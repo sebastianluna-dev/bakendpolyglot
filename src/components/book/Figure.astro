@@ -1,0 +1,9 @@
+---
+// A numbered figure. Put an inline <svg> (or an image) in the slot.
+interface Props { n: string; caption: string }
+const { n, caption } = Astro.props;
+---
+<figure class="bp-figure">
+  <figcaption><b>Figure {n}</b> · {caption}</figcaption>
+  <slot />
+</figure>

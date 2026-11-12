@@ -1,0 +1,31 @@
+---
+// Chapter pages get the book's opener: part, "Chapter N", title, ornament, kicker.
+const data = Astro.locals.starlightRoute.entry.data as {
+  title: string; chapter?: number; part?: string; kicker?: string;
+};
+const words = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen','Twenty'];
+const n = data.chapter;
+---
+{typeof n === 'number' ? (
+  <header class="bp-web-opener">
+    {data.part && <div class="bp-web-opener__part">{data.part}</div>}
+    <div class="bp-web-opener__num">Chapter {n <= 20 ? words[n] : n}</div>
+    <h1 id="_top">{data.title}</h1>
+    <div class="bp-web-ornament" aria-hidden="true"><span></span><i></i><span></span></div>
+    {data.kicker && <p class="bp-web-opener__kicker">{data.kicker}</p>}
+  </header>
+) : (
+  <h1 id="_top">{data.title}</h1>
+)}
+
+<style>
+  h1 { margin-top: 1rem; font-size: var(--sl-text-h1); line-height: var(--sl-line-height-headings); font-weight: 600; color: var(--sl-color-white); }
+  .bp-web-opener { text-align: center; padding-block: 1.5rem 0.5rem; }
+  .bp-web-opener h1 { margin-top: 0.4rem; font-size: clamp(2rem, 4vw, 2.75rem); }
+  .bp-web-opener__part { font-family: var(--bp-font-label); font-size: 0.75rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--sl-color-gray-3); }
+  .bp-web-opener__num { margin-top: 1.25rem; font-family: var(--bp-font-display); font-style: italic; font-size: 1.3rem; color: var(--sl-color-accent); }
+  .bp-web-opener__kicker { margin: 0; font-style: italic; color: var(--sl-color-gray-3); }
+  .bp-web-ornament { display: flex; align-items: center; gap: 0.75rem; width: 12rem; margin: 1rem auto; }
+  .bp-web-ornament span { flex: 1; height: 1px; background: var(--sl-color-accent); }
+  .bp-web-ornament i { width: 7px; height: 7px; background: var(--sl-color-accent); transform: rotate(45deg); }
+</style>

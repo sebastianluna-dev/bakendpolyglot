@@ -1,0 +1,28 @@
+---
+// Web: a flip deck (click or Enter/Space to flip). Print: cut-out cards, front and back side by side.
+interface Card { front: string; back: string }
+interface Props { cards: Card[]; title?: string }
+const { cards, title = 'Flashcards' } = Astro.props;
+---
+<section class="bp-cards">
+  <span class="bp-label">{title}</span>
+  <span class="bp-print-only bp-cards__hint"> · cut along the dashes, fold in the middle</span>
+  <div class="bp-cards__grid">
+    {cards.map((c) => (
+      <button type="button" class="bp-card" aria-pressed="false" aria-label={`Flashcard: ${c.front}. Press to flip.`}>
+        <span class="bp-card__inner">
+          <span class="bp-card__face bp-card__front"><span class="bp-card__side">Front</span><strong>{c.front}</strong></span>
+          <span class="bp-card__face bp-card__back"><span class="bp-card__side">Back</span><span>{c.back}</span></span>
+        </span>
+      </button>
+    ))}
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('.bp-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      card.setAttribute('aria-pressed', String(card.getAttribute('aria-pressed') !== 'true'));
+    });
+  });
+</script>

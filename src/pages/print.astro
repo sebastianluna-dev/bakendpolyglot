@@ -1,0 +1,105 @@
+---
+// The print edition: every chapter on one page, paginated in the browser by Paged.js.
+// `npm run pdf` turns it into dist/backend-polyglot.pdf.
+import '../styles/fonts.css';
+import '../styles/tokens.css';
+import '../styles/components.css';
+import '../styles/print.css';
+import Cover from '../print/Cover.astro';
+const pagedUrl = '/vendor/paged.polyfill.js'; // copied from node_modules by the prebuild script
+
+type Q = { q: string; options: string[]; answer: number; why: string };
+type Mod = {
+  default: any;
+  frontmatter: { title: string; chapter?: number; part?: string; kicker?: string };
+  quiz?: Q[];
+};
+const mods = Object.values(import.meta.glob<Mod>('../content/docs/**/*.mdx', { eager: true }))
+  .filter((m) => typeof m.frontmatter.chapter === 'number')
+  .sort((a, b) => a.frontmatter.chapter! - b.frontmatter.chapter!);
+
+const KEYS = 'ABCDEF';
+const words = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen','Twenty'];
+const chapterWord = (n: number) => n <= 20 ? words[n] : String(n);
+let lastPart = '';
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Backend Polyglot — Print Edition</title>
+  <script is:inline>
+    // Paged.js only needs to parse our print stylesheet (it holds the @page rules). Starlight's and
+    // Expressive Code's CSS use selectors its parser cannot handle, so they stay as normal styles.
+    window.PagedConfig = {
+      before: () => {
+        document.querySelectorAll('.bp-body').forEach((b) => b.querySelector(':scope > p')?.classList.add('bp-dropcap'));
+        document.querySelectorAll('link[rel="stylesheet"], style').forEach((el) => {
+          const href = el.getAttribute('href') || '';
+          if (!/\/print\.[^/]*\.css$/.test(href)) el.setAttribute('data-pagedjs-ignore', '');
+        });
+      },
+      after: () => {
+        document.querySelectorAll('.pagedjs_page').forEach((pg) => {
+          if (!pg.querySelector('.bp-opener, .bp-appendix > .bp-opener__title')) return;
+          pg.classList.add('bp-opener-page');
+          const folio = document.createElement('div');
+          folio.className = 'bp-folio';
+          folio.textContent = pg.dataset.pageNumber || '';
+          pg.querySelector('.pagedjs_sheet')?.appendChild(folio);
+        });
+        window.__pagedDone = true;
+      },
+    };
+  </script>
+  <script is:inline src={pagedUrl}></script>
+</head>
+<body>
+  <Cover />
+
+  <section class="bp-toc">
+    <h2 class="bp-toc__title">Contents</h2>
+    <ol>
+      {mods.map((m) => (
+        <li><a href={`#ch-${m.frontmatter.chapter}`}><span class="bp-toc__n">{m.frontmatter.chapter}</span><span class="bp-toc__t">{m.frontmatter.title}</span></a></li>
+      ))}
+      <li><a href="#appendix-a"><span class="bp-toc__n">A</span><span class="bp-toc__t">Quiz Answers</span></a></li>
+    </ol>
+  </section>
+
+  {mods.map((m) => {
+    const fm = m.frontmatter;
+    const newPart = fm.part && fm.part !== lastPart;
+    if (fm.part) lastPart = fm.part;
+    const Content = m.default;
+    return (
+      <>
+        {newPart && <section class="bp-part"><div class="bp-part__label">{fm.part!.split(' · ')[0]}</div><h2 class="bp-part__title">{fm.part!.split(' · ')[1]}</h2></section>}
+        <article class="bp-chapter" id={`ch-${fm.chapter}`}>
+          <header class="bp-opener">
+            <div class="bp-opener__part">{fm.part}</div>
+            <div class="bp-opener__num">Chapter {chapterWord(fm.chapter!)}</div>
+            <h1 class="bp-opener__title">{fm.title}</h1>
+            <div class="bp-ornament"><span></span><i></i><span></span></div>
+            {fm.kicker && <p class="bp-opener__kicker">{fm.kicker}</p>}
+          </header>
+          <div class="bp-body"><Content /></div>
+        </article>
+      </>
+    );
+  })}
+
+  <section class="bp-appendix" id="appendix-a">
+    <div class="bp-opener__num">Appendix A</div>
+    <h1 class="bp-opener__title">Quiz Answers</h1>
+    {mods.filter((m) => m.quiz?.length).map((m) => (
+      <div class="bp-answers">
+        <h3>Chapter {m.frontmatter.chapter} · {m.frontmatter.title}</h3>
+        <ol>
+          {m.quiz!.map((q) => <li><b>{KEYS[q.answer]}.</b> {q.why}</li>)}
+        </ol>
+      </div>
+    ))}
+  </section>
+</body>
+</html>

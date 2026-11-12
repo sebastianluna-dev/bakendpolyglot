@@ -1,0 +1,8 @@
+---
+interface Props { title?: string }
+const { title = 'In the wild' } = Astro.props;
+---
+<aside class="bp-box bp-wild" aria-label={title}>
+  <span class="bp-box__title">{title}</span>
+  <slot />
+</aside>

@@ -1,0 +1,8 @@
+---
+interface Props { title?: string }
+const { title = 'Interview lens' } = Astro.props;
+---
+<aside class="bp-box bp-interview" aria-label={title}>
+  <span class="bp-box__title">{title}</span>
+  <slot />
+</aside>

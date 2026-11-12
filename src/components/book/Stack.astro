@@ -1,0 +1,11 @@
+---
+import { TabItem } from '@astrojs/starlight/components';
+import { STACKS, type StackId } from './stacks';
+interface Props { id: StackId; lib?: string }
+const { id, lib } = Astro.props;
+const s = STACKS[id];
+---
+<TabItem label={s.name}>
+  <div class="bp-stack__label"><span class="bp-dot" style={`background:${s.color}`}></span><b>{s.name}</b>{lib && <i> · {lib}</i>}</div>
+  <slot />
+</TabItem>

@@ -1,0 +1,18 @@
+---
+// Reminders of earlier material this section depends on.
+// items: [{ ref: 'Ch. 14', text: '...' , href?: '/part-2/14-...' }]
+interface Item { ref: string; text: string; href?: string }
+interface Props { title?: string; items: Item[] }
+const { title = 'Before you begin', items } = Astro.props;
+---
+<aside class="bp-box bp-recall" aria-label={title}>
+  <span class="bp-box__title">{title}</span>
+  <ul>
+    {items.map((i) => (
+      <li>
+        {i.href ? <a class="bp-recall__ref" href={i.href}>{i.ref}</a> : <span class="bp-recall__ref">{i.ref}</span>}
+        <span>{i.text}</span>
+      </li>
+    ))}
+  </ul>
+</aside>

@@ -1,0 +1,40 @@
+---
+// Multiple-choice review. Web: click an option to check it. Print: answers move to Appendix A.
+export interface Question { q: string; options: string[]; answer: number; why: string }
+interface Props { id: string; questions: Question[]; title?: string }
+const { id, questions, title = 'Quiz' } = Astro.props;
+const KEYS = 'ABCDEF';
+---
+<section class="bp-quiz" data-quiz={id}>
+  <span class="bp-label">{title}</span>
+  <ol class="bp-quiz__list">
+    {questions.map((item, qi) => (
+      <li class="bp-q" data-answer={item.answer}>
+        <p class="bp-q__prompt">{item.q}</p>
+        <ul class="bp-q__options">
+          {item.options.map((o, oi) => (
+            <li><button type="button" class="bp-opt" data-index={oi}><span class="bp-opt__key">{KEYS[oi]}</span><span>{o}</span></button></li>
+          ))}
+        </ul>
+        <p class="bp-q__why" hidden><b>{KEYS[item.answer]}.</b> {item.why}</p>
+      </li>
+    ))}
+  </ol>
+  <p class="bp-quiz__foot"><span class="bp-web-only">Pick an answer to check it.</span><span class="bp-print-only">Answers and explanations: Appendix A.</span></p>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.bp-q').forEach((q) => {
+    const answer = Number(q.dataset.answer);
+    const why = q.querySelector<HTMLElement>('.bp-q__why');
+    q.querySelectorAll<HTMLButtonElement>('.bp-opt').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const picked = Number(btn.dataset.index);
+        q.querySelectorAll<HTMLButtonElement>('.bp-opt').forEach((b) => b.removeAttribute('data-state'));
+        btn.dataset.state = picked === answer ? 'right' : 'wrong';
+        if (picked !== answer) q.querySelector<HTMLElement>(`.bp-opt[data-index="${answer}"]`)!.dataset.state = 'right';
+        if (why) why.hidden = false;
+      });
+    });
+  });
+</script>

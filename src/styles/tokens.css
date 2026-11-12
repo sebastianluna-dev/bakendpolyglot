@@ -1,0 +1,26 @@
+/* Backend Polyglot — Direction B "Classic Engineering" design tokens.
+   Shared by the web edition (Starlight) and the print edition. */
+:root {
+  --bp-font-display: 'Fraunces Variable', Georgia, serif;
+  --bp-font-body: 'Source Serif 4 Variable', Georgia, serif;
+  --bp-font-label: 'IBM Plex Sans', system-ui, sans-serif;
+  --bp-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --bp-paper: #fbf8f2;
+  --bp-paper-2: #f2ece1;
+  --bp-ink: #1d1b18;
+  --bp-muted: #5c574f;
+  --bp-rule: #cfc6b8;
+  --bp-accent: #1f4e8c;
+  --bp-accent-soft: #e6ecf4;
+  --bp-warn: #9a3412;
+  --bp-warn-soft: #fbeee6;
+
+  /* One quiet colour per stack, used only as a small marker next to its name */
+  --bp-ts: #2f6db5;
+  --bp-cs: #6b2c91;
+  --bp-java: #a3501a;
+  --bp-kotlin: #7f52ff;
+  --bp-go: #007d9c;
+  --bp-py: #3b6e2a;
+}

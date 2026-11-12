@@ -1,0 +1,14 @@
+---
+// The same concept in every stack. Web: synced tabs (pick Go once, every block shows Go).
+// Print: every panel shown, stacked, each with its own label.
+import { Tabs } from '@astrojs/starlight/components';
+interface Props { title?: string; note?: string }
+const { title = 'Five Stacks', note } = Astro.props;
+---
+<section class="bp-stacks">
+  <div class="bp-stacks__head">
+    <span class="bp-label">{title}</span>
+    {note && <span class="bp-stacks__note">{note}</span>}
+  </div>
+  <Tabs syncKey="stack"><slot /></Tabs>
+</section>

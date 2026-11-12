@@ -1,0 +1,72 @@
+@import './tokens.css';
+@import './components.css';
+
+/* Map Direction B onto Starlight's theme variables */
+:root {
+  --sl-font: var(--bp-font-body);
+  --sl-font-mono: var(--bp-font-mono);
+  --sl-text-body: 1.0625rem;
+  --sl-line-height: 1.7;
+  --sl-content-width: 46rem;
+}
+
+/* Light: warm paper, navy accent */
+:root[data-theme='light'] {
+  --sl-color-white: var(--bp-ink);
+  --sl-color-gray-1: #2a2723;
+  --sl-color-gray-2: #3d3934;
+  --sl-color-gray-3: #5c574f;
+  --sl-color-gray-4: #8a8378;
+  --sl-color-gray-5: #cfc6b8;
+  --sl-color-gray-6: #ece5d8;
+  --sl-color-gray-7: #f5f0e7;
+  --sl-color-black: var(--bp-paper);
+  --sl-color-accent-low: #dbe4f0;
+  --sl-color-accent: var(--bp-accent);
+  --sl-color-accent-high: #163a69;
+}
+
+/* Dark: ink paper, softened accent; component tokens follow */
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #1b2a40;
+  --sl-color-accent: #8fb0dd;
+  --sl-color-accent-high: #c9d9ef;
+  --bp-paper: #17191d;
+  --bp-paper-2: #23262c;
+  --bp-ink: #ece7de;
+  --bp-muted: #aaa49a;
+  --bp-rule: #3b3e45;
+  --bp-accent: #8fb0dd;
+  --bp-accent-soft: #1c2636;
+  --bp-warn: #f0a77a;
+  --bp-warn-soft: #2e2119;
+}
+:root[data-theme='dark'] .bp-opt[data-state='right'] { background: #1f3320; }
+
+/* Editorial typography */
+.sl-markdown-content h1, .sl-markdown-content h2, .sl-markdown-content h3,
+h1#_top {
+  font-family: var(--bp-font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sl-markdown-content h2 { font-size: 1.75rem; margin-top: 2.75rem; }
+.sl-markdown-content h3 { font-size: 1.3rem; }
+.sl-markdown-content :is(h2, h3) .bp-num { font-family: var(--bp-font-label); font-size: 0.6em; font-weight: 600; color: var(--sl-color-accent); margin-right: 0.6em; vertical-align: 0.2em; }
+.sl-markdown-content > p:first-of-type::first-letter { /* drop cap on a chapter's first paragraph */
+  float: left; font-family: var(--bp-font-display); font-size: 3.6em; line-height: 0.85; padding: 0.08em 0.1em 0 0; color: var(--sl-color-accent);
+}
+.sidebar-content, .right-sidebar, starlight-tabs [role='tab'], .bp-label { font-family: var(--bp-font-label); }
+
+/* Keep every surface on the same paper */
+:root[data-theme='light'] {
+  --sl-color-bg: var(--bp-paper);
+  --sl-color-bg-nav: var(--bp-paper);
+  --sl-color-bg-sidebar: var(--bp-paper);
+  --sl-color-hairline-light: var(--bp-rule);
+}
+:root[data-theme='dark'] {
+  --sl-color-bg: var(--bp-paper);
+  --sl-color-bg-nav: var(--bp-paper);
+  --sl-color-bg-sidebar: var(--bp-paper);
+}
