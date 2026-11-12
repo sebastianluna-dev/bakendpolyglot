@@ -1,0 +1,194 @@
+---
+title: "Build: Shelfwise"
+chapter: 18
+part: Part II · Backend Foundations
+kicker: One contract, one schema, eight implementations.
+sidebar:
+  order: 18
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Two requests try to lend the same copy at the same moment. In Shelfwise, what guarantees that only one succeeds?',
+    options: ['A check in the service that the copy is free', 'The partial unique index one_open_loan_per_copy, whose violation the service turns into a 409', 'The HTTP server queues requests per copy', 'The ORM’s change tracking'],
+    answer: 1,
+    why: 'Both requests can pass the service check before either inserts. Only the database index sees both inserts and rejects the second; the service maps that error code to CopyOnLoan.',
+  },
+  {
+    q: 'What is the PostgreSQL error code for a unique constraint violation?',
+    options: ['23503', '23505', '40001', '42P01'],
+    answer: 1,
+    why: '23505 is unique_violation. 23503 is a foreign key violation, 40001 a serialisation failure, 42P01 an undefined table.',
+  },
+  {
+    q: 'Why does the Shelfwise repository run one language-neutral test suite against all eight implementations?',
+    options: ['To save CI minutes', 'So every stack provably honours the same OpenAPI contract, status codes and error bodies', 'Because unit tests are not allowed', 'To benchmark the stacks'],
+    answer: 1,
+    why: 'The conformance suite only speaks HTTP. If an implementation drifts from the contract, its CI job fails, whatever its own tests say.',
+  },
+];
+
+export const cards = [
+  { front: 'Conformance suite', back: 'Language-neutral HTTP tests that every implementation of a contract must pass.' },
+  { front: 'Unique violation → 409', back: 'Catch the database’s 23505 at the repository or service edge and raise a domain error that maps to 409 Conflict.' },
+  { front: 'Handler · service · repository', back: 'HTTP concerns, business rules, data access: the three layers every Shelfwise stack uses.' },
+];
+
+Everything in Part II now becomes one working service, built eight times. Shelfwise is a library catalog and loans API: small enough to read in an afternoon per stack, complete enough to exercise HTTP semantics, validation, Problem Details, cursor pagination, ETags, a normalised schema, migrations, typed configuration and a real test suite. This chapter is the guided tour; the code lives in the companion repository, `shelfwise`, listed in Appendix D.
+
+<Recall
+  items={[
+    { ref: 'Ch. 12', text: 'The Shelfwise API: books, copies, loans, members, with Problem Details and cursors.' },
+    { ref: 'Ch. 14', text: 'The schema enforces one open loan per copy with a partial unique index.' },
+    { ref: 'Ch. 17', text: 'Integration tests run against a real Postgres from Testcontainers.' },
+  ]}
+/>
+
+## What you are building
+
+- Search the catalog with cursor pagination; add and edit books with validation, ETags and `If-Match`.
+- Add physical copies to a book, each with a unique barcode.
+- Lend a copy to a member for a configurable number of days, with a configurable maximum of open loans per member.
+- Return a copy; list a member’s open and past loans.
+- Every error as Problem Details; every request with an `X-Request-Id`; health at `/health`.
+
+## The repository
+
+```text
+shelfwise/
+├── contract/openapi.yaml        # the single source of truth for the API
+├── db/migrations/*.sql          # one schema, shared by every implementation
+├── conformance/                 # HTTP-only test suite, run against every stack
+├── stacks/
+│   ├── express/   nest/         # TypeScript
+│   ├── aspnet/                  # C#
+│   ├── spring-java/  spring-kotlin/
+│   ├── go/
+│   └── django/   fastapi/       # Python
+├── compose.yaml                 # Postgres, migrations, and any stack by profile
+└── .github/workflows/ci.yml     # matrix: unit + integration + conformance per stack
+```
+
+Two decisions deserve a note. First, the **schema is shared** and applied by plain SQL migrations, instead of each stack generating its own. Real teams use their stack’s migration tool (Chapter 15), but a shared schema keeps the comparison honest: every implementation must work against exactly the same tables and constraints. Second, the **conformance suite** only speaks HTTP. It is the Phase 2 gate made executable.
+
+Run any stack locally with one command:
+
+```bash
+docker compose --profile go up --build      # or: express, nest, aspnet, spring-java, …
+BASE_URL=http://localhost:3000 npm --prefix conformance test
+```
+
+## Three layers in every stack
+
+Each implementation uses the same three layers, so you can read one stack with the others open side by side:
+
+| Layer | Responsibility | Knows about HTTP? | Knows about SQL? |
+| --- | --- | --- | --- |
+| Handler | Bind, validate shape, call the service, map results and errors to HTTP | Yes | No |
+| Service | Business rules: loan limits, due dates, state transitions | No | No |
+| Repository | Queries and writes; translate database errors to domain errors | No | Yes |
+
+The service is where the interesting rules live, and it is plain code in every stack: it takes a clock and a repository, and it can be unit-tested without a database or a web server.
+
+## The heart of it: lending a copy
+
+Lending shows every Part II idea at once: validated input, a business rule checked in the service, a constraint enforced by the database, and a database error translated into a domain error that becomes a `409`. Here is the repository-level translation in each stack:
+
+<FiveStacks note="Insert a loan; a unique violation means the copy is already on loan">
+<Stack id="nest" lib="Prisma">
+```ts
+try {
+  return await this.prisma.loan.create({ data: { copyId, memberId, dueAt } });
+} catch (e) {
+  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+    throw new CopyOnLoan(copyId);           // ProblemFilter → 409
+  }
+  throw e;
+}
+```
+</Stack>
+<Stack id="cs" lib="EF Core + Npgsql">
+```csharp
+db.Loans.Add(new Loan(copyId, memberId, dueAt));
+try
+{
+    await db.SaveChangesAsync(ct);
+}
+catch (DbUpdateException e) when (e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+{
+    throw new CopyOnLoanException(copyId);  // exception handler → 409
+}
+```
+</Stack>
+<Stack id="java" lib="Spring Data JPA">
+```java
+try {
+    return loans.saveAndFlush(new Loan(copy, member, dueAt));
+} catch (DataIntegrityViolationException e) {
+    throw new CopyOnLoan(copy.getBarcode());   // @RestControllerAdvice → 409
+}
+```
+</Stack>
+<Stack id="go" lib="sqlc + pgx">
+```go
+loan, err := r.q.InsertLoan(ctx, db.InsertLoanParams{CopyID: copyID, MemberID: memberID, DueAt: dueAt})
+var pgErr *pgconn.PgError
+if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	return Loan{}, ErrCopyOnLoan // handler → writeProblem(409)
+}
+return loan, err
+```
+</Stack>
+<Stack id="django" lib="Django ORM">
+```python
+try:
+    with transaction.atomic():
+        return Loan.objects.create(copy_id=copy_id, member_id=member_id, due_at=due_at)
+except IntegrityError as e:
+    if getattr(e.__cause__, "sqlstate", None) == "23505":
+        raise CopyOnLoan(copy_id) from e    # exception handler → 409
+    raise
+```
+</Stack>
+</FiveStacks>
+
+The service still checks first ("is this copy free? is the member under the limit?") so the common case gets a clear error without hitting the constraint. The constraint handles the rare race the check cannot see. Spring’s `DataIntegrityViolationException` covers every integrity error, so the real implementation inspects the constraint name before deciding it is `CopyOnLoan`; the other stacks check the code directly.
+
+<Pitfall title="Catching too much">
+Turning every database exception into a `409` hides real bugs: a foreign key violation (`23503`) on a missing member should be a `404` or `422`, and a broken connection is a `500`. Match the specific code, and ideally the constraint name, then rethrow everything else.
+</Pitfall>
+
+## Reading order
+
+Each stack folder has a README that starts at `main` (or `Program.cs`, `Application.kt`, `manage.py`) and follows one request through the layers. A good order for reading:
+
+1. **Go** first: everything is explicit, wired by hand in `main.go`.
+2. **FastAPI**: the same shape, with types doing validation.
+3. **Express**, then **NestJS**: the same app without and with a framework container.
+4. **ASP.NET Core** and **Spring (Java)**: containers, attributes, conventions.
+5. **Spring (Kotlin)** and **Django** last, comparing each with its sibling.
+
+Keep the notes from the Phase 1 gate open, and add to them. By the end you will have your own comparison of the five stacks, written from code you ran.
+
+<InTheWild>
+Building the same service in several stacks is exactly what platform teams do when they evaluate a language or write a "golden path" template. The artefacts they produce look like this repository: a contract, a reference schema, a conformance suite, and short READMEs that explain the choices.
+</InTheWild>
+
+## Gate: Phase 2
+
+- [ ] Run the conformance suite against at least three stacks locally, including Go and one JVM stack.
+- [ ] Break one implementation on purpose (remove the 409 mapping) and watch the suite catch it.
+- [ ] Add a feature to two stacks: `GET /books/{id}/availability`, returning how many copies are free. Update the contract first.
+- [ ] Read the CI workflow and explain each job in one sentence.
+- [ ] Shelfwise is green in CI for every stack.
+
+<InterviewLens>
+"How do you prevent double booking of a shared resource?" A strong answer starts at the database: a unique or exclusion constraint that makes the bad state impossible, translated into a domain error and a 409. Then the application check for a friendly message, then the remaining options for harder cases: row locks or optimistic versions (Chapter 23) and idempotency keys for retried requests (Chapter 24).
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch18" questions={quiz} />
+
+<Flashcards cards={cards} />

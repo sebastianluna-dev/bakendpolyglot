@@ -1,0 +1,192 @@
+---
+title: Testing Foundations
+chapter: 17
+part: Part II · Backend Foundations
+kicker: Fast tests for logic, real databases for everything else.
+sidebar:
+  order: 17
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why test repositories against a real PostgreSQL in a container instead of an in-memory database such as SQLite or H2?',
+    options: ['It is faster', 'In-memory engines differ in SQL dialect, constraints and behaviour, so tests can pass while production fails', 'In-memory databases cannot be used in CI', 'ORMs require PostgreSQL'],
+    answer: 1,
+    why: 'Partial indexes, jsonb, locking and error codes behave differently elsewhere. Testcontainers gives you the real engine with a few seconds of startup.',
+  },
+  {
+    q: 'A test passes or fails depending on the time of day. What is the usual fix?',
+    options: ['Retry it in CI', 'Inject a clock so the test controls "now"', 'Run it at night', 'Mark it as flaky and ignore it'],
+    answer: 1,
+    why: 'Code that reads the system clock directly is not deterministic. Depend on a Clock or TimeProvider abstraction and pass a fixed one in tests.',
+  },
+  {
+    q: 'In the testing pyramid for a backend service, which tests should be most numerous?',
+    options: ['End-to-end UI tests', 'Fast unit tests of domain logic, with a solid layer of integration tests above them', 'Manual tests', 'Load tests'],
+    answer: 1,
+    why: 'Unit tests are cheap and precise; integration tests prove the pieces work together. End-to-end tests are valuable but slow and brittle, so keep them few.',
+  },
+];
+
+export const cards = [
+  { front: 'Testcontainers', back: 'Library (in all five stacks) that starts real dependencies such as Postgres in Docker for a test run.' },
+  { front: 'Test double', back: 'A stand-in for a dependency: a stub returns canned data, a fake is a working light implementation, a mock verifies calls.' },
+  { front: 'Injectable clock', back: 'Clock / TimeProvider / a now() function passed in, so tests control time.' },
+  { front: 'Testing pyramid', back: 'Many unit tests, fewer integration tests, very few end-to-end tests.' },
+];
+
+Tests are how a team changes code without fear. For a backend, the interesting bugs live where pieces meet: SQL that does not do what the ORM call suggested, a constraint that fires, a status code mapped wrong. This chapter sets the testing strategy used by every companion app: unit tests for pure logic, integration tests against a **real** PostgreSQL started by Testcontainers, and a thin layer of API tests over the whole service.
+
+<Recall
+  items={[
+    { ref: 'Ch. 4', text: 'WebApplicationFactory starts a whole ASP.NET app in memory for tests.' },
+    { ref: 'Ch. 5', text: 'Spring test slices: @WebMvcTest for controllers, @DataJpaTest for repositories.' },
+    { ref: 'Ch. 14', text: 'The one-open-loan rule is a partial unique index: only a real Postgres enforces it.' },
+  ]}
+/>
+
+## The shape of a backend test suite
+
+<Figure n="17.1" caption="Most tests are fast and focused; fewer prove the pieces work together; very few run the whole system">
+  <svg viewBox="0 0 720 190" role="img" aria-label="Testing pyramid" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <polygon points="360,12 470,72 250,72" fill="var(--bp-paper-2)" stroke="var(--bp-rule)" stroke-width="1.25" />
+    <polygon points="250,76 470,76 560,128 160,128" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <polygon points="160,132 560,132 650,184 70,184" fill="var(--bp-paper-2)" stroke="var(--bp-rule)" stroke-width="1.25" />
+    <g text-anchor="middle" fill="var(--bp-ink)">
+      <text x="360" y="60" font-weight="600">API / E2E</text>
+      <text x="360" y="100" font-weight="600">Integration</text>
+      <text x="360" y="116" font-size="11">real Postgres in a container · repositories, endpoints</text>
+      <text x="360" y="156" font-weight="600">Unit</text>
+      <text x="360" y="172" font-size="11">domain rules, mapping, validation · milliseconds, no I/O</text>
+    </g>
+    <g fill="var(--bp-muted)" font-size="11">
+      <text x="486" y="44">few, slow, broad</text>
+      <text x="580" y="104">enough to trust the edges</text>
+      <text x="664" y="160">many, fast</text>
+    </g>
+  </svg>
+</Figure>
+
+**Unit tests** cover logic with no I/O: due-date calculation, the rule that a member with three overdue loans cannot borrow, DTO mapping. They run in milliseconds, so you run them constantly.
+
+**Integration tests** cover everything that touches the database or the HTTP layer: repository queries, constraints, transactions, and each endpoint’s status codes and bodies. This is where backend bugs are found, so in this book the integration layer is thick.
+
+**API or end-to-end tests** run the built service with its real dependencies, usually in CI, for a handful of critical journeys: lend a copy, return it, see the history.
+
+## A real database in every test run
+
+Mocking the database tests your mocks. In-memory substitutes (SQLite, H2, EF Core’s in-memory provider) speak a different dialect and skip the constraints that matter, so tests pass while production fails. **Testcontainers**, available in all five stacks, starts a real PostgreSQL in Docker for the test run, in a few seconds:
+
+<FiveStacks note="A disposable Postgres for the test run">
+<Stack id="nest" lib="@testcontainers/postgresql + Vitest">
+```ts
+let pg: StartedPostgreSqlContainer;
+
+beforeAll(async () => {
+  pg = await new PostgreSqlContainer('postgres:17').start();
+  process.env.DATABASE_URL = pg.getConnectionUri();
+  await migrate(process.env.DATABASE_URL);
+}, 60_000);
+
+afterAll(() => pg.stop());
+```
+</Stack>
+<Stack id="cs" lib="Testcontainers.PostgreSql + xUnit">
+```csharp
+public class DbFixture : IAsyncLifetime
+{
+    public PostgreSqlContainer Pg { get; } = new PostgreSqlBuilder().WithImage("postgres:17").Build();
+
+    public async Task InitializeAsync()
+    {
+        await Pg.StartAsync();
+        await Migrations.ApplyAsync(Pg.GetConnectionString());
+    }
+
+    public Task DisposeAsync() => Pg.DisposeAsync().AsTask();
+}
+```
+</Stack>
+<Stack id="java" lib="Testcontainers + Spring Boot">
+```java
+@SpringBootTest
+@Testcontainers
+class LoanRepositoryTest {
+    @Container
+    @ServiceConnection   // Spring points the DataSource at the container automatically
+    static PostgreSQLContainer<?> pg = new PostgreSQLContainer<>("postgres:17");
+
+    // Flyway migrations run on startup; tests use the real repositories.
+}
+```
+</Stack>
+<Stack id="go" lib="testcontainers-go">
+```go
+func TestMain(m *testing.M) {
+	ctx := context.Background()
+	pg, err := postgres.Run(ctx, "postgres:17",
+		postgres.WithDatabase("shelfwise"),
+		postgres.BasicWaitStrategies())
+	if err != nil {
+		log.Fatal(err)
+	}
+	dsn, _ := pg.ConnectionString(ctx, "sslmode=disable")
+	mustMigrate(dsn)
+	code := m.Run()
+	_ = pg.Terminate(ctx)
+	os.Exit(code)
+}
+```
+</Stack>
+<Stack id="fastapi" lib="testcontainers + pytest">
+```python
+@pytest.fixture(scope="session")
+def database_url() -> Iterator[str]:
+    with PostgresContainer("postgres:17", driver="asyncpg") as pg:
+        url = pg.get_connection_url()
+        run_migrations(url)
+        yield url
+```
+</Stack>
+</FiveStacks>
+
+Start one container per test run (not per test), and isolate tests from each other by wrapping each one in a transaction that is rolled back, or by truncating tables between tests. Both are fast; pick one per project.
+
+## Determinism
+
+A test that sometimes fails is worse than no test, because people learn to ignore red builds. The usual causes, and their fixes:
+
+- **Time.** Code that calls `now()` directly cannot be tested at month ends or across time zones. Inject a clock: `TimeProvider` in .NET, `java.time.Clock`, a `func() time.Time` in Go, a `now` dependency in Python and Nest. Shelfwise tests lend a book "on 31 January" and check the due date.
+- **Randomness and ids.** Inject the generator, or assert on shape instead of exact values.
+- **Order.** Tests that depend on running after another test break when run alone or in parallel. Each test creates its own data.
+- **External services.** Never call a real third-party API in a test. Use a fake server (WireMock, `httptest`, MSW, `respx`) with recorded responses.
+
+<Pitfall title="Over-mocking">
+A unit test that mocks five collaborators and asserts the exact calls made to each one breaks on every refactor and proves little. Prefer real objects for in-process collaborators, fakes for I/O boundaries, and mocks only when the interaction itself is the behaviour, such as "an email was sent".
+</Pitfall>
+
+## What to test in an endpoint
+
+For each endpoint, the integration suite checks the contract, not the implementation:
+
+1. The success status, headers (`Location`, `ETag`) and body shape.
+2. Each documented error: 404, 409, 412, 422 with the Problem Details body.
+3. The database effect: the row exists, the loan is closed, the version moved.
+4. Authorization, once it exists (Part III).
+
+Because Shelfwise has one OpenAPI contract and eight implementations, the API-level suite is written once, in a language-neutral runner, and executed against every stack in CI. That is the gate for Phase 2.
+
+<InTheWild>
+Teams that adopt Testcontainers rarely go back: CI needs Docker, and suites take a few seconds longer to start, but entire classes of "passes locally, fails in prod" bugs disappear. Expect integration tests to be the majority of a mature backend suite, with unit tests concentrated on genuinely complex domain logic.
+</InTheWild>
+
+<InterviewLens>
+"How do you test a service that depends on a database and an external payment API?" A strong answer: unit tests for domain rules with no I/O; integration tests against a real database via Testcontainers with migrations applied; a fake HTTP server for the payment API, including error and timeout cases; a few end-to-end journeys in CI; deterministic time and data; and contract tests if other teams consume the API.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch17" questions={quiz} />
+
+<Flashcards cards={cards} />

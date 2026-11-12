@@ -1,0 +1,245 @@
+---
+title: HTTP in Depth
+chapter: 10
+part: Part II · Backend Foundations
+kicker: The protocol every framework in this book is a wrapper around.
+sidebar:
+  order: 10
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Which of these methods is idempotent but not safe?',
+    options: ['GET', 'POST', 'PUT', 'PATCH'],
+    answer: 2,
+    why: 'PUT changes state (not safe), but sending the same PUT twice leaves the same result (idempotent). GET is both; POST and PATCH are neither by definition.',
+  },
+  {
+    q: 'A client sends If-None-Match with the ETag it cached, and the resource has not changed. What should the server answer?',
+    options: ['200 with the full body', '204 No Content', '304 Not Modified with no body', '412 Precondition Failed'],
+    answer: 2,
+    why: '304 tells the client its cached copy is still valid, saving the body transfer. 412 is for If-Match on writes, when the version no longer matches.',
+  },
+  {
+    q: 'A request body fails validation (a required field is missing). Which status code fits best?',
+    options: ['400 or 422', '404', '409', '500'],
+    answer: 0,
+    why: '400 Bad Request is the general client error; 422 Unprocessable Content means the syntax is fine but the content is invalid. Both are used; pick one per API and be consistent.',
+  },
+  {
+    q: 'What is the main improvement of HTTP/2 over HTTP/1.1 for an API server?',
+    options: ['It encrypts traffic', 'It multiplexes many requests over one connection without head-of-line blocking at the HTTP layer', 'It replaces JSON with binary', 'It removes headers'],
+    answer: 1,
+    why: 'HTTP/2 sends many streams over one TCP connection and compresses headers. HTTP/3 goes further by moving to QUIC over UDP, removing TCP-level head-of-line blocking.',
+  },
+  {
+    q: 'What does Cache-Control: no-cache mean?',
+    options: ['Never store the response', 'Store it, but revalidate with the server before every use', 'Cache for one minute', 'Only proxies may cache it'],
+    answer: 1,
+    why: 'no-cache allows storing but requires revalidation, usually with ETag. no-store is the directive that forbids storing at all.',
+  },
+];
+
+export const cards = [
+  { front: 'Safe method', back: 'Does not change server state: GET, HEAD, OPTIONS. Crawlers and caches may call it freely.' },
+  { front: 'Idempotent method', back: 'Repeating it has the same effect as doing it once: GET, HEAD, PUT, DELETE, OPTIONS.' },
+  { front: 'ETag', back: 'An opaque version tag for a representation. Enables 304 on reads (If-None-Match) and safe updates (If-Match).' },
+  { front: 'no-cache vs no-store', back: 'no-cache: store but revalidate before use. no-store: never store.' },
+];
+
+Every framework in Part I hides HTTP behind decorators and lambdas. That is convenient until something behaves strangely: a cache serves stale data, a retry creates a duplicate, a proxy strips a header. Then you need the protocol itself. This chapter covers the parts of HTTP that backend engineers are expected to know cold, as defined in RFC 9110.
+
+<Recall
+  items={[
+    { ref: 'Ch. 1', text: 'Every stack answered GET /health with JSON; the frameworks differ, the wire format does not.' },
+    { ref: 'Ch. 9', text: 'Four stacks throw and translate errors to HTTP at the edge; Go writes the status where it handles the error.' },
+  ]}
+/>
+
+## A request and a response, on the wire
+
+HTTP is text at heart (HTTP/2 and HTTP/3 encode it in binary frames, but the model is the same). A request is a method, a target, headers and an optional body; a response is a status, headers and an optional body:
+
+```http
+GET /books/42 HTTP/1.1
+Host: api.shelfwise.dev
+Accept: application/json
+If-None-Match: "book-42-v3"
+
+HTTP/1.1 304 Not Modified
+ETag: "book-42-v3"
+Cache-Control: private, no-cache
+```
+
+Everything a framework gives you, from route parameters to model binding, is parsing this structure.
+
+## Methods and their promises
+
+Methods are not just names. Each one makes a promise that caches, proxies, browsers and client libraries rely on:
+
+| Method | Purpose | Safe | Idempotent | Body |
+| --- | --- | --- | --- | --- |
+| GET | Read a representation | Yes | Yes | No |
+| HEAD | GET without the body | Yes | Yes | No |
+| POST | Create, or run a process | No | No | Yes |
+| PUT | Replace the whole resource | No | Yes | Yes |
+| PATCH | Change part of a resource | No | No | Yes |
+| DELETE | Remove the resource | No | Yes | Optional |
+| OPTIONS | Ask what is allowed (CORS preflight) | Yes | Yes | No |
+
+**Safe** means no state change; **idempotent** means doing it twice equals doing it once. Client libraries and proxies retry idempotent requests automatically after a network error. That is why a `GET` that deletes things is a bug, and why a `POST` that charges a card needs an idempotency key (Chapter 24).
+
+## Status codes that matter
+
+You do not need all sixty. You need these, used consistently:
+
+| Code | Meaning | Typical use |
+| --- | --- | --- |
+| 200 OK | Success with a body | Reads, updates that return the resource |
+| 201 Created | A resource was created | POST, with a `Location` header |
+| 204 No Content | Success, no body | DELETE, updates that return nothing |
+| 304 Not Modified | Your cached copy is valid | Conditional GET |
+| 400 Bad Request | Malformed request | Unparseable JSON, wrong types |
+| 401 Unauthorized | Not authenticated | Missing or invalid credentials |
+| 403 Forbidden | Authenticated, not allowed | Insufficient role or ownership |
+| 404 Not Found | No such resource | Unknown id, or hiding a forbidden one |
+| 409 Conflict | Conflicts with current state | Copy already on loan, duplicate ISBN |
+| 412 Precondition Failed | `If-Match` did not match | Someone else updated it first |
+| 422 Unprocessable Content | Well-formed but invalid | Validation errors |
+| 429 Too Many Requests | Rate limited | With `Retry-After` |
+| 500 / 503 | Server error / unavailable | Bugs / overload or maintenance |
+
+<Pitfall title="200 with an error inside">
+Answering `200 OK` with `{ "success": false }` breaks every tool that reads status codes: caches store the error, monitoring counts it as success, and retries never happen. Errors get 4xx or 5xx, always.
+</Pitfall>
+
+## Headers you will use every week
+
+- **Content-Type** says what the body is (`application/json`); **Accept** says what the client wants back. Content negotiation is the server choosing a representation from `Accept`.
+- **Location** points to a newly created resource after a `201`.
+- **Authorization** carries credentials (Chapter 19).
+- **Cache-Control** tells browsers and proxies whether and how long to keep a response: `no-store` (never keep), `no-cache` (keep but revalidate), `max-age=60`, `private` (only the user’s browser) or `public`.
+- **ETag** with **If-None-Match** and **If-Match** make conditional requests possible.
+
+## Conditional requests
+
+An **ETag** is a version tag for a representation. The client sends it back in `If-None-Match`; if nothing changed, the server answers `304` with no body. On writes, `If-Match` makes an update fail with `412` if someone else changed the resource first, which is optimistic concurrency over HTTP (Chapter 23 does it in the database).
+
+<Figure n="10.1" caption="Revalidation: the second request costs a round trip but no body">
+  <svg viewBox="0 0 720 200" role="img" aria-label="Conditional GET with ETag and 304" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs>
+      <marker id="cg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker>
+    </defs>
+    <g fill="var(--bp-ink)" font-weight="600" text-anchor="middle">
+      <text x="100" y="20">Client</text>
+      <text x="620" y="20">Server</text>
+    </g>
+    <g stroke="var(--bp-rule)" stroke-width="1.25">
+      <path d="M100 30V192" /><path d="M620 30V192" />
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M100 50H616" marker-end="url(#cg-arrow)" />
+      <path d="M620 82H104" marker-end="url(#cg-arrow)" />
+      <path d="M100 130H616" marker-end="url(#cg-arrow)" />
+      <path d="M620 162H104" marker-end="url(#cg-arrow)" stroke="var(--bp-accent)" stroke-width="2" />
+    </g>
+    <g fill="var(--bp-ink)" font-size="11.5">
+      <text x="120" y="44">GET /books/42</text>
+      <text x="120" y="76">200 OK · ETag: "book-42-v3" · full JSON body</text>
+      <text x="120" y="124">GET /books/42 · If-None-Match: "book-42-v3"</text>
+      <text x="120" y="156" fill="var(--bp-accent)" font-weight="600">304 Not Modified · no body</text>
+    </g>
+  </svg>
+</Figure>
+
+<FiveStacks note="Conditional GET with a version-based ETag">
+<Stack id="express" lib="Express">
+```ts
+// Express computes a weak ETag for res.json() and answers 304
+// automatically when If-None-Match matches. To control it yourself:
+app.get('/books/:id', async (req, res) => {
+  const book = await books.find(Number(req.params.id));
+  if (!book) return res.status(404).end();
+  res.set('ETag', `"book-${book.id}-v${book.version}"`);
+  if (req.fresh) return res.status(304).end();
+  res.json(book);
+});
+```
+</Stack>
+<Stack id="cs" lib="ASP.NET Core">
+```csharp
+app.MapGet("/books/{id:int}", async (int id, HttpContext ctx, BooksService books) =>
+{
+    if (await books.FindAsync(id) is not { } book) return Results.NotFound();
+    var etag = $"\"book-{book.Id}-v{book.Version}\"";
+    ctx.Response.Headers.ETag = etag;
+    return ctx.Request.Headers.IfNoneMatch == etag
+        ? Results.StatusCode(StatusCodes.Status304NotModified)
+        : Results.Ok(book);
+});
+```
+</Stack>
+<Stack id="java" lib="Spring Boot">
+```java
+@GetMapping("/{id}")
+ResponseEntity<Book> find(@PathVariable long id, WebRequest request) {
+    Book book = books.findById(id).orElseThrow(() -> new BookNotFound(id));
+    String etag = "\"book-%d-v%d\"".formatted(book.id(), book.version());
+    if (request.checkNotModified(etag)) return null;   // Spring writes the 304
+    return ResponseEntity.ok().eTag(etag).body(book);
+}
+```
+</Stack>
+<Stack id="go" lib="net/http">
+```go
+etag := fmt.Sprintf(`"book-%d-v%d"`, book.ID, book.Version)
+w.Header().Set("ETag", etag)
+if r.Header.Get("If-None-Match") == etag {
+	w.WriteHeader(http.StatusNotModified)
+	return
+}
+writeJSON(w, http.StatusOK, book)
+```
+</Stack>
+<Stack id="fastapi" lib="FastAPI">
+```python
+@app.get("/books/{book_id}")
+async def find_book(book_id: int, request: Request, response: Response, books: BookRepo = Depends()):
+    book = await books.find(book_id)
+    if book is None:
+        raise HTTPException(404)
+    etag = f'"book-{book.id}-v{book.version}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    return book
+```
+</Stack>
+</FiveStacks>
+
+A version column makes the ETag cheap and exact. Hashing the serialised body also works, and is what Express and Spring’s `ShallowEtagHeaderFilter` do, but it still costs the database query and the serialisation; it only saves bandwidth.
+
+## HTTP/1.1, HTTP/2 and HTTP/3
+
+HTTP/1.1 sends one request at a time per connection, so browsers open several connections. **HTTP/2** multiplexes many requests as streams over one TCP connection and compresses headers. **HTTP/3** runs over **QUIC** on UDP, so a lost packet only stalls its own stream, and connections survive network changes.
+
+As a backend engineer you rarely choose: a load balancer or reverse proxy terminates HTTP/2 or HTTP/3 and TLS at the edge, and talks HTTP/1.1 or HTTP/2 to your service. What matters is that your service handles keep-alive connections well and that timeouts are set at every hop.
+
+## TLS in one paragraph
+
+HTTPS is HTTP inside **TLS**. During the handshake the server presents a certificate chain, client and server agree on keys, and from then on traffic is encrypted and tamper-evident. TLS 1.3 completes the handshake in one round trip. In production, TLS is usually terminated by the load balancer; inside a cluster, a service mesh or mutual TLS (mTLS) may encrypt service-to-service traffic too.
+
+<InTheWild>
+Most production incidents that look like "the API is slow" or "users see old data" are HTTP problems: a missing `Cache-Control` letting a CDN cache personal data, a client retrying non-idempotent POSTs, or mismatched timeouts between load balancer and service. Seniors read headers first.
+</InTheWild>
+
+<InterviewLens>
+"What is the difference between PUT and PATCH, and why does idempotency matter?" A strong answer: PUT replaces the full resource and is idempotent, PATCH applies a partial change and is not guaranteed to be. Idempotency matters because networks fail and clients, proxies and libraries retry; a non-idempotent operation needs an idempotency key or a conditional request to be retried safely.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch10" questions={quiz} />
+
+<Flashcards cards={cards} />

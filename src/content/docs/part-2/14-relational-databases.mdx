@@ -1,0 +1,200 @@
+---
+title: Relational Databases
+chapter: 14
+part: Part II · Backend Foundations
+kicker: Model the data well and half the backend writes itself.
+sidebar:
+  order: 14
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'You have an index on (author, year). Which query can use it efficiently?',
+    options: ['WHERE year = 1965', 'WHERE author = $1 AND year > 1950', 'WHERE title = $1', 'WHERE year > 1950 ORDER BY title'],
+    answer: 1,
+    why: 'A composite B-tree index is sorted by its first column, then the next. It serves filters on a left prefix: author alone, or author plus year. year alone cannot use it well.',
+  },
+  {
+    q: 'How do you enforce in the database that a copy can have at most one active loan?',
+    options: ['A trigger that sleeps', 'A partial unique index on loans(copy_id) WHERE returned_at IS NULL', 'A CHECK constraint on copies', 'An application-level if statement'],
+    answer: 1,
+    why: 'The partial unique index only covers open loans, so history is allowed but two open loans for one copy are rejected, even under concurrent requests.',
+  },
+  {
+    q: 'In EXPLAIN ANALYZE output, what does "Seq Scan" with a large "Rows Removed by Filter" usually tell you?',
+    options: ['The query is optimal', 'The database read the whole table to find a few rows; an index may help', 'The table is empty', 'The query used a cache'],
+    answer: 1,
+    why: 'A sequential scan reading many rows to return few is the classic sign of a missing or unusable index.',
+  },
+  {
+    q: 'Why do indexes make writes slower?',
+    options: ['They lock the table', 'Every insert, update of an indexed column and delete must also update each index', 'They disable transactions', 'They compress rows'],
+    answer: 1,
+    why: 'Each index is a separate structure kept in sync with the table. Index what queries need, not every column.',
+  },
+];
+
+export const cards = [
+  { front: 'B-tree index', back: 'Sorted tree of keys pointing to rows. Serves equality, ranges, ORDER BY and left prefixes of composite keys.' },
+  { front: 'Partial index', back: 'An index over only the rows matching a WHERE clause; can also be UNIQUE to enforce conditional uniqueness.' },
+  { front: 'Third normal form', back: 'Every non-key column depends on the key, the whole key, and nothing but the key.' },
+  { front: 'EXPLAIN ANALYZE', back: 'Runs a query and shows the plan the database chose, with real row counts and timings.' },
+];
+
+Frameworks change every few years; your data lives for decades. The schema is the part of a backend that is hardest to change later, and the database is the only component that can enforce rules even when your code has a bug or two requests race. This chapter models Shelfwise in PostgreSQL, the database every app in this book uses, and covers the indexing and query-reading skills that separate senior backend engineers from everyone else.
+
+<Recall
+  items={[
+    { ref: 'Ch. 12', text: 'Shelfwise has books, physical copies, members and loans; a copy cannot be lent twice.' },
+    { ref: 'Ch. 13', text: 'The database is the last line of defence: unique, foreign keys and checks.' },
+  ]}
+/>
+
+## The Shelfwise model
+
+<Figure n="14.1" caption="Shelfwise: a book has many copies; a loan joins one copy to one member for a period">
+  <svg viewBox="0 0 720 230" role="img" aria-label="Shelfwise entity relationship diagram" font-family="IBM Plex Mono, monospace" font-size="11">
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="10" width="160" height="128" rx="2" />
+      <rect x="200" y="10" width="160" height="112" rx="2" />
+      <rect x="392" y="10" width="170" height="144" rx="2" stroke="var(--bp-accent)" stroke-width="2" />
+      <rect x="594" y="10" width="118" height="96" rx="2" />
+      <path d="M8 34H168M200 34H360M392 34H562M594 34H712" />
+    </g>
+    <g fill="var(--bp-ink)" font-family="IBM Plex Sans, sans-serif" font-weight="600" font-size="12">
+      <text x="18" y="27">books</text><text x="210" y="27">copies</text><text x="402" y="27">loans</text><text x="604" y="27">members</text>
+    </g>
+    <g fill="var(--bp-ink)" style={{ whiteSpace: 'pre' }}>
+      <text x="18" y="52">id        bigint PK</text><text x="18" y="68">isbn      text UNIQUE</text><text x="18" y="84">title     text</text><text x="18" y="100">author    text</text><text x="18" y="116">year      int NULL</text><text x="18" y="132">version   int</text>
+      <text x="210" y="52">id       bigint PK</text><text x="210" y="68">book_id  FK → books</text><text x="210" y="84">barcode  text UNIQUE</text><text x="210" y="100">status   text</text><text x="210" y="116">added_at timestamptz</text>
+      <text x="402" y="52">id          bigint PK</text><text x="402" y="68">copy_id     FK → copies</text><text x="402" y="84">member_id   FK → members</text><text x="402" y="100">loaned_at   timestamptz</text><text x="402" y="116">due_at      timestamptz</text><text x="402" y="132">returned_at NULL</text><text x="402" y="148" fill="var(--bp-accent)">one open loan per copy</text>
+      <text x="604" y="52">id    bigint PK</text><text x="604" y="68">email UNIQUE</text><text x="604" y="84">name  text</text><text x="604" y="100">since date</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M168 60H200" /><path d="M360 60H392" /><path d="M594 76H562" />
+    </g>
+    <g fill="var(--bp-muted)" font-family="IBM Plex Sans, sans-serif">
+      <text x="172" y="54">1</text><text x="190" y="54">n</text>
+      <text x="364" y="54">1</text><text x="382" y="54">n</text>
+      <text x="584" y="70">1</text><text x="566" y="70">n</text>
+    </g>
+    <text x="8" y="190" fill="var(--bp-muted)" font-family="IBM Plex Sans, sans-serif" font-size="11.5">A loan’s history stays in the table after return; only open loans are unique per copy.</text>
+  </svg>
+</Figure>
+
+```sql
+CREATE TABLE books (
+  id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  isbn       text NOT NULL UNIQUE CHECK (isbn ~ '^97[89][0-9]{10}$'),
+  title      text NOT NULL,
+  author     text NOT NULL,
+  year       int  CHECK (year BETWEEN 1450 AND 2100),
+  version    int  NOT NULL DEFAULT 1
+);
+
+CREATE TABLE copies (
+  id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  book_id   bigint NOT NULL REFERENCES books (id),
+  barcode   text   NOT NULL UNIQUE,
+  status    text   NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'lost', 'retired')),
+  added_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE members (
+  id     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email  text NOT NULL UNIQUE,
+  name   text NOT NULL,
+  since  date NOT NULL DEFAULT current_date
+);
+
+CREATE TABLE loans (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  copy_id      bigint NOT NULL REFERENCES copies (id),
+  member_id    bigint NOT NULL REFERENCES members (id),
+  loaned_at    timestamptz NOT NULL DEFAULT now(),
+  due_at       timestamptz NOT NULL,
+  returned_at  timestamptz,
+  CHECK (due_at > loaned_at)
+);
+
+CREATE UNIQUE INDEX one_open_loan_per_copy ON loans (copy_id) WHERE returned_at IS NULL;
+```
+
+Notice how many rules live in the schema: ISBN format, valid years, allowed statuses, due dates after loan dates, and the key one, **one open loan per copy**. If two librarians lend the same copy at the same instant, one insert fails with a unique violation, whatever the application code does. Your code turns that error into a `409` (Chapter 23 covers concurrency in depth).
+
+<Pitfall title="Rules only in application code">
+A rule that lives only in an `if` statement is broken the first time two requests race, a migration script runs, or another service writes to the same table. If the database can express it (unique, foreign key, check, partial unique index), let the database enforce it, and keep the application check too for good error messages.
+</Pitfall>
+
+## Normalisation, briefly
+
+Normalisation removes duplication so a fact lives in one place. The practical target is **third normal form**: every column depends on the key, the whole key, and nothing but the key. In Shelfwise, the title lives on `books`, not on each copy; a member’s email lives on `members`, not on each loan. Denormalise later, deliberately, for read performance, and only with a plan for keeping copies in sync.
+
+## Indexes
+
+An index is a separate, sorted structure that lets the database find rows without reading the whole table. PostgreSQL’s default is the **B-tree**, which serves equality, ranges, sorting and prefixes.
+
+| Index | Serves | Example |
+| --- | --- | --- |
+| Single column | `WHERE author = $1` | `CREATE INDEX ON books (author)` |
+| Composite | Left prefixes: `author`, or `author` + `year` | `CREATE INDEX ON books (author, year)` |
+| Covering | Answers from the index alone | `CREATE INDEX ON books (author) INCLUDE (title)` |
+| Partial | A subset of rows | `ON loans (member_id) WHERE returned_at IS NULL` |
+| Expression | Computed values | `ON members (lower(email))` |
+
+Primary keys and `UNIQUE` constraints create indexes automatically. **Foreign keys do not** in PostgreSQL, so `copies.book_id` and `loans.member_id` need their own indexes, or joins and deletes on the parent will scan.
+
+Indexes are not free: each one slows every write that touches its columns and takes space. Index what your queries actually filter, join and sort on, which means you need to see what queries actually do.
+
+## Reading a query plan
+
+`EXPLAIN ANALYZE` runs a query and shows the plan the database chose, with real timings. This is the single most useful database skill for a backend engineer. Here is a search by author before and after adding an index (illustrative output; your numbers will differ):
+
+```sql
+EXPLAIN ANALYZE SELECT id, title FROM books WHERE author = 'Herbert';
+
+-- Seq Scan on books  (cost=0.00..2041.00 rows=12 width=40) (actual time=0.03..14.88 rows=11 loops=1)
+--   Filter: (author = 'Herbert'::text)
+--   Rows Removed by Filter: 79989
+
+CREATE INDEX books_author_idx ON books (author);
+
+-- Index Scan using books_author_idx on books  (cost=0.42..48.61 rows=12 width=40) (actual time=0.02..0.06 rows=11 loops=1)
+--   Index Cond: (author = 'Herbert'::text)
+```
+
+Read plans from the innermost node outwards. Look for **Seq Scan** on large tables with many rows removed by a filter, a big gap between estimated and actual `rows` (stale statistics: run `ANALYZE`), and **Sort** or **Hash** nodes that spill to disk.
+
+## Joins
+
+A join combines rows from several tables on a condition. `INNER JOIN` keeps only matching pairs; `LEFT JOIN` keeps every row on the left and fills missing matches with `NULL`. This query lists a member’s open loans with titles, the kind of query Shelfwise runs on every member page:
+
+```sql
+SELECT l.id, b.title, c.barcode, l.due_at
+FROM loans l
+JOIN copies c ON c.id = l.copy_id
+JOIN books  b ON b.id = c.book_id
+WHERE l.member_id = $1 AND l.returned_at IS NULL
+ORDER BY l.due_at;
+```
+
+With the partial index on `loans (member_id) WHERE returned_at IS NULL` and the primary keys on `copies` and `books`, this stays fast with millions of historical loans.
+
+<FromTS>
+If Prisma or TypeORM have hidden SQL from you so far, this is the chapter to slow down on. Every ORM in this book generates SQL like the query above, and when a page is slow, the fix is almost always found in `EXPLAIN ANALYZE`, not in the ORM.
+</FromTS>
+
+<InTheWild>
+PostgreSQL has become the default relational database for new projects in every stack in this book. Teams lean on its extras: `jsonb` for flexible attributes, partial and expression indexes, `RETURNING` on writes, and `pg_stat_statements` to find the slowest queries in production. Learn to read its plans and you can help any team, whatever their language.
+</InTheWild>
+
+<InterviewLens>
+"This endpoint is slow. How do you find out why?" A strong answer: measure first (logs, traces, `pg_stat_statements`), find the slow query, run `EXPLAIN ANALYZE` on it with realistic parameters, look for sequential scans, misestimates and sorts, then fix with an index, a rewritten query or less data, and confirm with the plan and a load test. Mention the write cost of new indexes.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch14" questions={quiz} />
+
+<Flashcards cards={cards} />

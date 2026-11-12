@@ -1,0 +1,206 @@
+---
+title: Anatomy of a Request
+chapter: 11
+part: Part II · Backend Foundations
+kicker: From socket to handler, and the names each stack gives every stop.
+sidebar:
+  order: 11
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A cross-cutting concern must run for every request, before routing, and see the raw request. Where does it belong?',
+    options: ['In each controller', 'In middleware (a servlet filter in Spring)', 'In a pipe', 'In the database layer'],
+    answer: 1,
+    why: 'Middleware and filters wrap the whole pipeline, before a route is chosen. Request ids, logging, CORS and compression live there.',
+  },
+  {
+    q: 'What is model binding?',
+    options: ['Mapping database rows to objects', 'Turning route values, query strings, headers and the body into typed handler parameters', 'Binding a port to a process', 'Registering services in DI'],
+    answer: 1,
+    why: 'Every framework parses the raw request into the parameters your handler declares: @PathVariable, [FromQuery], Depends, r.PathValue and so on.',
+  },
+  {
+    q: 'Why add an X-Request-Id to every response and log line?',
+    options: ['To improve caching', 'To correlate one request across logs, services and support tickets', 'It is required by HTTP', 'To authenticate the client'],
+    answer: 1,
+    why: 'A request id ties together every log line of one request, across services if you forward it. Chapter 43 replaces it with full distributed tracing.',
+  },
+  {
+    q: 'In Spring MVC, which component receives every request and dispatches it to a controller method?',
+    options: ['The ApplicationContext', 'The DispatcherServlet', 'Tomcat’s Valve', 'The HandlerInterceptor'],
+    answer: 1,
+    why: 'DispatcherServlet is Spring MVC’s front controller: it finds the handler, runs interceptors, binds arguments, invokes the method and writes the response.',
+  },
+];
+
+export const cards = [
+  { front: 'Middleware', back: 'Code that wraps the whole request pipeline: it runs before and after everything inside it.' },
+  { front: 'Model binding', back: 'Parsing route, query, headers and body into the typed parameters a handler declares.' },
+  { front: 'Front controller', back: 'One entry point that dispatches every request: DispatcherServlet in Spring, the router in the others.' },
+  { front: 'Request id', back: 'A per-request identifier read from or written to X-Request-Id and attached to every log line.' },
+];
+
+Chapter 10 described what travels over the wire. This chapter follows one request inside your process, from the moment bytes arrive on a socket to the moment your handler returns. The stops are the same in every stack; the names are not. Once you can map them, any framework’s documentation becomes easy to read.
+
+<Recall
+  items={[
+    { ref: 'Ch. 3', text: 'NestJS: middleware, guards, interceptors, pipes, handler, exception filters.' },
+    { ref: 'Ch. 4', text: 'ASP.NET Core middleware wraps the endpoint; order is behaviour.' },
+    { ref: 'Ch. 7', text: 'Go middleware is a function from http.Handler to http.Handler.' },
+  ]}
+/>
+
+## Seven stops
+
+<Figure n="11.1" caption="Every stack follows the same seven stops between the socket and your code">
+  <svg viewBox="0 0 720 110" role="img" aria-label="Seven stops of a request" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs>
+      <marker id="rq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker>
+    </defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="4" y="20" width="88" height="56" rx="2" />
+      <rect x="106" y="20" width="88" height="56" rx="2" />
+      <rect x="208" y="20" width="88" height="56" rx="2" />
+      <rect x="310" y="20" width="88" height="56" rx="2" />
+      <rect x="412" y="20" width="88" height="56" rx="2" />
+      <rect x="514" y="20" width="88" height="56" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="616" y="20" width="100" height="56" rx="2" />
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M92 48H104" marker-end="url(#rq-arrow)" /><path d="M194 48H206" marker-end="url(#rq-arrow)" /><path d="M296 48H308" marker-end="url(#rq-arrow)" /><path d="M398 48H410" marker-end="url(#rq-arrow)" /><path d="M500 48H512" marker-end="url(#rq-arrow)" /><path d="M602 48H614" marker-end="url(#rq-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="48" y="44" font-weight="600">1 Server</text><text x="48" y="62" font-size="11" fill="var(--bp-muted)">parse HTTP</text>
+      <text x="150" y="44" font-weight="600">2 Middleware</text><text x="150" y="62" font-size="11" fill="var(--bp-muted)">wraps all</text>
+      <text x="252" y="44" font-weight="600">3 Routing</text><text x="252" y="62" font-size="11" fill="var(--bp-muted)">pick handler</text>
+      <text x="354" y="44" font-weight="600">4 Policies</text><text x="354" y="62" font-size="11" fill="var(--bp-muted)">auth, filters</text>
+      <text x="456" y="44" font-weight="600">5 Binding</text><text x="456" y="62" font-size="11" fill="var(--bp-muted)">+ validation</text>
+      <text x="558" y="44" font-weight="600">6 Handler</text><text x="558" y="62" font-size="11" fill="var(--bp-muted)">your code</text>
+      <text x="666" y="44" font-weight="600">7 Serialise</text><text x="666" y="62" font-size="11" fill="var(--bp-muted)">+ map errors</text>
+    </g>
+    <text x="360" y="100" text-anchor="middle" fill="var(--bp-muted)" font-size="11">Errors thrown in 3–6 jump to stop 7, where they become status codes and bodies</text>
+  </svg>
+</Figure>
+
+| Stop | NestJS | ASP.NET Core | Spring MVC | Go | FastAPI / Django |
+| --- | --- | --- | --- | --- | --- |
+| 1 Server | Node `http` (Express or Fastify) | Kestrel | Embedded Tomcat | `net/http` | Uvicorn / Gunicorn |
+| 2 Middleware | Middleware | Middleware | Servlet filters | `func(http.Handler) http.Handler` | Middleware |
+| 3 Routing | Controller decorators | Endpoint routing | `DispatcherServlet` + mappings | `ServeMux` patterns | Path operations / `urls.py` |
+| 4 Policies | Guards, interceptors | Authorization, endpoint filters | `HandlerInterceptor`, Spring Security | Middleware per route | Dependencies / permission classes |
+| 5 Binding | Pipes | Model binding | Argument resolvers, `@Valid` | `r.PathValue`, `json.Decoder` | Pydantic / serializers |
+| 6 Handler | Controller method | Lambda or action | Controller method | Handler func | Path function / view |
+| 7 Errors | Exception filters | Exception handler, Problem Details | `@RestControllerAdvice` | Your own helpers | Exception handlers |
+
+## Choosing the right stop
+
+The table is also a placement guide. A concern belongs at the **earliest** stop that has the information it needs:
+
+- **Request ids, access logs, CORS, compression**: middleware. They do not care which route matched.
+- **Authentication**: middleware, because it only reads headers. **Authorization**: a policy stop, because it often needs the route or the resource.
+- **Parsing and validation**: binding. The handler should receive valid, typed data or not run at all.
+- **Business rules**: the handler and the services it calls. Nothing above should know about loans or books.
+- **Translating exceptions to HTTP**: the error stop, in one place per application.
+
+<Pitfall title="Business logic in middleware">
+Middleware that loads a book, checks its status and rejects the request works, until a second endpoint needs a slightly different rule and nobody remembers the middleware exists. Keep middleware generic; anything that knows your domain belongs in a handler or a service it calls.
+</Pitfall>
+
+## Your first middleware, five times
+
+A request id is the classic first middleware: accept one from the caller (so it can be followed across services), generate one otherwise, return it in the response, and attach it to every log line.
+
+<FiveStacks note="Read or create X-Request-Id, echo it, log with it">
+<Stack id="express" lib="Express">
+```ts
+import { randomUUID } from 'node:crypto';
+
+app.use((req, res, next) => {
+  const id = req.get('x-request-id') ?? randomUUID();
+  res.setHeader('x-request-id', id);
+  req.log = logger.child({ requestId: id });   // pino child logger
+  next();
+});
+```
+</Stack>
+<Stack id="cs" lib="ASP.NET Core">
+```csharp
+app.Use(async (ctx, next) =>
+{
+    var id = ctx.Request.Headers["X-Request-Id"].FirstOrDefault() ?? Guid.NewGuid().ToString();
+    ctx.Response.Headers["X-Request-Id"] = id;
+    using (app.Logger.BeginScope(new Dictionary<string, object> { ["RequestId"] = id }))
+    {
+        await next(ctx);
+    }
+});
+```
+</Stack>
+<Stack id="java" lib="Spring Boot">
+```java
+@Component
+class RequestIdFilter extends OncePerRequestFilter {
+    @Override
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
+            throws ServletException, IOException {
+        String id = Optional.ofNullable(req.getHeader("X-Request-Id")).orElseGet(() -> UUID.randomUUID().toString());
+        res.setHeader("X-Request-Id", id);
+        MDC.put("requestId", id);              // every log line on this thread gets it
+        try { chain.doFilter(req, res); } finally { MDC.remove("requestId"); }
+    }
+}
+```
+</Stack>
+<Stack id="go" lib="net/http">
+```go
+func requestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("X-Request-Id")
+		if id == "" {
+			id = uuid.NewString()
+		}
+		w.Header().Set("X-Request-Id", id)
+		logger := slog.Default().With("requestId", id)
+		next.ServeHTTP(w, r.WithContext(withLogger(r.Context(), logger)))
+	})
+}
+```
+</Stack>
+<Stack id="fastapi" lib="FastAPI">
+```python
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or str(uuid4())
+    request_id_var.set(rid)                 # a ContextVar read by the log formatter
+    response = await call_next(request)
+    response.headers["x-request-id"] = rid
+    return response
+```
+</Stack>
+</FiveStacks>
+
+Look at how each stack carries "the current request" to the logger. Java uses **MDC**, a thread-local map, which works because Spring MVC keeps one request on one thread. Python uses a **ContextVar**, which follows async tasks. Go passes it explicitly in `context.Context`. Node needs a child logger or `AsyncLocalStorage`. C# uses a logging scope backed by `AsyncLocal`. Same goal, five answers shaped by the concurrency models of Chapter 9.
+
+<FromTS>
+`AsyncLocalStorage` from `node:async_hooks` is Node’s equivalent of a thread-local for async code. Libraries such as `nestjs-cls` build on it so that any service can read the current request id without passing it through every function.
+</FromTS>
+
+## Timeouts at every hop
+
+A request crosses several timers: the client’s, the load balancer’s idle timeout, the server’s read and write timeouts, and every database or HTTP call your handler makes. The rule is that **inner timeouts must be shorter than outer ones**, so your service gives up and returns an error before the load balancer cuts the connection and the client sees a blank 502.
+
+<InTheWild>
+Go’s `http.Server` has no read or write timeouts by default, and many production Go services set `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout` and `IdleTimeout` explicitly for that reason. Kestrel, Tomcat and Uvicorn ship with defaults, but they rarely match your load balancer. Check them on day one.
+</InTheWild>
+
+<InterviewLens>
+"Walk me through what happens when a request hits your Spring service." A strong answer goes stop by stop: Tomcat accepts and parses, the filter chain runs (security, request id), `DispatcherServlet` maps the handler, interceptors run, arguments are resolved and validated, the method executes, the return value is serialised by a message converter, and exceptions are mapped by controller advice. Then it names where they would put logging, auth and validation, and why.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch11" questions={quiz} />
+
+<Flashcards cards={cards} />

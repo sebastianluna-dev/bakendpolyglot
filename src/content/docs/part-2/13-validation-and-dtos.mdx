@@ -1,0 +1,206 @@
+---
+title: Validation, Serialization and DTOs
+chapter: 13
+part: Part II · Backend Foundations
+kicker: Trust nothing that crosses the boundary, in either direction.
+sidebar:
+  order: 13
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why should an API not return database entities directly?',
+    options: ['Entities cannot be serialised', 'They leak internal fields and couple the public contract to the schema', 'It is slower', 'JSON does not support classes'],
+    answer: 1,
+    why: 'Returning entities exposes columns like password hashes or internal flags, and every schema change becomes an API change. DTOs decouple the two.',
+  },
+  {
+    q: 'What is mass assignment?',
+    options: ['Inserting many rows at once', 'Binding request fields straight onto an entity, letting clients set fields they should not (such as isAdmin)', 'A bulk validation API', 'Assigning a request to many workers'],
+    answer: 1,
+    why: 'If the request body maps onto the entity, any field the entity has can be set by the client. Input DTOs list exactly what a client may send.',
+  },
+  {
+    q: 'How should dates and times travel in a JSON API?',
+    options: ['As Unix timestamps in local time', 'As ISO 8601 strings, in UTC with an explicit offset', 'As "dd/mm/yyyy" strings', 'As the server’s locale format'],
+    answer: 1,
+    why: 'ISO 8601 with Z or an offset is unambiguous and sorts correctly as text. Convert to the user’s zone only at display time.',
+  },
+  {
+    q: 'Which stack validates a request body against its declared types automatically, with no extra annotations?',
+    options: ['Express', 'Go net/http', 'FastAPI with a Pydantic model', 'Spring without @Valid'],
+    answer: 2,
+    why: 'FastAPI validates every parameter and body from its type hints and Pydantic constraints. Spring needs @Valid, Nest needs ValidationPipe, Go needs your own code.',
+  },
+];
+
+export const cards = [
+  { front: 'DTO', back: 'Data Transfer Object: the shape of data at a boundary, separate from your entities and domain types.' },
+  { front: 'Mass assignment', back: 'A client setting fields it should not, because the request was bound straight to an entity.' },
+  { front: 'Parse, don’t validate', back: 'Turn untrusted input into a typed value once, at the edge, so the rest of the code can trust it.' },
+  { front: 'Money in JSON', back: 'Integer minor units (amountCents: 1999) or a decimal string, plus a currency code. Never a float.' },
+];
+
+Every request carries untrusted data, and every response exposes something to the world. Validation guards the way in; DTOs and careful serialisation guard the way out. This chapter applies one rule in all five stacks: **parse at the edge, once**, so that by the time data reaches a service it already has the right types and has passed the rules.
+
+<Recall
+  items={[
+    { ref: 'Ch. 11', text: 'Binding and validation happen at stop 5, before the handler runs.' },
+    { ref: 'Ch. 12', text: 'Errors use Problem Details; validation errors add an errors member per field.' },
+  ]}
+/>
+
+## DTOs: one shape per boundary
+
+A **DTO** (data transfer object) describes data at a boundary. Shelfwise uses three kinds:
+
+| Kind | Example | Purpose |
+| --- | --- | --- |
+| Input | `CreateBookRequest` | Exactly the fields a client may send, with rules |
+| Domain or entity | `Book` | What your code and database work with |
+| Output | `BookResponse` | Exactly the fields a client may see, in the public format |
+
+Three types for one concept looks like duplication, and in a CRUD screen it nearly is. The payoff comes the first time the database gains a column the public should not see, or a client sends a field your entity happens to have.
+
+<Pitfall title="Mass assignment">
+Binding a request body straight onto an entity lets a client set any field the entity has: `"role": "admin"`, `"price": 0`, `"memberId": 999`. Several large breaches started exactly this way. Input DTOs list allowed fields explicitly; everything else is ignored or rejected.
+</Pitfall>
+
+## Validating at the edge
+
+Here is the Shelfwise `CreateBookRequest` in each stack: a required title and author, an ISBN-13, and an optional publication year that cannot be in the future.
+
+<FiveStacks note="CreateBookRequest with its rules">
+<Stack id="nest" lib="class-validator + ValidationPipe">
+```ts
+export class CreateBookRequest {
+  @IsString() @Length(1, 200) title!: string;
+  @IsString() @Length(1, 200) author!: string;
+  @Matches(/^97[89]\d{10}$/) isbn!: string;
+  @IsOptional() @IsInt() @Min(1450) @Max(new Date().getFullYear()) year?: number;
+}
+
+// main.ts: reject unknown fields, convert types
+app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+```
+</Stack>
+<Stack id="cs" lib="DataAnnotations + [ApiController]">
+```csharp
+public record CreateBookRequest(
+    [property: Required, StringLength(200, MinimumLength = 1)] string Title,
+    [property: Required, StringLength(200, MinimumLength = 1)] string Author,
+    [property: Required, RegularExpression(@"^97[89]\d{10}$")] string Isbn,
+    [property: Range(1450, 2100)] int? Year);
+
+// In a [ApiController] action, an invalid body never reaches your code:
+// the framework answers 400 with a ValidationProblemDetails body.
+```
+</Stack>
+<Stack id="java" lib="Jakarta Bean Validation">
+```java
+public record CreateBookRequest(
+    @NotBlank @Size(max = 200) String title,
+    @NotBlank @Size(max = 200) String author,
+    @Pattern(regexp = "^97[89]\\d{10}$") String isbn,
+    @Min(1450) @PastOrPresentYear Integer year) {}   // custom constraint
+
+@PostMapping
+ResponseEntity<BookResponse> create(@Valid @RequestBody CreateBookRequest req) { /* … */ }
+```
+</Stack>
+<Stack id="go" lib="explicit checks">
+```go
+type CreateBookRequest struct {
+	Title  string `json:"title"`
+	Author string `json:"author"`
+	ISBN   string `json:"isbn"`
+	Year   *int   `json:"year"`
+}
+
+var isbn13 = regexp.MustCompile(`^97[89]\d{10}$`)
+
+func (r CreateBookRequest) Validate() map[string]string {
+	errs := map[string]string{}
+	if l := len(strings.TrimSpace(r.Title)); l == 0 || l > 200 {
+		errs["title"] = "must be 1–200 characters"
+	}
+	if !isbn13.MatchString(r.ISBN) {
+		errs["isbn"] = "must be a valid ISBN-13"
+	}
+	if r.Year != nil && (*r.Year < 1450 || *r.Year > time.Now().Year()) {
+		errs["year"] = "must be between 1450 and this year"
+	}
+	return errs // author check omitted for brevity
+}
+```
+</Stack>
+<Stack id="fastapi" lib="Pydantic">
+```python
+class CreateBookRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")      # reject unknown fields
+
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    author: Annotated[str, Field(min_length=1, max_length=200)]
+    isbn: Annotated[str, Field(pattern=r"^97[89]\d{10}$")]
+    year: Annotated[int | None, Field(ge=1450)] = None
+
+    @field_validator("year")
+    @classmethod
+    def not_in_future(cls, v: int | None) -> int | None:
+        if v is not None and v > date.today().year:
+            raise ValueError("cannot be in the future")
+        return v
+```
+</Stack>
+</FiveStacks>
+
+Three families appear. Nest, ASP.NET and Spring **annotate** a class and let the framework run the rules. FastAPI **parses** into a typed model, so an invalid body never becomes a `CreateBookRequest` at all. Go writes the rules as **plain code**; teams that want annotations use the `go-playground/validator` library, but many prefer the explicit version for its readability.
+
+Frameworks disagree on the status code (ASP.NET, Spring and Nest default to 400, FastAPI to 422), so Shelfwise maps all of them, in each stack’s error handler, to the same response:
+
+```json
+{
+  "type": "https://shelfwise.dev/problems/validation",
+  "title": "Request is invalid",
+  "status": 422,
+  "errors": { "isbn": ["must be a valid ISBN-13"], "year": ["cannot be in the future"] }
+}
+```
+
+## Shape rules versus business rules
+
+Validation at the edge checks **shape**: types, lengths, formats, ranges. It does not check **business rules** that need the database or the current state: "this ISBN already exists", "this member has three overdue loans". Those belong in the service, and they produce 409 or 422 errors from there. Trying to do business rules in validation attributes leads to annotations that query the database, which are slow, hard to test and easy to bypass.
+
+<FromTS>
+If you have used zod, Pydantic will feel familiar: a schema that parses unknown input into a typed value or fails with structured errors. "Parse, don’t validate" is the idea underneath both: after the edge, nothing should need to check the same field again.
+</FromTS>
+
+## Serialisation conventions
+
+Decide these once per organisation and configure every stack to match:
+
+- **Field names**: `camelCase` in JSON. Spring, ASP.NET and Nest default to it; Go needs struct tags; Python models use `alias_generator=to_camel` or plain camelCase fields.
+- **Dates**: ISO 8601 strings in UTC (`2026-11-12T19:22:05Z`). Store in UTC, convert at display.
+- **Money**: integer minor units (`"amountCents": 1999`) or a decimal string, always with a currency. Never a binary float.
+- **Enums**: strings (`"status": "on_loan"`), not numbers, so logs and clients stay readable and reordering is safe.
+- **Nulls**: decide between omitting absent fields and sending `null`, and do the same everywhere.
+- **Unknown fields**: ignored when reading responses (for forward compatibility), rejected or ignored on requests by explicit choice.
+
+<Pitfall title="Large integers and JavaScript clients">
+JSON numbers are parsed into JavaScript `number`, which is exact only up to 2^53 − 1. A 64-bit id such as a Snowflake id loses its last digits in the browser. Send such ids as strings.
+</Pitfall>
+
+<InTheWild>
+Most API security reviews find the same two issues: responses that include more fields than intended, and inputs bound directly to entities. Output DTOs and allow-listed input DTOs fix both, which is why mature codebases accept the extra types.
+</InTheWild>
+
+<InterviewLens>
+"Where do you validate, and what?" A strong answer: shape at the edge, with the framework’s binding, producing a uniform 422 with field errors; business rules in the service, producing domain errors; and constraints in the database (unique, foreign keys, checks) as the last line of defence against races and bugs.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch13" questions={quiz} />
+
+<Flashcards cards={cards} />

@@ -1,0 +1,183 @@
+---
+title: Data Access
+chapter: 15
+part: Part II · Backend Foundations
+kicker: ORMs, query builders, raw SQL, and the bug they all let you write.
+sidebar:
+  order: 15
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A page lists 50 loans and shows each loan’s book title. The log shows 101 queries. What is the problem called?',
+    options: ['A deadlock', 'The N+1 query problem', 'A connection leak', 'A cartesian product'],
+    answer: 1,
+    why: 'One query for the list, then one per item for its related data (here two per loan). The fix is eager loading or a join.',
+  },
+  {
+    q: 'In Django, which call loads a foreign-key relation with a JOIN in the same query?',
+    options: ['prefetch_related', 'select_related', 'only', 'values'],
+    answer: 1,
+    why: 'select_related follows foreign keys with a SQL join. prefetch_related runs one extra query per relation and joins in Python, which suits many-to-many and reverse relations.',
+  },
+  {
+    q: 'Your service runs 8 replicas, each with a connection pool of 20. Postgres allows 100 connections. What happens under load?',
+    options: ['Nothing; pools share connections', 'The pools want up to 160 connections, so some replicas fail to connect', 'Postgres raises its limit automatically', 'Each replica gets 12'],
+    answer: 1,
+    why: 'Pool size multiplies by the number of processes. Size pools from the database’s limit down, or put a pooler such as PgBouncer in between.',
+  },
+  {
+    q: 'Why are migrations committed to the repository and run in order?',
+    options: ['To make builds faster', 'So every environment reaches the same schema through the same reviewed, versioned steps', 'Because ORMs require it', 'To avoid writing SQL'],
+    answer: 1,
+    why: 'Migrations are the history of your schema. Versioned, reviewed and applied in order, they make local, CI and production databases match.',
+  },
+];
+
+export const cards = [
+  { front: 'N+1 queries', back: 'One query for a list plus one per row for related data. Fix with eager loading or a join.' },
+  { front: 'Eager loading', back: 'Loading related data in the same query (join) or one extra batched query, instead of lazily per row.' },
+  { front: 'Connection pool', back: 'A set of reusable open database connections. Size it per process, and multiply by replicas.' },
+  { front: 'Migration', back: 'A versioned, ordered script that changes the schema, committed with the code that needs it.' },
+];
+
+Every stack offers three ways to talk to a database: a full **ORM** that maps rows to objects, a **query builder** that composes SQL with types, and **raw SQL** with a thin mapping layer. Each has good uses, and all of them let you write the same performance bug. This chapter compares them, fixes that bug in five stacks, and covers the two operational pieces that every service needs: migrations and connection pools.
+
+<Recall
+  items={[
+    { ref: 'Ch. 4', text: 'LINQ queries against EF Core are translated to SQL; they run when enumerated.' },
+    { ref: 'Ch. 14', text: 'The open-loans query joins loans, copies and books; foreign keys need their own indexes.' },
+  ]}
+/>
+
+## Three levels of abstraction
+
+| Stack | ORM | Query builder or SQL-first | Raw SQL |
+| --- | --- | --- | --- |
+| TypeScript | Prisma, TypeORM | Drizzle, Kysely | `pg` |
+| C# | Entity Framework Core | — | Dapper |
+| Java / Kotlin | Spring Data JPA (Hibernate) | jOOQ | `JdbcClient` |
+| Go | GORM | `sqlc` (generates Go from SQL) | `pgx` |
+| Python | Django ORM, SQLAlchemy ORM | SQLAlchemy Core | `asyncpg`, `psycopg` |
+
+An **ORM** gives you objects, relationships, change tracking and migrations; it is fastest for CRUD and slowest to debug when the generated SQL is wrong. A **query builder** or SQL-first tool keeps you close to SQL with type safety; it suits read-heavy, query-shaped code. **Raw SQL** is unbeatable for reports and tuned queries. Mature codebases mix them: ORM for writes and simple reads, SQL for the queries that matter.
+
+## The N+1 problem
+
+The most common database performance bug looks innocent. List a member’s open loans, then show each loan’s book title:
+
+```ts
+const loans = await db.loan.findMany({ where: { memberId, returnedAt: null } }); // 1 query
+for (const loan of loans) {
+  const copy = await db.copy.findUnique({ where: { id: loan.copyId } });         // N queries
+  const book = await db.book.findUnique({ where: { id: copy!.bookId } });        // N more
+}
+```
+
+Fifty loans become 101 round trips. On a laptop it takes 40 ms and nobody notices; in production, with a database 1 ms away and real traffic, the page takes a second and the database is busy for nothing. ORMs make it worse with **lazy loading**: touching `loan.copy.book.title` in a template silently runs a query.
+
+The fix is the same in every stack: say up front what you need, and let the tool fetch it in one query (a join) or one extra query per relation (a batched `IN (…)`).
+
+<FiveStacks note="Open loans with their book titles, without N+1">
+<Stack id="nest" lib="Prisma">
+```ts
+const loans = await prisma.loan.findMany({
+  where: { memberId, returnedAt: null },
+  include: { copy: { include: { book: { select: { title: true } } } } },
+  orderBy: { dueAt: 'asc' },
+});
+```
+</Stack>
+<Stack id="cs" lib="EF Core">
+```csharp
+var loans = await db.Loans
+    .Where(l => l.MemberId == memberId && l.ReturnedAt == null)
+    .OrderBy(l => l.DueAt)
+    .Select(l => new OpenLoan(l.Id, l.Copy.Book.Title, l.Copy.Barcode, l.DueAt)) // one SQL join
+    .ToListAsync(ct);
+```
+</Stack>
+<Stack id="java" lib="Spring Data JPA">
+```java
+@Query("""
+    select new shelfwise.loans.OpenLoan(l.id, b.title, c.barcode, l.dueAt)
+    from Loan l join l.copy c join c.book b
+    where l.member.id = :memberId and l.returnedAt is null
+    order by l.dueAt""")
+List<OpenLoan> findOpenLoans(long memberId);
+```
+</Stack>
+<Stack id="go" lib="sqlc">
+```sql
+-- name: OpenLoans :many
+SELECT l.id, b.title, c.barcode, l.due_at
+FROM loans l
+JOIN copies c ON c.id = l.copy_id
+JOIN books  b ON b.id = c.book_id
+WHERE l.member_id = $1 AND l.returned_at IS NULL
+ORDER BY l.due_at;
+```
+```go
+loans, err := q.OpenLoans(ctx, memberID) // sqlc generated a typed Go function from the SQL above
+```
+</Stack>
+<Stack id="django" lib="Django ORM">
+```python
+loans = (
+    Loan.objects
+    .filter(member_id=member_id, returned_at__isnull=True)
+    .select_related("copy__book")          # one query with two joins
+    .order_by("due_at")
+)
+```
+</Stack>
+</FiveStacks>
+
+Two patterns are visible. EF Core and JPA **project** into a small read model (`OpenLoan`) instead of loading full entities, which also avoids change-tracking overhead. Prisma and Django **eager-load** the relations. Go’s `sqlc` sidesteps the question: you write the join, and it generates the typed function.
+
+<Pitfall title="Find N+1 before production does">
+Turn on SQL logging in development and read it when a page feels slow. Better, make it fail tests: Django has `assertNumQueries`, Hibernate can log statement counts per request, and in every stack you can count queries in an integration test for the endpoints that list things.
+</Pitfall>
+
+## Migrations
+
+The schema changes with the code, so its changes are versioned with the code. A **migration** is an ordered script; a tool records which ones each database has applied and runs the rest.
+
+| Stack | Tool | Generated from models? |
+| --- | --- | --- |
+| TypeScript | Prisma Migrate, Drizzle Kit | Yes |
+| C# | EF Core migrations | Yes |
+| Java / Kotlin | Flyway or Liquibase | No: you write SQL |
+| Go | goose, golang-migrate, Atlas | No (Atlas can diff) |
+| Python | Django migrations, Alembic | Yes (autogenerate) |
+
+Generated migrations are a starting point, not a final answer: always read the SQL before committing. Two rules keep deployments safe. First, never edit a migration that has run anywhere shared; add a new one. Second, make schema changes **backward compatible** with the code still running: add a nullable column, deploy code that writes it, backfill, then make it required. Renaming a column in one step breaks every instance still running the old code during a rolling deploy.
+
+## Connection pools
+
+Opening a database connection costs a TCP and TLS handshake plus authentication, several milliseconds. A **pool** keeps connections open and lends them out per query or transaction. Every stack has one built in or one standard choice: HikariCP in Spring (default size 10), Npgsql’s pool in .NET, `pgxpool` in Go, Prisma’s and SQLAlchemy’s pools, Django’s persistent connections.
+
+Pools need sizing from the database down, not from the service up. PostgreSQL handles a limited number of connections well (each one is a process), so the total across **all replicas** must fit:
+
+```text
+replicas × pool size per replica  ≤  database max_connections − headroom
+8 × 10 = 80                       ≤  100 − 20      ✓
+8 × 20 = 160                      ≤  100 − 20      ✗
+```
+
+A bigger pool is rarely faster: past roughly a few connections per database CPU core, queries just wait inside Postgres instead of in your pool. When you need many replicas, put **PgBouncer** (or a managed equivalent) in front of the database.
+
+<InTheWild>
+Teams argue about ORMs forever. The pragmatic consensus in most companies: use the stack’s mainstream ORM for writes and straightforward reads, drop to SQL for anything performance-sensitive, and review generated SQL in code review for the endpoints that list things. Go teams lean SQL-first with `sqlc` more than any other community.
+</InTheWild>
+
+<InterviewLens>
+"What is the N+1 problem and how do you prevent it?" A strong answer defines it with numbers, explains lazy loading as the usual cause, names the fix in the candidate’s stack (Include, fetch join or EntityGraph, select_related), mentions projections into read models, and describes how to catch it: SQL logging, query-count assertions in tests, and APM traces in production.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch15" questions={quiz} />
+
+<Flashcards cards={cards} />

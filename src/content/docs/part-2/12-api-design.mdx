@@ -1,0 +1,242 @@
+---
+title: API Design
+chapter: 12
+part: Part II · Backend Foundations
+kicker: Resources, errors and pages that clients can rely on for years.
+sidebar:
+  order: 12
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why does offset pagination (LIMIT 20 OFFSET 4000) get slow and unreliable on large, changing tables?',
+    options: ['OFFSET is not valid SQL', 'The database still reads and discards every skipped row, and inserts shift items between pages', 'It cannot be indexed at all', 'It only works with UUIDs'],
+    answer: 1,
+    why: 'OFFSET N makes the database walk N rows. Concurrent inserts move rows across page boundaries, so clients see duplicates or miss items. Cursors avoid both.',
+  },
+  {
+    q: 'What is the standard media type for error bodies defined by RFC 9457?',
+    options: ['application/json+error', 'application/problem+json', 'text/error', 'application/vnd.error'],
+    answer: 1,
+    why: 'Problem Details uses application/problem+json with type, title, status, detail and instance, plus your own extension members.',
+  },
+  {
+    q: 'A client creates a book with POST /books. What should a successful response include?',
+    options: ['200 and nothing else', '201 Created, a Location header pointing to /books/{id}, and usually the created resource', '204 No Content', '302 redirect to the book'],
+    answer: 1,
+    why: '201 plus Location tells the client where the new resource lives; returning the body saves a follow-up GET.',
+  },
+  {
+    q: 'Which change is backward compatible for existing API clients?',
+    options: ['Renaming a field', 'Adding an optional field to a response', 'Making an optional request field required', 'Changing a field from number to string'],
+    answer: 1,
+    why: 'Well-behaved clients ignore unknown fields, so additions are safe. Renames, type changes and new requirements break someone.',
+  },
+];
+
+export const cards = [
+  { front: 'Cursor pagination', back: 'Return an opaque cursor encoding the last item’s sort key; the next page asks for items after it.' },
+  { front: 'Problem Details', back: 'RFC 9457 error format: type, title, status, detail, instance, plus extensions. Media type application/problem+json.' },
+  { front: 'Contract-first', back: 'Write the OpenAPI document first, review it, then generate or implement code against it.' },
+  { front: 'Additive change', back: 'Adding optional fields or new endpoints. Safe without a new version; everything else needs one.' },
+];
+
+An API is a promise. Once a mobile app or a partner integration depends on it, every field name and status code is hard to change. This chapter covers the decisions that are cheap now and expensive later: how resources are named, how errors look, how lists are paged, and how the contract is written down. Then we apply them to Shelfwise, whose API we will build in Chapter 18.
+
+<Recall
+  items={[
+    { ref: 'Ch. 10', text: 'POST is not idempotent; PUT and DELETE are. 201 comes with a Location header.' },
+    { ref: 'Ch. 9', text: 'Every stack can return a 404; the body was different in each one.' },
+  ]}
+/>
+
+## Resources, not actions
+
+REST APIs model **resources** (nouns) and use HTTP methods as the verbs. The URL names a thing; the method says what to do with it.
+
+| Instead of | Prefer | Why |
+| --- | --- | --- |
+| `POST /createBook` | `POST /books` | The method already says "create" |
+| `GET /getBooksByAuthor?a=…` | `GET /books?author=…` | Filtering is a query on the collection |
+| `POST /books/42/delete` | `DELETE /books/42` | Proxies and clients understand DELETE |
+| `POST /returnLoan` | `POST /loans/7/return` | A domain action on one resource is fine as a sub-resource |
+
+Plural nouns, lowercase, hyphens for multi-word names, and nesting no more than one level deep (`/books/42/copies`, not `/libraries/1/books/42/copies/3/loans`). When an operation is really a process, such as returning a book, a sub-resource with `POST` is honest and readable.
+
+## One error format for every stack
+
+Chapter 9 showed five different 404 bodies. Clients should never care which stack answered, so every service in this book uses **Problem Details** (RFC 9457):
+
+```json
+{
+  "type": "https://shelfwise.dev/problems/copy-on-loan",
+  "title": "Copy is already on loan",
+  "status": 409,
+  "detail": "Copy C-0042 has been on loan since 2026-11-02.",
+  "instance": "/loans",
+  "copyId": "C-0042"
+}
+```
+
+`type` is a stable identifier clients can switch on; `title` is a short human summary; `detail` explains this occurrence; extra members (here `copyId`) carry data. For validation errors we add an `errors` member listing each field (Chapter 13).
+
+<FiveStacks note="A domain error rendered as application/problem+json">
+<Stack id="nest" lib="NestJS">
+```ts
+@Catch(DomainError)
+export class ProblemFilter implements ExceptionFilter {
+  catch(e: DomainError, host: ArgumentsHost) {
+    const res = host.switchToHttp().getResponse<Response>();
+    res.status(e.status).type('application/problem+json').json({
+      type: `https://shelfwise.dev/problems/${e.code}`,
+      title: e.title, status: e.status, detail: e.message, ...e.extensions,
+    });
+  }
+}
+```
+</Stack>
+<Stack id="cs" lib="ASP.NET Core">
+```csharp
+builder.Services.AddProblemDetails();         // standard bodies for errors and status codes
+// …
+return Results.Problem(
+    type: "https://shelfwise.dev/problems/copy-on-loan",
+    title: "Copy is already on loan",
+    statusCode: StatusCodes.Status409Conflict,
+    detail: $"Copy {copy.Barcode} has been on loan since {loan.LoanedAt:yyyy-MM-dd}.",
+    extensions: new Dictionary<string, object?> { ["copyId"] = copy.Barcode });
+```
+</Stack>
+<Stack id="java" lib="Spring Boot">
+```java
+@ExceptionHandler(CopyOnLoan.class)
+ProblemDetail copyOnLoan(CopyOnLoan e) {
+    var problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    problem.setType(URI.create("https://shelfwise.dev/problems/copy-on-loan"));
+    problem.setTitle("Copy is already on loan");
+    problem.setProperty("copyId", e.barcode());
+    return problem;                          // served as application/problem+json
+}
+```
+</Stack>
+<Stack id="go" lib="net/http">
+```go
+type Problem struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail,omitempty"`
+	CopyID string `json:"copyId,omitempty"`
+}
+
+func writeProblem(w http.ResponseWriter, p Problem) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(p.Status)
+	json.NewEncoder(w).Encode(p)
+}
+```
+</Stack>
+<Stack id="fastapi" lib="FastAPI">
+```python
+@app.exception_handler(DomainError)
+async def problem(request: Request, e: DomainError) -> JSONResponse:
+    return JSONResponse(
+        status_code=e.status,
+        media_type="application/problem+json",
+        content={"type": f"https://shelfwise.dev/problems/{e.code}", "title": e.title,
+                 "status": e.status, "detail": str(e), "instance": request.url.path, **e.extensions},
+    )
+```
+</Stack>
+</FiveStacks>
+
+ASP.NET Core and Spring support Problem Details natively; in Nest, Go and FastAPI it is one small filter or helper, written once per service.
+
+<Pitfall title="Leaking internals in errors">
+Stack traces, SQL fragments and exception class names in a 500 response help attackers more than users. Log the details with the request id; return a generic `detail` and the id so support can find the log line.
+</Pitfall>
+
+## Pagination
+
+Never return an unbounded list. There are two ways to page:
+
+<Figure n="12.1" caption="Offset pages count rows; cursor pages remember where they stopped">
+  <svg viewBox="0 0 720 170" role="img" aria-label="Offset versus cursor pagination" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <g fill="var(--bp-ink)" font-weight="600">
+      <text x="8" y="20">Offset: ?page=3&amp;size=4</text>
+      <text x="8" y="104">Cursor: ?after=eyJpZCI6MTJ9&amp;limit=4</text>
+    </g>
+    <g fill="var(--bp-paper-2)" stroke="var(--bp-rule)">
+      <rect x="8" y="32" width="40" height="30" /><rect x="52" y="32" width="40" height="30" /><rect x="96" y="32" width="40" height="30" /><rect x="140" y="32" width="40" height="30" />
+      <rect x="184" y="32" width="40" height="30" /><rect x="228" y="32" width="40" height="30" /><rect x="272" y="32" width="40" height="30" /><rect x="316" y="32" width="40" height="30" />
+    </g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.5">
+      <rect x="360" y="32" width="40" height="30" /><rect x="404" y="32" width="40" height="30" /><rect x="448" y="32" width="40" height="30" /><rect x="492" y="32" width="40" height="30" />
+      <rect x="8" y="116" width="40" height="30" /><rect x="52" y="116" width="40" height="30" /><rect x="96" y="116" width="40" height="30" /><rect x="140" y="116" width="40" height="30" />
+    </g>
+    <g fill="var(--bp-muted)" font-size="11">
+      <text x="548" y="44">8 rows read and</text>
+      <text x="548" y="58">thrown away first</text>
+      <text x="196" y="128">WHERE id &gt; 12 ORDER BY id LIMIT 4</text>
+      <text x="196" y="144">the index jumps straight to row 13</text>
+    </g>
+  </svg>
+</Figure>
+
+**Offset** pagination is simple and lets users jump to page 37, which admin screens like. **Cursor** (keyset) pagination encodes the sort key of the last item in an opaque token; the next query starts right after it, using the index, at the same speed on page 1 and page 10,000, and inserts do not shift items between pages. Public APIs and infinite scroll should use cursors. Shelfwise uses this shape:
+
+```json
+{
+  "items": [ { "id": 13, "title": "Dune" }, "…" ],
+  "nextCursor": "eyJ0aXRsZSI6IkR1bmUiLCJpZCI6MTN9",
+  "limit": 20
+}
+```
+
+The cursor is base64-encoded JSON of the sort key and the id (the id breaks ties). Clients must treat it as opaque, so you can change its contents later.
+
+## Filtering, sorting and partial responses
+
+Use query parameters for all three: `GET /books?author=Herbert&sort=-year&fields=id,title`. Whitelist the fields that may be filtered and sorted, because each one needs an index (Chapter 14) and an unindexed sort on a large table is an outage waiting to happen.
+
+## Versioning and change
+
+Most changes should not need a new version. **Additive** changes (new optional fields, new endpoints, new optional parameters) are safe if clients ignore unknown fields, which you should require in your API guidelines. **Breaking** changes (renames, removed fields, new required inputs, type changes) need a new version, and the common, boring choice is a URL prefix: `/v1/books`, `/v2/books`. Header-based versioning is cleaner in theory and harder to debug in practice.
+
+## The contract: OpenAPI
+
+Write the API down as an **OpenAPI** document. There are two workflows:
+
+- **Code-first**: annotations or types generate the document (NestJS Swagger, ASP.NET Core OpenAPI, springdoc, FastAPI built in, Huma or swag in Go). Fast, and the document never drifts from the code.
+- **Contract-first**: write the YAML, review it like code, then generate server stubs and clients. Slower to start, better when several teams or stacks implement the same contract.
+
+Shelfwise is a contract-first API: one `openapi.yaml`, eight implementations, and a CI job that checks each one against it.
+
+## The Shelfwise API
+
+| Method and path | Purpose | Success | Notable errors |
+| --- | --- | --- | --- |
+| `GET /books?q=&after=&limit=` | Search the catalog | 200, paged | 400 bad cursor |
+| `POST /books` | Add a book | 201 + Location | 409 duplicate ISBN, 422 invalid |
+| `GET /books/{id}` | One book, with ETag | 200 / 304 | 404 |
+| `PATCH /books/{id}` | Edit a book, with If-Match | 200 | 404, 412, 422 |
+| `POST /books/{id}/copies` | Add a physical copy | 201 | 404, 409 duplicate barcode |
+| `POST /loans` | Lend a copy to a member | 201 | 404, 409 copy on loan, 422 |
+| `POST /loans/{id}/return` | Return a copy | 200 | 404, 409 already returned |
+| `GET /members/{id}/loans` | A member’s loans | 200, paged | 404 |
+| `GET /health` | Liveness | 200 | — |
+
+<InTheWild>
+Large companies publish API guidelines (Microsoft, Google and Zalando have public ones) that fix exactly these decisions: naming, errors, pagination, versioning. Reading one is the fastest way to learn what "consistent" means at scale, and writing one is a classic senior contribution.
+</InTheWild>
+
+<InterviewLens>
+"Design the API for a library system." A strong answer starts from resources and their relationships, picks methods and status codes deliberately, defines one error format, pages every list with cursors, explains how it would evolve without breaking clients, and mentions concurrency (If-Match) and idempotency for the operations that need them.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch12" questions={quiz} />
+
+<Flashcards cards={cards} />
