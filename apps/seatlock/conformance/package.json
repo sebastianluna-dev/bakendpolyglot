@@ -1,0 +1,13 @@
+{
+  "name": "seatlock-conformance",
+  "private": true,
+  "type": "module",
+  "description": "HTTP-only tests that every SeatLock implementation must pass. See README for the environment.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

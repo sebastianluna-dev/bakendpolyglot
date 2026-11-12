@@ -1,0 +1,287 @@
+openapi: 3.1.0
+info:
+  title: SeatLock
+  version: 1.0.0
+  description: |
+    Event ticketing API from Backend Polyglot, Chapter 27. Every stack in `stacks/` implements this
+    contract and passes the same conformance suite.
+
+    - Authentication: bearer access tokens from the `seatlock` Keycloak realm (Chapters 19–20).
+      Tokens must be RS256, issued by `OIDC_ISSUER`, with `aud` containing `seatlock-api`.
+      Roles come from `realm_access.roles`; the user id is `sub`.
+    - Authorization (Chapter 21): `box-office` creates events and runs the reaper; `customer` holds
+      and buys. Holds and orders belong to the user who created them; anyone else gets 404.
+    - Errors are `application/problem+json` (RFC 9457) with `type` = `https://seatlock.dev/problems/{code}`.
+servers:
+  - url: http://localhost:3000
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+          description: Present on `validation` problems.
+        seatIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: Present on `seats-unavailable`; the requested seats that could not be held.
+    Section:
+      type: object
+      additionalProperties: false
+      required: [name, rows, seatsPerRow, priceCents]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        rows: { type: integer, minimum: 1, maximum: 26, description: Rows are labelled A, B, C … }
+        seatsPerRow: { type: integer, minimum: 1, maximum: 50 }
+        priceCents: { type: integer, minimum: 0, maximum: 1000000 }
+    NewEvent:
+      type: object
+      additionalProperties: false
+      required: [name, venue, startsAt, sections]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        venue: { type: string, minLength: 1, maxLength: 200 }
+        startsAt: { type: string, format: date-time }
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { $ref: '#/components/schemas/Section' }
+          description: Section names must be unique; at most 5,000 seats in total.
+    Event:
+      type: object
+      required: [id, name, venue, startsAt, seatCount]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        venue: { type: string }
+        startsAt: { type: string, format: date-time }
+        seatCount: { type: integer }
+    Seat:
+      type: object
+      required: [id, section, row, number, priceCents, status]
+      properties:
+        id: { type: string, format: uuid }
+        section: { type: string }
+        row: { type: string }
+        number: { type: integer }
+        priceCents: { type: integer }
+        status: { type: string, enum: [available, held, sold] }
+    SeatMap:
+      type: object
+      required: [eventId, items]
+      properties:
+        eventId: { type: string, format: uuid }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Seat' }
+          description: Ordered by section, row, number.
+    NewHold:
+      type: object
+      additionalProperties: false
+      required: [eventId, seatIds]
+      properties:
+        eventId: { type: string, format: uuid }
+        seatIds:
+          type: array
+          minItems: 1
+          maxItems: 6
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    Hold:
+      type: object
+      required: [id, eventId, seatIds, status, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        seatIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: Sorted ascending.
+        status:
+          type: string
+          enum: [active, checked_out, released, expired]
+          description: An active hold past its expiry reads as `expired` even before the reaper runs.
+        expiresAt: { type: string, format: date-time }
+    Order:
+      type: object
+      required: [id, holdId, eventId, seatIds, status, totalCents, currency, paymentIntentId]
+      properties:
+        id: { type: string, format: uuid }
+        holdId: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        seatIds: { type: array, items: { type: string, format: uuid } }
+        status: { type: string, enum: [pending, paid, failed] }
+        totalCents: { type: integer }
+        currency: { type: string }
+        paymentIntentId: { type: [string, 'null'] }
+    PaymentEvent:
+      type: object
+      required: [id, type, data]
+      properties:
+        id: { type: string, description: The provider's event id; used for deduplication. }
+        type: { type: string, enum: [payment_intent.succeeded, payment_intent.failed] }
+        data:
+          type: object
+          required: [paymentIntentId]
+          properties:
+            paymentIntentId: { type: string }
+            orderId: { type: string }
+  responses:
+    Problem:
+      description: Problem Details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+paths:
+  /health:
+    get:
+      responses:
+        '200': { description: OK }
+
+  /events:
+    post:
+      summary: Create an event and its seats (box-office)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NewEvent' } } }
+      responses:
+        '201':
+          description: Created; `Location` is the event URL.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /events/{id}:
+    get:
+      summary: Event details (public, cacheable)
+      description: '`Cache-Control: public, max-age=60`. Served from Redis when `REDIS_URL` is set.'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Event' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /events/{id}/seats:
+    get:
+      summary: Seat map with fresh availability (public)
+      description: |
+        The map (sections, rows, prices) may come from the cache; `status` is always read from the
+        database. `Cache-Control: no-store`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SeatMap' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /holds:
+    post:
+      summary: Hold up to six seats for HOLD_TTL_SECONDS (customer), all or nothing
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NewHold' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Hold' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: '`seats-unavailable`, with `seatIds`', $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /holds/{id}:
+    get:
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Hold' } } } }
+        '404': { description: Not found or not yours, $ref: '#/components/responses/Problem' }
+    delete:
+      summary: Release an active hold
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Released }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: '`hold-not-active`', $ref: '#/components/responses/Problem' }
+
+  /holds/{id}/checkout:
+    post:
+      summary: Turn a hold into a pending order and a payment intent
+      description: |
+        Requires `Idempotency-Key` (1–200 characters). A retry with the same key returns the stored
+        status and body with `Idempotent-Replayed: true`. The key is scoped to the user; reusing it for
+        another hold is `422 idempotency-key-reuse`; while the first attempt runs it is
+        `409 idempotency-in-progress`. Provider failures (`502`) are not stored, so a retry runs again
+        and resumes the same order.
+      security: [{ bearer: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '400': { description: '`idempotency-key-required`', $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: '`hold-not-active` or `idempotency-in-progress`', $ref: '#/components/responses/Problem' }
+        '410': { description: '`hold-expired`', $ref: '#/components/responses/Problem' }
+        '422': { description: '`idempotency-key-reuse`', $ref: '#/components/responses/Problem' }
+        '502': { description: '`payment-provider-unavailable`', $ref: '#/components/responses/Problem' }
+
+  /orders/{id}:
+    get:
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /webhooks/payments:
+    post:
+      summary: Payment provider events
+      description: |
+        `X-Signature` is the hex HMAC-SHA256 of the raw body with `PAYMENT_WEBHOOK_SECRET`, compared in
+        constant time. Events are deduplicated by `id`. `succeeded` on a pending order marks it paid and
+        its seats sold; `failed` marks it failed and releases the seats. Anything else is acknowledged
+        and ignored, so late or out-of-order events never undo a final state.
+      parameters:
+        - { name: X-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PaymentEvent' } } }
+      responses:
+        '204': { description: Accepted (including duplicates and unknown orders) }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { description: '`invalid-signature`', $ref: '#/components/responses/Problem' }
+
+  /admin/holds/release-expired:
+    post:
+      summary: Run the hold reaper now (box-office; the hold-reaper client has it)
+      description: Also runs in-process every REAPER_INTERVAL_SECONDS. Idempotent.
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, required: [released], properties: { released: { type: integer, description: Holds released } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
