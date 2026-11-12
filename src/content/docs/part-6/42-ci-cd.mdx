@@ -35,7 +35,7 @@ export const cards = [
   { front: 'Deployment frequency and lead time', back: 'Two of the DORA metrics: how often you ship, and how long a change takes from commit to production.' },
 ];
 
-A team’s speed is mostly decided by its pipeline. If merging is scary, deploys are weekly and rollbacks take an hour, every other improvement is capped. This chapter lays out the pipeline every companion repository uses, the matrix that tests eight implementations at once, and the release strategies that make deploying boring.
+A team’s speed is mostly decided by its pipeline. If merging is scary, deploys are weekly and rollbacks take an hour, every other improvement is capped. This chapter lays out the pipeline every companion app uses, the matrix that tests eight implementations at once, and the release strategies that make deploying boring.
 
 <Recall
   items={[
@@ -85,13 +85,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Unit and integration tests
-        run: make -C stacks/${{ matrix.stack }} test          # each stack's Makefile knows its toolchain
+        run: make -C apps/shelfwise/stacks/${{ matrix.stack }} test   # each stack's Makefile knows its toolchain
       - name: Build image
-        run: docker build -t shelfwise-${{ matrix.stack }} stacks/${{ matrix.stack }}
+        run: docker build -t shelfwise-${{ matrix.stack }} apps/shelfwise/stacks/${{ matrix.stack }}
       - name: Conformance suite
         run: |
+          cd apps/shelfwise
           docker compose --profile ${{ matrix.stack }} up -d --wait
-          npm --prefix conformance ci && BASE_URL=http://localhost:3000 npm --prefix conformance test
+          npm --prefix conformance ci && SHELFWISE_URL=http://localhost:3000 npm --prefix conformance test
 ```
 
 Each stack’s `Makefile` hides its toolchain behind the same targets (`test`, `build`, `lint`), a small convention that lets one pipeline drive five ecosystems. Cache dependencies per stack (`actions/setup-*` caches, Gradle and NuGet caches, Go module cache, uv cache) or the matrix becomes slow.

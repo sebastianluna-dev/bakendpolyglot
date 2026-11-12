@@ -224,6 +224,7 @@ Shelfwise is a contract-first API: one `openapi.yaml`, eight implementations, an
 | `POST /books/{id}/copies` | Add a physical copy | 201 | 404, 409 duplicate barcode |
 | `POST /loans` | Lend a copy to a member | 201 | 404, 409 copy on loan, 422 |
 | `POST /loans/{id}/return` | Return a copy | 200 | 404, 409 already returned |
+| `POST /members` | Register a member | 201 + Location | 409 duplicate email, 422 |
 | `GET /members/{id}/loans` | A member’s loans | 200, paged | 404 |
 | `GET /health` | Liveness | 200 | — |
 

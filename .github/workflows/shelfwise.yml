@@ -1,0 +1,44 @@
+name: shelfwise
+
+on:
+  push:
+    branches: [main]
+    paths: ["apps/shelfwise/**", ".github/workflows/shelfwise.yml"]
+  pull_request:
+    paths: ["apps/shelfwise/**", ".github/workflows/shelfwise.yml"]
+
+defaults:
+  run:
+    working-directory: apps/shelfwise
+
+jobs:
+  stack:
+    name: ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [express, fastapi]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+        if: matrix.stack == 'fastapi'
+
+      - name: Lint and unit tests
+        run: make -C stacks/${{ matrix.stack }} lint test
+
+      - name: Start Postgres and the stack
+        run: docker compose --profile ${{ matrix.stack }} up --build -d --wait
+
+      - name: Conformance suite
+        run: |
+          npm --prefix conformance ci
+          SHELFWISE_URL=http://localhost:3000 npm --prefix conformance test
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile ${{ matrix.stack }} logs

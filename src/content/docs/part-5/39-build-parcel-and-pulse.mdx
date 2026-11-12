@@ -28,7 +28,7 @@ export const cards = [
   { front: 'Inbox table', back: 'Processed event ids stored with the consumer’s effect; duplicates are detected by primary key.' },
 ];
 
-This is where Part IV’s architecture and Part V’s distributed-systems tools meet. **Parcel** is an order pipeline split into five services, each in a different language, talking through GraphQL, REST, gRPC and Kafka. **Pulse** is a real-time chat and notification service that Parcel uses to tell customers about their orders. The code lives in the `parcel` and `pulse` repositories; this chapter is the map.
+This is where Part IV’s architecture and Part V’s distributed-systems tools meet. **Parcel** is an order pipeline split into five services, each in a different language, talking through GraphQL, REST, gRPC and Kafka. **Pulse** is a real-time chat and notification service that Parcel uses to tell customers about their orders. The code lives in `apps/parcel` and `apps/pulse`; this chapter is the map.
 
 <Recall
   items={[

@@ -35,7 +35,7 @@ export const cards = [
   { front: 'Invariant check', back: 'A SQL query that must return zero rows if the system is correct, run after load tests and in monitoring.' },
 ];
 
-Part III comes together in **SeatLock**, an event ticketing API. It is small, but it has every hard property a real ticketing system has: authenticated users from an identity provider, ownership rules, a scarce resource fought over by concurrent buyers, payments confirmed by webhook, retries everywhere, and a cache in front of read-heavy pages. It is built in five stacks: NestJS, ASP.NET Core (with controllers, as promised in Chapter 4), Spring Boot in Java, Go and Django. The code lives in the `seatlock` repository.
+Part III comes together in **SeatLock**, an event ticketing API. It is small, but it has every hard property a real ticketing system has: authenticated users from an identity provider, ownership rules, a scarce resource fought over by concurrent buyers, payments confirmed by webhook, retries everywhere, and a cache in front of read-heavy pages. It is built in five stacks: NestJS, ASP.NET Core (with controllers, as promised in Chapter 4), Spring Boot in Java, Go and Django. The code lives in `apps/seatlock`.
 
 <Recall
   items={[
@@ -169,11 +169,11 @@ It is tempting to create the payment intent inside the checkout transaction. Do 
 
 ## Repository and local setup
 
-The `seatlock` repository mirrors Shelfwise: `contract/openapi.yaml`, shared SQL migrations, a conformance suite, and `stacks/{nest,aspnet,spring-java,go,django}`. Compose adds Keycloak with the `seatlock` realm (Chapter 20), Redis, and a tiny fake payment provider that sends signed webhooks, sometimes twice and sometimes out of order, on purpose.
+`apps/seatlock` mirrors Shelfwise: `contract/openapi.yaml`, shared SQL migrations, a conformance suite, and `stacks/{nest,aspnet,spring-java,go,django}`. Compose adds Keycloak with the `seatlock` realm (Chapter 20), Redis, and a tiny fake payment provider that sends signed webhooks, sometimes twice and sometimes out of order, on purpose.
 
 ## Gate: Phase 3
 
-The gate from the roadmap: **1,000 concurrent checkouts, zero seats oversold.** The repository includes a k6 script that has a thousand virtual users hold and buy random seats for a sold-out event, with retries and duplicate webhooks enabled.
+The gate from the roadmap: **1,000 concurrent checkouts, zero seats oversold.** The folder includes a k6 script that has a thousand virtual users hold and buy random seats for a sold-out event, with retries and duplicate webhooks enabled.
 
 - [ ] Run the load test against at least two stacks.
 - [ ] Run the invariant checks; each must return zero rows:

@@ -1,0 +1,41 @@
+# Postgres with the shared schema, plus one stack per profile:
+#   docker compose --profile express up --build
+#   SHELFWISE_URL=http://localhost:3000 npm --prefix conformance test
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app          # local development only (Chapter 16)
+      POSTGRES_DB: shelfwise
+    ports: ["5432:5432"]
+    volumes:
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro   # applied in order on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d shelfwise"]
+      interval: 2s
+      retries: 20
+
+  express:
+    profiles: [express]
+    build: ./stacks/express
+    environment: &app-env
+      DATABASE_URL: postgres://app:app@postgres:5432/shelfwise
+      PORT: "3000"
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck: &app-health
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 2s
+      retries: 30
+
+  fastapi:
+    profiles: [fastapi]
+    build: ./stacks/fastapi
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3000/health').status == 200 else 1)\""]
+      interval: 2s
+      retries: 30

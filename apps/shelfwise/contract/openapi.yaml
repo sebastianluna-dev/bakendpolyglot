@@ -1,0 +1,314 @@
+openapi: 3.1.0
+info:
+  title: Shelfwise
+  version: 1.0.0
+  description: |
+    Library catalog and loans API (Backend Polyglot, Chapter 18).
+    Every implementation in stacks/ must honour this contract; conformance/ checks it over HTTP.
+    Errors are Problem Details (RFC 9457) served as application/problem+json.
+servers:
+  - url: http://localhost:3000
+
+paths:
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { const: ok } }, required: [status] }
+
+  /books:
+    get:
+      summary: Search the catalog, sorted by title then id, with cursor pagination
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Case-insensitive match on title or author }
+        - { name: after, in: query, schema: { type: string }, description: Opaque cursor from nextCursor }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: A page of books
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    post:
+      summary: Add a book
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateBookRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { schema: { type: string }, description: /books/{id} }
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /books/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: One book, with a version-based ETag
+      parameters:
+        - { name: If-None-Match, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: The book
+          headers: { ETag: { schema: { type: string }, description: '"book-{id}-v{version}"' } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+        "304": { description: Not modified }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    patch:
+      summary: Edit a book; If-Match makes the edit conditional on the version
+      parameters:
+        - { name: If-Match, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateBookRequest" }
+      responses:
+        "200":
+          description: The updated book (version incremented)
+          headers: { ETag: { schema: { type: string } } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Book" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /books/{id}/copies:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Add a physical copy of a book
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [barcode]
+              properties: { barcode: { type: string, minLength: 1, maxLength: 40 } }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Copy" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /members:
+    post:
+      summary: Register a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, name]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                name: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        "201":
+          description: Created
+          headers: { Location: { schema: { type: string } } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Member" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /members/{id}/loans:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: A member's loans, newest first
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, all], default: all } }
+        - { name: after, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: A page of loans
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoanPage" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /loans:
+    post:
+      summary: Lend a copy to a member
+      description: |
+        409 copy-on-loan if the copy already has an open loan (enforced by a partial unique index),
+        409 loan-limit if the member already has MAX_LOANS_PER_MEMBER open loans.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [copyId, memberId]
+              properties:
+                copyId: { type: integer, minimum: 1 }
+                memberId: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Created
+          headers: { Location: { schema: { type: string } } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Loan" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /loans/{id}/return:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Return a copy
+      responses:
+        "200":
+          description: The closed loan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Loan" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      description: A positive integer; anything else is 400 invalid-id
+      schema: { type: integer, minimum: 1 }
+
+  responses:
+    Problem:
+      description: |
+        Problem Details. type is https://shelfwise.dev/problems/<code> where code is one of:
+        invalid-body (400), invalid-id (400), bad-cursor (400), validation (422, with errors),
+        not-found (404), duplicate-isbn, duplicate-barcode, duplicate-email, copy-on-loan,
+        loan-limit, already-returned (409), version-mismatch (412).
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: object
+          description: For validation problems, field name to list of messages
+          additionalProperties: { type: array, items: { type: string } }
+
+    Book:
+      type: object
+      required: [id, isbn, title, author, year, version]
+      properties:
+        id: { type: integer }
+        isbn: { type: string, pattern: "^97[89][0-9]{10}$" }
+        title: { type: string }
+        author: { type: string }
+        year: { type: [integer, "null"] }
+        version: { type: integer }
+
+    CreateBookRequest:
+      type: object
+      additionalProperties: false
+      required: [title, author, isbn]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        author: { type: string, minLength: 1, maxLength: 200 }
+        isbn: { type: string, pattern: "^97[89][0-9]{10}$" }
+        year: { type: [integer, "null"], minimum: 1450, description: Not later than the current year }
+
+    UpdateBookRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        author: { type: string, minLength: 1, maxLength: 200 }
+        year: { type: [integer, "null"], minimum: 1450 }
+
+    BookPage:
+      type: object
+      required: [items, nextCursor, limit]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Book" } }
+        nextCursor: { type: [string, "null"] }
+        limit: { type: integer }
+
+    Copy:
+      type: object
+      required: [id, bookId, barcode, status]
+      properties:
+        id: { type: integer }
+        bookId: { type: integer }
+        barcode: { type: string }
+        status: { type: string, enum: [available, lost, retired] }
+
+    Member:
+      type: object
+      required: [id, email, name]
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        name: { type: string }
+
+    Loan:
+      type: object
+      required: [id, copyId, memberId, bookId, title, barcode, loanedAt, dueAt, returnedAt]
+      properties:
+        id: { type: integer }
+        copyId: { type: integer }
+        memberId: { type: integer }
+        bookId: { type: integer }
+        title: { type: string }
+        barcode: { type: string }
+        loanedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
+        returnedAt: { type: [string, "null"], format: date-time }
+
+    LoanPage:
+      type: object
+      required: [items, nextCursor, limit]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Loan" } }
+        nextCursor: { type: [string, "null"] }
+        limit: { type: integer }

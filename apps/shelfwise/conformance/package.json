@@ -1,0 +1,13 @@
+{
+  "name": "shelfwise-conformance",
+  "private": true,
+  "type": "module",
+  "description": "HTTP-only tests that every Shelfwise implementation must pass. Set SHELFWISE_URL.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

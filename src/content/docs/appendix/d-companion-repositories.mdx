@@ -1,30 +1,29 @@
 ---
-title: Companion Repositories
+title: Companion Apps
 appendix: D
 kicker: Where the full, runnable code lives.
 sidebar:
   order: 4
 ---
 
-The chapters show minimal snippets; each companion app has its own repository with every stack, a shared contract, migrations, a conformance or contract test suite, Docker Compose and CI. All repositories follow the same layout: `contract/`, `db/`, `stacks/<stack>/`, `compose.yaml` and `.github/workflows/`.
+The chapters show minimal snippets; the full code of every companion app lives next to the book, in the `apps/` folder of the [bakendpolyglot repository](https://github.com/sebastianluna-dev/bakendpolyglot). One repository keeps the book and the code in step: a change to a contract updates every stack and the chapter that describes it in the same commit, and each app has its own CI workflow that only runs when its folder changes.
 
-| Repository | Built in | Stacks | Status |
+| Folder | Built in | Stacks | Status |
 | --- | --- | --- | --- |
-| `bakendpolyglot` | The book itself: web and print editions | Astro Starlight, Paged.js | Available |
-| `shelfwise` | Chapter 18 | Express, NestJS, ASP.NET Core, Spring (Java), Spring (Kotlin), Go, Django, FastAPI | Planned |
-| `seatlock` | Chapter 27 | NestJS, ASP.NET Core, Spring (Java), Go, Django | Planned |
-| `parcel` | Chapter 39 | NestJS gateway, FastAPI, Spring (Kotlin), Go, ASP.NET Core | Planned |
-| `pulse` | Chapter 39 | NestJS, ASP.NET Core (SignalR), Spring, Go, FastAPI | Planned |
+| `apps/shelfwise` | Chapter 18 | Express, FastAPI · next: Go, NestJS, ASP.NET Core, Spring (Java), Spring (Kotlin), Django | In progress |
+| `apps/seatlock` | Chapter 27 | NestJS, ASP.NET Core, Spring (Java), Go, Django | Planned |
+| `apps/parcel` | Chapter 39 | NestJS gateway, FastAPI, Spring (Kotlin), Go, ASP.NET Core | Planned |
+| `apps/pulse` | Chapter 39 | NestJS, ASP.NET Core (SignalR), Spring, Go, FastAPI | Planned |
 
-Repositories marked *Planned* are described in full by their chapters; this table is updated as each one is published, and the web edition always has the current links.
+Each app follows the same layout: `contract/` (OpenAPI, Protobuf or event schemas), `db/migrations/` (one shared schema), `conformance/` (an HTTP-only test suite every stack must pass), `stacks/<stack>/` (one folder per implementation with its own README, tests and Dockerfile) and `compose.yaml`.
 
-## Running any of them
+## Running an app
 
 ```bash
-git clone <repository>
-cd <repository>
-docker compose --profile <stack> up --build     # e.g. go, nest, aspnet, spring-java
-make -C stacks/<stack> test                      # the stack's own unit and integration tests
+git clone https://github.com/sebastianluna-dev/bakendpolyglot.git
+cd bakendpolyglot/apps/shelfwise
+docker compose --profile express up --build            # Postgres + migrations + the Express stack
+SHELFWISE_URL=http://localhost:3000 npm --prefix conformance test
 ```
 
 Each stack folder has a README that starts at the entry point and follows one request through the layers, plus a short "From TypeScript" section with the surprises specific to that stack.

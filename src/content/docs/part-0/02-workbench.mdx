@@ -10,7 +10,7 @@ import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Q
 
 export const quiz = [
   {
-    q: 'Why does every companion repository pin its toolchain versions in files (global.json, .nvmrc, go.mod, .python-version)?',
+    q: 'Why does every companion app pin its toolchain versions in files (global.json, .nvmrc, go.mod, .python-version)?',
     options: ['To make the repo smaller', 'So every machine, CI runner and container builds with the same versions', 'Because the SDKs refuse to run otherwise', 'To enable syntax highlighting'],
     answer: 1,
     why: 'Pinned versions remove "works on my machine": the SDK manager reads the file and switches versions, and CI reads the same file.',
@@ -46,14 +46,14 @@ Five languages means five compilers, five package managers and five sets of habi
 
 <Recall
   items={[
-    { ref: 'Ch. 1', text: 'Every app in this book is built in each stack, and the full code lives in the companion repositories.' },
+    { ref: 'Ch. 1', text: 'Every app in this book is built in each stack, and the full code lives in the apps/ folder of the book’s repository.' },
     { ref: 'You', text: 'You already use VS Code, npm and Git every day.' },
   ]}
 />
 
 ## Two ways to set up
 
-You can install every toolchain on your machine, or open each repository inside a **Dev Container** that already has them. Both work; the companion repositories support both.
+You can install every toolchain on your machine, or open the repository inside a **Dev Container** that already has them. Both work; the companion apps support both.
 
 <Figure n="2.1" caption="Local SDKs are faster day to day; a Dev Container is identical everywhere">
   <svg viewBox="0 0 720 210" role="img" aria-label="Local SDK setup compared with a Dev Container setup" font-family="IBM Plex Sans, sans-serif" font-size="12">
@@ -84,7 +84,7 @@ Use local SDKs if you want the fastest feedback loop on one machine. Use the Dev
 
 ## VS Code, per language
 
-VS Code covers four of the five stacks very well. Install these extensions; each repository also lists them in `.vscode/extensions.json`, so VS Code offers to install them when you open the folder.
+VS Code covers four of the five stacks very well. Install these extensions; the repository also lists them in `.vscode/extensions.json`, so VS Code offers to install them when you open the folder.
 
 | Stack | Extensions | Notes |
 | --- | --- | --- |
@@ -162,7 +162,7 @@ Go and Python are the light ones: `go mod init` creates only the module file and
 
 ## The Dev Container
 
-Every companion repository ships this file. Open the folder in VS Code, accept "Reopen in Container", and every toolchain in this book is ready.
+The book’s repository ships this file. Open the folder in VS Code, accept "Reopen in Container", and every toolchain in this book is ready.
 
 ```json title=".devcontainer/devcontainer.json"
 {

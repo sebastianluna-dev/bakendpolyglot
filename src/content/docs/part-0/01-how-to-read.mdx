@@ -17,9 +17,9 @@ export const quiz = [
   },
   {
     q: 'In this book, where do you find the complete, runnable code for an app?',
-    options: ['Only in the printed chapters', 'In the companion GitHub repositories', 'In Appendix C', 'Nowhere; snippets only'],
+    options: ['Only in the printed chapters', 'In the apps/ folder of the book’s repository', 'In Appendix C', 'Nowhere; snippets only'],
     answer: 1,
-    why: 'Chapters show minimal snippets. Each companion app has its own repository with every stack, listed in Appendix D.',
+    why: 'Chapters show minimal snippets. Every companion app lives in the apps/ folder of the book’s repository, with every stack; Appendix D lists them.',
   },
   {
     q: 'What does a Recall box do?',
@@ -76,7 +76,7 @@ Every chapter follows the same rhythm, so you always know where you are. It open
 
 This is the heart of the book. Below is the smallest useful backend in each stack: one endpoint that answers `GET /health` with JSON. On the web, pick a tab and every other block in the book switches to the same language. In print, all five appear one under another.
 
-<FiveStacks note="Full code: github · shelfwise">
+<FiveStacks note="Full code: apps/shelfwise">
 <Stack id="express" lib="Express">
 ```ts
 import express from 'express';

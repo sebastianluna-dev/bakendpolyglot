@@ -1,0 +1,35 @@
+[project]
+name = "shelfwise-fastapi"
+version = "1.0.0"
+description = "Shelfwise on FastAPI, asyncpg and Pydantic (Backend Polyglot, Chapter 18)"
+requires-python = ">=3.12"
+dependencies = [
+    "asyncpg>=0.32.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.162.5",
+    "pydantic-settings>=2.16.2",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shelfwise"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110

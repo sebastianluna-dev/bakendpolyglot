@@ -22,7 +22,7 @@ export const quiz = [
     why: '23505 is unique_violation. 23503 is a foreign key violation, 40001 a serialisation failure, 42P01 an undefined table.',
   },
   {
-    q: 'Why does the Shelfwise repository run one language-neutral test suite against all eight implementations?',
+    q: 'Why does Shelfwise run one language-neutral test suite against all eight implementations?',
     options: ['To save CI minutes', 'So every stack provably honours the same OpenAPI contract, status codes and error bodies', 'Because unit tests are not allowed', 'To benchmark the stacks'],
     answer: 1,
     why: 'The conformance suite only speaks HTTP. If an implementation drifts from the contract, its CI job fails, whatever its own tests say.',
@@ -35,7 +35,7 @@ export const cards = [
   { front: 'Handler · service · repository', back: 'HTTP concerns, business rules, data access: the three layers every Shelfwise stack uses.' },
 ];
 
-Everything in Part II now becomes one working service, built eight times. Shelfwise is a library catalog and loans API: small enough to read in an afternoon per stack, complete enough to exercise HTTP semantics, validation, Problem Details, cursor pagination, ETags, a normalised schema, migrations, typed configuration and a real test suite. This chapter is the guided tour; the code lives in the companion repository, `shelfwise`, listed in Appendix D.
+Everything in Part II now becomes one working service, built eight times. Shelfwise is a library catalog and loans API: small enough to read in an afternoon per stack, complete enough to exercise HTTP semantics, validation, Problem Details, cursor pagination, ETags, a normalised schema, migrations, typed configuration and a real test suite. This chapter is the guided tour; the code lives in `apps/shelfwise` in the book’s repository, listed in Appendix D.
 
 <Recall
   items={[
@@ -53,10 +53,10 @@ Everything in Part II now becomes one working service, built eight times. Shelfw
 - Return a copy; list a member’s open and past loans.
 - Every error as Problem Details; every request with an `X-Request-Id`; health at `/health`.
 
-## The repository
+## The layout
 
 ```text
-shelfwise/
+apps/shelfwise/
 ├── contract/openapi.yaml        # the single source of truth for the API
 ├── db/migrations/*.sql          # one schema, shared by every implementation
 ├── conformance/                 # HTTP-only test suite, run against every stack
@@ -75,8 +75,9 @@ Two decisions deserve a note. First, the **schema is shared** and applied by pla
 Run any stack locally with one command:
 
 ```bash
-docker compose --profile go up --build      # or: express, nest, aspnet, spring-java, …
-BASE_URL=http://localhost:3000 npm --prefix conformance test
+cd apps/shelfwise
+docker compose --profile express up --build   # or: fastapi, go, nest, aspnet, spring-java, …
+SHELFWISE_URL=http://localhost:3000 npm --prefix conformance test
 ```
 
 ## Three layers in every stack
@@ -172,7 +173,7 @@ Each stack folder has a README that starts at `main` (or `Program.cs`, `Applicat
 Keep the notes from the Phase 1 gate open, and add to them. By the end you will have your own comparison of the five stacks, written from code you ran.
 
 <InTheWild>
-Building the same service in several stacks is exactly what platform teams do when they evaluate a language or write a "golden path" template. The artefacts they produce look like this repository: a contract, a reference schema, a conformance suite, and short READMEs that explain the choices.
+Building the same service in several stacks is exactly what platform teams do when they evaluate a language or write a "golden path" template. The artefacts they produce look like this folder: a contract, a reference schema, a conformance suite, and short READMEs that explain the choices.
 </InTheWild>
 
 ## Gate: Phase 2
