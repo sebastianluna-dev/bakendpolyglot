@@ -34,6 +34,8 @@ let lastPart = '';
     window.PagedConfig = {
       before: () => {
         document.querySelectorAll('.bp-body').forEach((b) => b.querySelector(':scope > p')?.classList.add('bp-dropcap'));
+        // Each chapter's review (quiz + flashcards) starts on its own page, like a worksheet.
+        document.querySelectorAll('.bp-body h2#review').forEach((h) => (h.parentElement?.classList.contains('sl-heading-wrapper') ? h.parentElement : h).classList.add('bp-review-start'));
         document.querySelectorAll('link[rel="stylesheet"], style').forEach((el) => {
           const href = el.getAttribute('href') || '';
           if (!/\/print\.[^/]*\.css$/.test(href)) el.setAttribute('data-pagedjs-ignore', '');

@@ -172,7 +172,7 @@ Memory stays flat whether the file is 1 MB or 10 GB, because only a few chunks a
 
 Express gives you a router and middleware, and leaves structure to you. NestJS adds the structure enterprise teams want: modules, dependency injection, decorators, and a fixed request pipeline. The same endpoint in both:
 
-<FiveStacks title="Two styles" note="Same endpoint, GET /books/:id">
+<FiveStacks title="Two styles" note="Same endpoint, GET /books/:id" sync={false}>
 <Stack id="express" lib="Express 5">
 ```ts
 const router = express.Router();

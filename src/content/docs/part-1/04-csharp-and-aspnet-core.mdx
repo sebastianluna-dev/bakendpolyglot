@@ -1,0 +1,302 @@
+---
+title: C# and ASP.NET Core
+chapter: 4
+part: Part I · Five Languages
+kicker: Same designer as TypeScript, very different runtime.
+sidebar:
+  order: 4
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'You pass a variable of a struct type to a method, and the method changes one of its fields. What does the caller see?',
+    options: ['The change, because structs are passed by reference', 'No change, because the method received a copy', 'A compile error', 'A NullReferenceException'],
+    answer: 1,
+    why: 'Structs are value types: assignment and argument passing copy the whole value. Classes are reference types, so a method would see and change the same object.',
+  },
+  {
+    q: 'What does enabling nullable reference types change at runtime?',
+    options: ['Null assignments throw immediately', 'Nothing: it adds compile-time analysis and warnings only', 'Reference types become value types', 'The GC skips nullable fields'],
+    answer: 1,
+    why: 'string and string? are the same type at runtime. The compiler tracks null-state and warns, much like strictNullChecks in TypeScript.',
+  },
+  {
+    q: 'In ASP.NET Core, a service registered with AddScoped lives for how long?',
+    options: ['The whole application', 'One HTTP request', 'One method call', 'Until the garbage collector runs'],
+    answer: 1,
+    why: 'The host creates a scope per request. Scoped services, including EF Core’s DbContext, are created once in that scope and disposed when the request ends.',
+  },
+  {
+    q: 'A singleton’s constructor takes a scoped DbContext. What happens in the Development environment?',
+    options: ['It works and shares one DbContext safely', 'The host throws at startup or first resolve: a singleton cannot consume a scoped service', 'Each request gets a new singleton', 'EF Core switches to a thread-safe mode'],
+    answer: 1,
+    why: 'Scope validation is on in Development. It catches the captive dependency: one DbContext held forever and shared by concurrent requests, which it does not support.',
+  },
+  {
+    q: 'Why is calling .Result on a Task inside a request handler a bad idea?',
+    options: ['It returns a stale value', 'It blocks a thread-pool thread while waiting, which starves the server under load', 'It is a syntax error in C# 12', 'It disables the garbage collector'],
+    answer: 1,
+    why: 'ASP.NET Core serves requests from the thread pool. Blocking threads on async work ("sync over async") ties them up, and under load requests queue for threads.',
+  },
+];
+
+export const cards = [
+  { front: 'Value type vs reference type', back: 'struct and record struct copy on assignment; class and record share one object through references.' },
+  { front: 'Scoped lifetime', back: 'One instance per HTTP request. DbContext is scoped: never share it across requests or threads.' },
+  { front: 'Middleware order', back: 'Exception handling first, then HTTPS, routing, CORS, authentication, authorization, then your endpoints. Order is behaviour.' },
+  { front: 'Captive dependency', back: 'A longer-lived service holding a shorter-lived one, such as a singleton capturing a scoped DbContext.' },
+];
+
+C# will feel strangely familiar. Anders Hejlsberg designed it before he designed TypeScript, and you will meet the same ideas: generics, `async`/`await`, lambdas, union-ish pattern matching. The surprises are underneath: a compiled runtime, real threads, types that exist at runtime, and a difference between values and references that TypeScript hides from you.
+
+<Recall
+  items={[
+    { ref: 'Ch. 1', text: 'ASP.NET Core answered GET /health with a Minimal API: MapGet and a lambda.' },
+    { ref: 'Ch. 3', text: 'NestJS providers are singletons by default, with request and transient scopes as options.' },
+    { ref: 'Ch. 3', text: 'Node runs your code on one thread; CPU work blocks every request.' },
+  ]}
+/>
+
+## The runtime: CLR, JIT and a real thread pool
+
+The C# compiler turns your code into **IL** (intermediate language). At run time, the **CLR** compiles IL to machine code with a JIT compiler, starting fast and recompiling hot methods with more optimisation as the app runs. Memory is managed by a generational garbage collector, much like V8’s.
+
+The big difference from Node is concurrency. There is no single event loop. ASP.NET Core serves requests on a **thread pool**, many requests truly in parallel across your CPU cores. `async`/`await` still matters, but for a different reason: awaiting I/O gives the thread back to the pool instead of parking it, so a few dozen threads can serve thousands of concurrent requests.
+
+| | TypeScript on Node | C# on .NET |
+| --- | --- | --- |
+| Types at runtime | Erased; structural | Real; nominal |
+| Generics | Erased | Reified: `List<int>` is a distinct runtime type |
+| Your code runs on | One thread per process | Many thread-pool threads |
+| CPU-heavy handler | Blocks every request | Uses one thread; others keep serving |
+| Package manifest | `package.json` | `.csproj` (NuGet packages) |
+
+<FromTS>
+Typing is **nominal**. Two classes with identical members are not interchangeable unless they share a base class or interface, so the "an object literal that fits the shape is fine" habit does not transfer. Interfaces are declared and implemented explicitly: `class SystemClock : IClock`.
+</FromTS>
+
+## Values and references
+
+Classes are **reference types**: variables hold a reference, and two variables can point at the same object. Structs are **value types**: assignment copies the data. TypeScript has nothing like structs, so this is the first new instinct to build.
+
+**Records** give you immutable data with value equality in one line, which is exactly what DTOs and domain values want:
+
+```csharp
+public record Book(int Id, string Title, string Author, int? Year);
+
+var a = new Book(1, "Dune", "Herbert", 1965);
+var b = a with { Year = 1966 };     // non-destructive copy
+// records compare by value:
+Console.WriteLine(a == new Book(1, "Dune", "Herbert", 1965)); // True
+```
+
+`record` is a class with value equality; `record struct` is the value-type version for small, hot data.
+
+## Null is part of the type
+
+New projects enable **nullable reference types**. `string` means "never null" and `string?` means "might be null", and the compiler warns when you dereference something that might be null. It is the same idea as `strictNullChecks`, and like it, it is compile-time only.
+
+```csharp
+string? subtitle = book.Subtitle;
+int bad = subtitle.Length;          // warning CS8602: dereference of a possibly null reference
+int good = subtitle?.Length ?? 0;
+```
+
+<Pitfall title="Treat nullable warnings as errors">
+Warnings are easy to ignore, and then the safety net has holes. Set `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` (or at least `<WarningsAsErrors>nullable</WarningsAsErrors>`) in the `.csproj` of every new project.
+</Pitfall>
+
+## Pattern matching and LINQ
+
+Switch expressions with property patterns replace long `if` chains and read like a table:
+
+```csharp
+string Era(Book b) => b switch
+{
+    { Year: null }   => "unknown",
+    { Year: < 1950 } => "classic",
+    { Year: >= 2020 } => "recent",
+    _                => "modern",
+};
+```
+
+**LINQ** is the collection API you will use everywhere. It looks like `filter`/`map`/`sort`, with one key difference: it is **lazy**. Nothing runs until you enumerate the result, for example with `ToList()`.
+
+```csharp
+var titles = books
+    .Where(b => b.Year >= 2000)
+    .OrderBy(b => b.Title)
+    .Select(b => b.Title)
+    .ToList();   // the query runs here
+```
+
+Run the same query against EF Core’s `db.Books` and it is translated to SQL instead of running in memory. That is why LINQ matters so much for backend work; Chapter 15 covers what to watch for.
+
+## async, await and Task
+
+`Task<T>` is C#’s `Promise<T>`, and `async`/`await` reads the same. Two habits are new. First, pass a `CancellationToken` through every async call so work stops when the client disconnects. Second, never block on a task.
+
+```csharp
+app.MapGet("/books/{id:int}", async (int id, AppDb db, CancellationToken ct) =>
+{
+    var book = await db.Books.FirstOrDefaultAsync(b => b.Id == id, ct);
+    return book is null ? Results.NotFound() : Results.Ok(book);
+});
+```
+
+<Pitfall title="Sync over async">
+`task.Result` and `task.Wait()` block a thread-pool thread until the task finishes. Do that in a handler and, under load, the pool runs out of free threads and requests queue up. If you are in async code, `await`; if a library only offers async APIs, make your caller async too.
+</Pitfall>
+
+## ASP.NET Core: the host and the pipeline
+
+A whole application is one `Program.cs`. The builder registers services; the built app configures the **middleware pipeline**; then it runs.
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDbContext<AppDb>(o => o.UseNpgsql(builder.Configuration.GetConnectionString("Db")));
+builder.Services.AddScoped<BooksService>();
+builder.Services.AddControllers();
+
+var app = builder.Build();
+app.UseExceptionHandler("/error");
+app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+app.Run();
+```
+
+Each `Use…` line adds a middleware. A request travels through them in order, reaches an endpoint, and the response travels back through them in reverse. **Order is behaviour**: put authorization before authentication and every user is anonymous when the policy runs.
+
+<Figure n="4.1" caption="Middleware wraps the endpoint: the request goes in through each one, the response comes back out in reverse">
+  <svg viewBox="0 0 720 150" role="img" aria-label="ASP.NET Core middleware pipeline" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs>
+      <marker id="mw-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker>
+    </defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="30" width="112" height="48" rx="2" />
+      <rect x="140" y="30" width="112" height="48" rx="2" />
+      <rect x="272" y="30" width="112" height="48" rx="2" />
+      <rect x="404" y="30" width="112" height="48" rx="2" />
+    </g>
+    <rect x="552" y="30" width="160" height="48" rx="2" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M120 46H138" marker-end="url(#mw-arrow)" />
+      <path d="M252 46H270" marker-end="url(#mw-arrow)" />
+      <path d="M384 46H402" marker-end="url(#mw-arrow)" />
+      <path d="M516 46H550" marker-end="url(#mw-arrow)" />
+      <path d="M552 64H518" marker-end="url(#mw-arrow)" />
+      <path d="M404 64H386" marker-end="url(#mw-arrow)" />
+      <path d="M272 64H254" marker-end="url(#mw-arrow)" />
+      <path d="M140 64H122" marker-end="url(#mw-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle" font-weight="600">
+      <text x="64" y="58">Exceptions</text>
+      <text x="196" y="58">HTTPS</text>
+      <text x="328" y="58">Authentication</text>
+      <text x="460" y="58">Authorization</text>
+      <text x="632" y="58">Endpoint</text>
+    </g>
+    <g fill="var(--bp-muted)" font-size="11">
+      <text x="8" y="18">request in →</text>
+      <text x="8" y="100">← response out, through the same middleware in reverse</text>
+      <text x="8" y="128">Each box is one app.Use… line. Move a line and you change what every later box can rely on.</text>
+    </g>
+  </svg>
+</Figure>
+
+Writing your own middleware is one lambda. Code before `next` runs on the way in, code after it on the way out:
+
+```csharp
+app.Use(async (ctx, next) =>
+{
+    var started = Stopwatch.StartNew();
+    await next(ctx);
+    app.Logger.LogInformation("{Path} took {Ms} ms", ctx.Request.Path, started.ElapsedMilliseconds);
+});
+```
+
+## Minimal APIs or controllers
+
+ASP.NET Core has two ways to declare endpoints. Minimal APIs map a route to a lambda; controllers group actions in a class with attributes, much like NestJS.
+
+<FiveStacks title="Two styles" note="Same endpoint, GET /books/:id" sync={false}>
+<Stack id="cs" label="Minimal API" lib="lambda per route">
+```csharp
+var books = app.MapGroup("/books");
+
+books.MapGet("/{id:int}", async Task<Results<Ok<Book>, NotFound>> (int id, BooksService svc, CancellationToken ct) =>
+    await svc.FindAsync(id, ct) is { } book ? TypedResults.Ok(book) : TypedResults.NotFound());
+```
+</Stack>
+<Stack id="cs" label="Controllers" lib="class with attributes">
+```csharp
+[ApiController]
+[Route("books")]
+public class BooksController(BooksService books) : ControllerBase
+{
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<Book>> Find(int id, CancellationToken ct) =>
+        await books.FindAsync(id, ct) is { } book ? book : NotFound();
+}
+```
+</Stack>
+</FiveStacks>
+
+The controller uses a **primary constructor** (`BooksController(BooksService books)`), the C# 12 shorthand for constructor injection. `[ApiController]` also turns invalid model binding into an automatic 400 response, the job a validation pipe does in Nest.
+
+<InTheWild>
+Most existing enterprise code uses controllers, and you will maintain plenty of them. Minimal APIs are the default in new templates and are popular for small services. Learn both; in this book Shelfwise uses Minimal APIs and SeatLock uses controllers, so you see each at scale.
+</InTheWild>
+
+## Dependency injection and lifetimes
+
+DI is built in. You register a service with one of three lifetimes, and the container builds everything at resolve time.
+
+```csharp
+// one instance for the whole app
+builder.Services.AddSingleton<IClock, SystemClock>();
+// one instance per HTTP request
+builder.Services.AddScoped<BooksService>();
+// a new instance every time it is injected
+builder.Services.AddTransient<ISlugger, Slugger>();
+// DbContext is registered as scoped by default
+builder.Services.AddDbContext<AppDb>(o => o.UseNpgsql(connectionString));
+```
+
+These are Nest’s three scopes under different names, with one important difference in defaults: in ASP.NET Core you choose the lifetime explicitly for every registration, and **scoped** is the everyday choice for anything that touches the database.
+
+<Pitfall title="Captive dependencies">
+A service can only depend on services that live at least as long as it does. A singleton that takes `AppDb` in its constructor captures one `DbContext` forever, shared by every concurrent request, and `DbContext` is not thread-safe. In the Development environment the host validates scopes and throws on startup or first use; in Production it would silently corrupt data. If a singleton needs the database, inject `IServiceScopeFactory` and create a scope per operation.
+</Pitfall>
+
+## Testing the whole app
+
+`WebApplicationFactory` starts your real app in memory, with the real pipeline and DI container, and gives you an `HttpClient` that talks to it without a network:
+
+```csharp
+public class HealthTests(WebApplicationFactory<Program> factory)
+    : IClassFixture<WebApplicationFactory<Program>>
+{
+    [Fact]
+    public async Task Health_returns_ok()
+    {
+        var response = await factory.CreateClient().GetAsync("/health");
+        response.EnsureSuccessStatusCode();
+    }
+}
+```
+
+With top-level statements, add `public partial class Program;` at the end of `Program.cs` so the test project can see the type. Chapter 17 adds a real Postgres with Testcontainers.
+
+<InterviewLens>
+"Explain singleton, scoped and transient, and a bug each can cause." A strong answer defines each lifetime against the request scope, names the captive dependency (a singleton holding a scoped DbContext), mentions that transient disposables are tracked until their scope ends, and says how to fix it: inject `IServiceScopeFactory` and create a scope per unit of work.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch04" questions={quiz} />
+
+<Flashcards cards={cards} />

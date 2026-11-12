@@ -2,13 +2,15 @@
 // The same concept in every stack. Web: synced tabs (pick Go once, every block shows Go).
 // Print: every panel shown, stacked, each with its own label.
 import { Tabs } from '@astrojs/starlight/components';
-interface Props { title?: string; note?: string }
-const { title = 'Five Stacks', note } = Astro.props;
+// sync={false} for blocks that compare styles inside one stack (Express vs Nest), so they
+// do not change the reader's chosen language.
+interface Props { title?: string; note?: string; sync?: boolean }
+const { title = 'Five Stacks', note, sync = true } = Astro.props;
 ---
 <section class="bp-stacks">
   <div class="bp-stacks__head">
     <span class="bp-label">{title}</span>
     {note && <span class="bp-stacks__note">{note}</span>}
   </div>
-  <Tabs syncKey="stack"><slot /></Tabs>
+  <Tabs syncKey={sync ? 'stack' : undefined}><slot /></Tabs>
 </section>

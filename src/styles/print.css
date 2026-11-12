@@ -146,3 +146,10 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 .bp-body table { width: 100%; border-collapse: collapse; margin: 1em 0 1.3em; font-size: 9.2pt; line-height: 1.4; break-inside: avoid; }
 .bp-body th { text-align: left; font-family: var(--bp-font-label); font-size: 7.8pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bp-muted); border-bottom: 1.5px solid var(--bp-ink); padding: 5px 8px 5px 0; }
 .bp-body td { border-bottom: 1px solid var(--bp-rule); padding: 5px 8px 5px 0; vertical-align: top; }
+
+/* Keep block labels with what they label */
+.bp-quiz > .bp-label, .bp-stacks__head { display: block; break-after: avoid; }
+.bp-cards { break-inside: avoid; }
+.bp-review-start { break-before: page; }
+.bp-review-start h2 { margin-top: 0; font-size: 22pt; }
+.bp-stacks__head { display: flex; }
