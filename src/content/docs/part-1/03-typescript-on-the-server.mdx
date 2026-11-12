@@ -1,0 +1,296 @@
+---
+title: TypeScript on the Server
+chapter: 3
+part: Part I · Five Languages
+kicker: You know the language. Now meet the runtime.
+sidebar:
+  order: 3
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A handler runs 800 ms of pure CPU work. What happens to other requests during those 800 ms?',
+    options: ['They run in parallel on other threads', 'They wait, because the event loop is busy', 'Node moves them to the libuv thread pool', 'They are rejected with 503'],
+    answer: 1,
+    why: 'Your JavaScript runs on one thread. While a callback runs, the loop cannot pick up any other callback, so every request on that process waits.',
+  },
+  {
+    q: 'In what order do these log: setTimeout(0), setImmediate, Promise.then, process.nextTick, and a plain console.log?',
+    options: ['sync, timeout, immediate, promise, nextTick', 'sync, nextTick, promise, then timeout and immediate in either order', 'nextTick, sync, promise, immediate, timeout', 'sync, promise, nextTick, immediate, timeout'],
+    answer: 1,
+    why: 'Synchronous code runs first, then the nextTick queue, then promise microtasks. From the main module, whether the timer or the immediate fires first depends on timing.',
+  },
+  {
+    q: 'Which work does the libuv thread pool handle by default?',
+    options: ['Incoming TCP connections', 'File system calls, dns.lookup, some crypto and zlib', 'Every await in your code', 'Garbage collection'],
+    answer: 1,
+    why: 'Network sockets use the operating system’s async APIs directly. The pool, four threads by default, takes work the OS cannot do asynchronously, such as most fs calls.',
+  },
+  {
+    q: 'In NestJS, which runs first for an incoming request?',
+    options: ['Pipes', 'Interceptors', 'Guards', 'Exception filters'],
+    answer: 2,
+    why: 'After middleware, guards decide whether the request may proceed at all; interceptors, then pipes, then the handler follow.',
+  },
+  {
+    q: 'What is the default scope of a NestJS provider?',
+    options: ['A new instance per request', 'A new instance per injection', 'One shared instance for the whole application', 'One instance per module import'],
+    answer: 2,
+    why: 'Providers are singletons by default. Request scope and transient scope exist, but they cost a new instance per request or per consumer.',
+  },
+];
+
+export const cards = [
+  { front: 'Event loop', back: 'Node’s scheduler: it runs one callback at a time, in phases (timers, poll, check, close), draining microtasks after each callback.' },
+  { front: 'Backpressure', back: 'A slow consumer telling a fast producer to pause. stream.pipeline handles it for you.' },
+  { front: 'Guard (NestJS)', back: 'A class that returns true or false to decide if a request reaches the handler. Typical use: authorization.' },
+  { front: 'Worker thread', back: 'A second V8 isolate with its own event loop, for CPU-heavy work that would otherwise block the main loop.' },
+];
+
+You have written TypeScript for years, and you have shipped Express apps. This chapter is not about the language. It is about what happens underneath your handlers: one thread, an event loop, a thread pool you did not know you were using. Every other runtime in this book makes a different choice here, so this is the baseline we will compare against for the rest of the book.
+
+<Recall
+  items={[
+    { ref: 'Ch. 1', text: 'Express answered GET /health with three lines; we called that the smallest useful backend.' },
+    { ref: 'Ch. 2', text: 'fnm pins the Node version in .nvmrc; the Nest CLI scaffolds a project with npx @nestjs/cli new.' },
+  ]}
+/>
+
+## V8 runs your code; libuv runs everything else
+
+Node is two engines glued together. **V8** compiles and runs your JavaScript on a single thread. **libuv** is a C library that talks to the operating system: sockets, files, timers, DNS. When you `await` a database query, V8 does not wait. It registers a callback, libuv watches the socket, and when bytes arrive libuv queues your callback for V8 to run.
+
+Network I/O never touches a thread of yours: libuv asks the operating system to notify it (epoll on Linux, kqueue on macOS, IOCP on Windows). Work the OS cannot do asynchronously, such as most file system calls, `dns.lookup`, `crypto.pbkdf2` and zlib, goes to the **libuv thread pool**, which has four threads unless you set `UV_THREADPOOL_SIZE`.
+
+## The event loop, one phase at a time
+
+The loop runs in phases. Each phase has a queue of callbacks; the loop runs the queue, moves on, and goes around again for as long as there is work.
+
+<Figure n="3.1" caption="Each turn of the loop visits six phases; microtasks drain after every single callback">
+  <svg viewBox="0 0 720 200" role="img" aria-label="The six phases of the Node.js event loop" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs>
+      <marker id="el-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker>
+    </defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="40" width="100" height="56" rx="2" />
+      <rect x="128" y="40" width="100" height="56" rx="2" />
+      <rect x="248" y="40" width="100" height="56" rx="2" />
+      <rect x="368" y="40" width="100" height="56" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="488" y="40" width="100" height="56" rx="2" />
+      <rect x="608" y="40" width="100" height="56" rx="2" />
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M108 68H126" marker-end="url(#el-arrow)" />
+      <path d="M228 68H246" marker-end="url(#el-arrow)" />
+      <path d="M348 68H366" marker-end="url(#el-arrow)" />
+      <path d="M468 68H486" marker-end="url(#el-arrow)" />
+      <path d="M588 68H606" marker-end="url(#el-arrow)" />
+      <path d="M658 96V122H58V98" marker-end="url(#el-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="58" y="64" font-weight="600">timers</text>
+      <text x="58" y="82" fill="var(--bp-muted)" font-size="11">setTimeout</text>
+      <text x="178" y="64" font-weight="600">pending</text>
+      <text x="178" y="82" fill="var(--bp-muted)" font-size="11">deferred I/O errors</text>
+      <text x="298" y="64" font-weight="600">idle, prepare</text>
+      <text x="298" y="82" fill="var(--bp-muted)" font-size="11">internal</text>
+      <text x="418" y="64" font-weight="600">poll</text>
+      <text x="418" y="82" fill="var(--bp-muted)" font-size="11">I/O callbacks</text>
+      <text x="538" y="64" font-weight="600">check</text>
+      <text x="538" y="82" fill="var(--bp-muted)" font-size="11">setImmediate</text>
+      <text x="658" y="64" font-weight="600">close</text>
+      <text x="658" y="82" fill="var(--bp-muted)" font-size="11">socket.on('close')</text>
+      <text x="358" y="140" fill="var(--bp-muted)" font-size="11">next turn</text>
+    </g>
+    <rect x="8" y="160" width="700" height="32" rx="2" fill="var(--bp-paper-2)" stroke="var(--bp-rule)" />
+    <text x="358" y="180" text-anchor="middle" fill="var(--bp-ink)" font-size="11.5">After every callback: drain process.nextTick queue, then promise microtasks</text>
+  </svg>
+</Figure>
+
+Most of your request handling happens in the **poll** phase: a socket becomes readable, its callback runs, your handler runs. The rule that matters is the bar at the bottom of the figure: after each callback, Node empties the `process.nextTick` queue, then the promise microtask queue, before it runs the next callback. That is why this ordering is predictable for four of the five lines:
+
+```ts
+setTimeout(() => console.log('timeout'), 0);
+setImmediate(() => console.log('immediate'));
+Promise.resolve().then(() => console.log('promise'));
+process.nextTick(() => console.log('nextTick'));
+console.log('sync');
+// sync → nextTick → promise → then timeout and immediate, in either order
+```
+
+## One thread means one slow handler slows everyone
+
+The single thread is a feature: no locks, no data races inside your process. It is also the one way to hurt every user at once.
+
+```ts
+app.get('/report', (_req, res) => {
+  const result = crunchNumbers(rows); // 800 ms of pure CPU
+  res.json(result);                   // every other request also waited 800 ms
+});
+```
+
+<Pitfall title="Things that block the loop">
+CPU-heavy loops, `JSON.parse` on a multi-megabyte body, synchronous APIs such as `fs.readFileSync` or `crypto.pbkdf2Sync` inside a handler, and regular expressions with catastrophic backtracking. None of them fail; they just make your p99 latency terrible under load.
+</Pitfall>
+
+For real CPU work, move it to a **worker thread**: a second V8 isolate with its own event loop, talking to yours by messages.
+
+```ts
+import { Worker } from 'node:worker_threads';
+
+function crunchInWorker(rows: Row[]): Promise<Report> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./crunch.worker.js', import.meta.url), { workerData: rows });
+    worker.once('message', resolve);
+    worker.once('error', reject);
+  });
+}
+```
+
+Starting a worker costs tens of milliseconds, so production code keeps a pool of them (the `piscina` library is the usual choice). And if the work is truly heavy, the honest answer is often a different service, which is exactly the kind of decision Go and Java make easier, as you will see in Chapters 5 and 7.
+
+## Streams and backpressure
+
+When a response is large, you should not hold it in memory. Streams move data in chunks, and **backpressure** lets a slow client tell a fast producer to pause. `stream.pipeline` wires it up and cleans up on errors:
+
+```ts
+import { pipeline } from 'node:stream/promises';
+import { createReadStream } from 'node:fs';
+import { createGzip } from 'node:zlib';
+
+app.get('/export', async (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Encoding', 'gzip');
+  await pipeline(createReadStream('loans.csv'), createGzip(), res);
+});
+```
+
+Memory stays flat whether the file is 1 MB or 10 GB, because only a few chunks are ever in flight. Every stack in this book has the same idea under another name: `IAsyncEnumerable` in C#, `StreamingResponseBody` in Spring, `io.Copy` in Go, `StreamingResponse` in FastAPI.
+
+## From Express to NestJS
+
+Express gives you a router and middleware, and leaves structure to you. NestJS adds the structure enterprise teams want: modules, dependency injection, decorators, and a fixed request pipeline. The same endpoint in both:
+
+<FiveStacks title="Two styles" note="Same endpoint, GET /books/:id">
+<Stack id="express" lib="Express 5">
+```ts
+const router = express.Router();
+const books = new BooksService(db);   // you wire dependencies yourself
+
+router.get('/books/:id', async (req, res) => {
+  const book = await books.find(Number(req.params.id));
+  if (!book) return res.status(404).json({ error: 'Book not found' });
+  res.json(book);
+});
+```
+</Stack>
+<Stack id="nest" lib="NestJS">
+```ts
+@Controller('books')
+export class BooksController {
+  constructor(private readonly books: BooksService) {}   // injected
+
+  @Get(':id')
+  async find(@Param('id', ParseIntPipe) id: number) {
+    const book = await this.books.find(id);
+    if (!book) throw new NotFoundException('Book not found');
+    return book;
+  }
+}
+```
+</Stack>
+</FiveStacks>
+
+Three things changed. The service is **injected** instead of constructed. Parsing and validation moved into a **pipe** (`ParseIntPipe` answers 400 for `/books/abc`). And errors are **thrown**, then turned into HTTP responses by an exception filter. Express 5 got closer: a rejected promise in a handler now reaches your error middleware without a wrapper.
+
+### Modules and dependency injection
+
+A Nest module declares what it provides and what it exposes. The DI container builds the object graph at startup:
+
+```ts
+@Module({
+  imports: [DatabaseModule],
+  controllers: [BooksController],
+  providers: [BooksService],
+  exports: [BooksService],      // other modules may inject it
+})
+export class BooksModule {}
+```
+
+Providers are **singletons** by default: one `BooksService` for the whole process. Nest also supports request scope (a new instance per request) and transient scope (a new instance per consumer), but both cost allocations on every request, so use them only when a provider really holds per-request state.
+
+<InTheWild>
+This is the same idea as Spring’s IoC container and ASP.NET Core’s service collection, and Nest borrowed it on purpose. Once you know Nest’s modules, providers and scopes, Chapter 4 (ASP.NET Core’s lifetimes: singleton, scoped, transient) and Chapter 5 (Spring beans) will feel familiar. Go and Python will feel different: they mostly wire dependencies by hand.
+</InTheWild>
+
+### The request lifecycle
+
+Every Nest request passes through the same stations in the same order. Knowing the order tells you where each concern belongs.
+
+<Figure n="3.2" caption="A NestJS request: guards decide, pipes validate, the handler runs, filters turn errors into responses">
+  <svg viewBox="0 0 720 150" role="img" aria-label="NestJS request lifecycle" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs>
+      <marker id="nest-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker>
+    </defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="20" width="88" height="48" rx="2" />
+      <rect x="112" y="20" width="88" height="48" rx="2" />
+      <rect x="216" y="20" width="88" height="48" rx="2" />
+      <rect x="320" y="20" width="88" height="48" rx="2" />
+      <rect x="424" y="20" width="88" height="48" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="528" y="20" width="88" height="48" rx="2" />
+      <rect x="632" y="20" width="80" height="48" rx="2" />
+      <rect x="320" y="100" width="296" height="40" rx="2" stroke-dasharray="4 3" />
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M96 44H110" marker-end="url(#nest-arrow)" />
+      <path d="M200 44H214" marker-end="url(#nest-arrow)" />
+      <path d="M304 44H318" marker-end="url(#nest-arrow)" />
+      <path d="M408 44H422" marker-end="url(#nest-arrow)" />
+      <path d="M512 44H526" marker-end="url(#nest-arrow)" />
+      <path d="M616 44H630" marker-end="url(#nest-arrow)" />
+      <path d="M616 120H672V70" marker-end="url(#nest-arrow)" />
+    </g>
+    <g text-anchor="middle" fill="var(--bp-ink)">
+      <text x="52" y="48" font-weight="600">Middleware</text>
+      <text x="156" y="48" font-weight="600">Guards</text>
+      <text x="260" y="40" font-weight="600">Interceptors</text>
+      <text x="260" y="56" fill="var(--bp-muted)" font-size="11">before</text>
+      <text x="364" y="48" font-weight="600">Pipes</text>
+      <text x="468" y="48" font-weight="600">Handler</text>
+      <text x="572" y="40" font-weight="600">Interceptors</text>
+      <text x="572" y="56" fill="var(--bp-muted)" font-size="11">after</text>
+      <text x="672" y="48" font-weight="600">Response</text>
+      <text x="468" y="125">Exception filters catch anything thrown on the way</text>
+    </g>
+  </svg>
+</Figure>
+
+Authorization belongs in a **guard**, because it should stop a request before any work is done:
+
+```ts
+@Injectable()
+export class ApiKeyGuard implements CanActivate {
+  canActivate(ctx: ExecutionContext): boolean {
+    const req = ctx.switchToHttp().getRequest<Request>();
+    return req.headers['x-api-key'] === process.env.API_KEY;
+  }
+}
+```
+
+Logging and timing belong in an **interceptor**, because it wraps the handler on both sides. Validation belongs in a **pipe**. Translating domain errors into HTTP status codes belongs in an **exception filter**. When every team puts each concern in the same station, a NestJS codebase becomes easy to navigate.
+
+<Pitfall title="Unhandled rejections end the process">
+Since Node 15, an unhandled promise rejection crashes the process by default. Frameworks catch errors inside handlers, but a forgotten `await` in a background task, or a `.then()` without a `.catch()`, will still take the whole server down. Run every background promise through a function that logs and handles its errors.
+</Pitfall>
+
+<InterviewLens>
+"Is Node.js single-threaded?" A strong answer: your JavaScript runs on one thread per process, but Node is not single-threaded. libuv uses the operating system’s async I/O for sockets and a thread pool for file, DNS and some crypto work, and you can add worker threads for CPU work. Then say what follows: never block the loop, scale with more processes (cluster or containers), and stream large payloads.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch03" questions={quiz} />
+
+<Flashcards cards={cards} />

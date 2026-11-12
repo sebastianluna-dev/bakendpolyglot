@@ -111,7 +111,7 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 /* Quiz: printed as a form; answers live in Appendix A */
 .bp-opt { cursor: default; padding: 2px 4px; }
 .bp-q { padding-block: 0.55em; }
-.bp-q::before { font-size: 1.15em; }
+.bp-q__n { font-size: 1.15em; }
 
 /* Flashcards: flat cut-out cards, front and back side by side */
 .bp-cards__grid { grid-template-columns: 1fr; gap: 10px; }
@@ -135,3 +135,14 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 0; }
   .pagedjs_page { background: var(--bp-paper); box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
 }
+
+/* Terminal frames: drop the decorative title bar */
+.expressive-code .frame.is-terminal .header { display: none !important; }
+.expressive-code .frame.has-title .header { background: var(--bp-paper-2) !important; border: 0 !important; }
+.expressive-code .frame.has-title .header .title { font-family: var(--bp-font-label); font-size: 8pt; color: var(--bp-muted); }
+.expressive-code .frame .header::before, .expressive-code .frame .header::after { display: none !important; }
+
+/* Tables */
+.bp-body table { width: 100%; border-collapse: collapse; margin: 1em 0 1.3em; font-size: 9.2pt; line-height: 1.4; break-inside: avoid; }
+.bp-body th { text-align: left; font-family: var(--bp-font-label); font-size: 7.8pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bp-muted); border-bottom: 1.5px solid var(--bp-ink); padding: 5px 8px 5px 0; }
+.bp-body td { border-bottom: 1px solid var(--bp-rule); padding: 5px 8px 5px 0; vertical-align: top; }

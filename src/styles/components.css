@@ -29,7 +29,7 @@
 .bp-recall { background: var(--bp-accent-soft); border-top: 2px solid var(--bp-accent); }
 .bp-recall ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.45rem; }
 .bp-recall li { display: flex; gap: 0.75rem; margin: 0; }
-.bp-recall__ref { font-family: var(--bp-font-label); font-weight: 600; font-size: 0.85em; color: var(--bp-accent); white-space: nowrap; }
+.bp-recall__ref { min-width: 2.6rem; font-family: var(--bp-font-label); font-weight: 600; font-size: 0.85em; color: var(--bp-accent); white-space: nowrap; }
 
 /* From TypeScript / Pitfall / In the Wild / Interview lens */
 .bp-fromts { border: 1px solid var(--bp-rule); }
@@ -47,9 +47,9 @@
 
 /* Quiz */
 .bp-quiz { margin-block: 2rem; }
-.bp-quiz ol.bp-quiz__list { padding: 0; margin: 0; list-style: none; counter-reset: q; }
-.bp-q { counter-increment: q; display: grid; grid-template-columns: 2rem 1fr; gap: 0.25rem 0.5rem; padding-block: 0.9rem; border-bottom: 1px solid var(--bp-rule); margin: 0 !important; }
-.bp-q::before { content: counter(q); font-family: var(--bp-font-display); font-weight: 600; font-size: 1.3em; color: var(--bp-accent); }
+.bp-quiz ol.bp-quiz__list { padding: 0; margin: 0; list-style: none; }
+.bp-q { display: grid; grid-template-columns: 2rem 1fr; gap: 0.25rem 0.5rem; padding-block: 0.9rem; border-bottom: 1px solid var(--bp-rule); margin: 0 !important; }
+.bp-q__n { grid-row: 1; font-family: var(--bp-font-display); font-weight: 600; font-size: 1.3em; color: var(--bp-accent); }
 .bp-q__prompt { font-weight: 600; margin: 0; }
 .bp-q__options { grid-column: 2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1.25rem; margin: 0.4rem 0 0 !important; padding: 0; list-style: none; }
 .bp-q__options li { margin: 0 !important; }

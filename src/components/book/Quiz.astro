@@ -10,6 +10,7 @@ const KEYS = 'ABCDEF';
   <ol class="bp-quiz__list">
     {questions.map((item, qi) => (
       <li class="bp-q" data-answer={item.answer}>
+        <span class="bp-q__n" aria-hidden="true">{qi + 1}</span>
         <p class="bp-q__prompt">{item.q}</p>
         <ul class="bp-q__options">
           {item.options.map((o, oi) => (

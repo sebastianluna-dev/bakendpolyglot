@@ -1,0 +1,211 @@
+---
+title: Your Workbench
+chapter: 2
+part: Part 0 · Orientation
+kicker: One editor, five toolchains, zero version drift.
+sidebar:
+  order: 2
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why does every companion repository pin its toolchain versions in files (global.json, .nvmrc, go.mod, .python-version)?',
+    options: ['To make the repo smaller', 'So every machine, CI runner and container builds with the same versions', 'Because the SDKs refuse to run otherwise', 'To enable syntax highlighting'],
+    answer: 1,
+    why: 'Pinned versions remove "works on my machine": the SDK manager reads the file and switches versions, and CI reads the same file.',
+  },
+  {
+    q: 'What does a Dev Container give you that installing SDKs on your laptop does not?',
+    options: ['Faster compilation', 'A reproducible environment described in the repo, rebuilt the same way for everyone', 'Free cloud hosting', 'Automatic code reviews'],
+    answer: 1,
+    why: 'devcontainer.json describes the image and tools; VS Code builds and opens the project inside it, so the environment travels with the code.',
+  },
+  {
+    q: 'Since Go 1.21, what happens when go.mod asks for a newer toolchain than the one installed?',
+    options: ['The build fails with a version error', 'The go command downloads and uses the requested toolchain', 'Go silently uses the older version', 'You must reinstall Go manually'],
+    answer: 1,
+    why: 'The toolchain directive lets the go command fetch the exact version a module asks for, so Go needs no separate version manager.',
+  },
+  {
+    q: 'Which tool replaces pip, virtualenv and pyenv in this book?',
+    options: ['Poetry', 'conda', 'uv', 'pipx'],
+    answer: 2,
+    why: 'uv installs Python versions, creates the virtual environment, resolves and locks dependencies, and runs commands, all from one binary.',
+  },
+];
+
+export const cards = [
+  { front: 'global.json', back: 'Pins the .NET SDK version for a folder and everything under it.' },
+  { front: 'Dev Container', back: 'A Docker-based development environment declared in .devcontainer/devcontainer.json and opened directly by VS Code.' },
+  { front: 'uv', back: 'Python’s all-in-one tool: Python versions, virtual environments, dependencies, lockfile and running commands.' },
+  { front: 'SDKMAN!', back: 'Installs and switches JDKs, Gradle, Maven and Kotlin from the command line.' },
+];
+
+Five languages means five compilers, five package managers and five sets of habits. Before writing any backend code, we make that cheap: one editor, one way to install each toolchain, and every version pinned in the repository so your laptop, a container and CI always agree.
+
+<Recall
+  items={[
+    { ref: 'Ch. 1', text: 'Every app in this book is built in each stack, and the full code lives in the companion repositories.' },
+    { ref: 'You', text: 'You already use VS Code, npm and Git every day.' },
+  ]}
+/>
+
+## Two ways to set up
+
+You can install every toolchain on your machine, or open each repository inside a **Dev Container** that already has them. Both work; the companion repositories support both.
+
+<Figure n="2.1" caption="Local SDKs are faster day to day; a Dev Container is identical everywhere">
+  <svg viewBox="0 0 720 210" role="img" aria-label="Local SDK setup compared with a Dev Container setup" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="30" width="340" height="170" rx="2" />
+      <rect x="372" y="30" width="340" height="170" rx="2" />
+      <rect x="392" y="70" width="300" height="110" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+    </g>
+    <g fill="var(--bp-ink)">
+      <text x="8" y="18" font-weight="600">Local SDKs</text>
+      <text x="372" y="18" font-weight="600">Dev Container</text>
+      <text x="28" y="60">Your laptop</text>
+      <text x="28" y="90" fill="var(--bp-muted)">fnm → Node</text>
+      <text x="28" y="110" fill="var(--bp-muted)">dotnet SDK (pinned by global.json)</text>
+      <text x="28" y="130" fill="var(--bp-muted)">SDKMAN! → JDK, Gradle, Kotlin</text>
+      <text x="28" y="150" fill="var(--bp-muted)">Go (fetches toolchains itself)</text>
+      <text x="28" y="170" fill="var(--bp-muted)">uv → Python</text>
+      <text x="392" y="56">Your laptop: VS Code + Docker only</text>
+      <text x="408" y="94" font-weight="600">Container from devcontainer.json</text>
+      <text x="408" y="118" fill="var(--bp-muted)">Node, .NET, JDK, Go, Python</text>
+      <text x="408" y="138" fill="var(--bp-muted)">Same image in CI and for every reader</text>
+      <text x="408" y="158" fill="var(--bp-muted)">Postgres and Redis via Docker Compose</text>
+    </g>
+  </svg>
+</Figure>
+
+Use local SDKs if you want the fastest feedback loop on one machine. Use the Dev Container if you switch machines, want zero setup, or are on Windows and prefer a Linux toolchain.
+
+## VS Code, per language
+
+VS Code covers four of the five stacks very well. Install these extensions; each repository also lists them in `.vscode/extensions.json`, so VS Code offers to install them when you open the folder.
+
+| Stack | Extensions | Notes |
+| --- | --- | --- |
+| TypeScript | ESLint, Prettier | Built-in TypeScript support does the rest |
+| C# | C# Dev Kit | Brings the solution explorer, test explorer and debugger |
+| Java | Extension Pack for Java, Spring Boot Extension Pack | Maven and Gradle projects are detected automatically |
+| Kotlin | Kotlin language support | Workable for reading and small edits; for heavy Kotlin work, IntelliJ IDEA is the stronger tool |
+| Go | Go (by the Go team) | Installs gopls, the language server, on first use |
+| Python | Python, Pylance, Ruff | Point the interpreter at the project’s `.venv` |
+| All | Dev Containers, Docker | For the container setup and Compose services |
+
+<InTheWild>
+Most Java and Kotlin teams use IntelliJ IDEA, and many .NET teams use Rider or Visual Studio. You do not need them to learn, but expect to see them at work. Nothing in this book depends on an IDE: every step runs from the terminal.
+</InTheWild>
+
+## One version manager per language
+
+Each ecosystem has a standard way to install and switch versions, and a file that pins the version for a project. Learn the pair once and you never fight versions again.
+
+| Stack | Install and switch with | Pinned in |
+| --- | --- | --- |
+| Node / TypeScript | `fnm` | `.nvmrc` or `.node-version` |
+| .NET | the `dotnet` SDK installer | `global.json` |
+| Java and Kotlin | `SDKMAN!` | `.sdkmanrc` |
+| Go | the `go` command itself | the `go` and `toolchain` lines in `go.mod` |
+| Python | `uv` | `.python-version` and `pyproject.toml` |
+
+<FromTS>
+`package.json` mixes three jobs: dependencies, scripts and metadata. Other ecosystems split them. .NET puts dependencies in a `.csproj` file, Java in `build.gradle.kts` or `pom.xml`, Go in `go.mod`, and Python in `pyproject.toml`. Each also has a lockfile, and you commit it, just as you commit `package-lock.json`.
+</FromTS>
+
+## A new project in each stack
+
+This is the command you will run at the start of every app. Each one creates a working HTTP service you can start immediately.
+
+<FiveStacks title="New project" note="Run inside an empty folder">
+<Stack id="nest" lib="Nest CLI">
+```bash
+npx @nestjs/cli new shelfwise
+cd shelfwise && npm run start:dev
+```
+</Stack>
+<Stack id="cs" lib=".NET CLI">
+```bash
+dotnet new webapi -n Shelfwise
+cd Shelfwise && dotnet run
+```
+</Stack>
+<Stack id="java" lib="Spring Initializr">
+```bash
+curl https://start.spring.io/starter.zip \
+  -d dependencies=web -d name=shelfwise -o shelfwise.zip
+unzip shelfwise.zip -d shelfwise && cd shelfwise && ./mvnw spring-boot:run
+```
+</Stack>
+<Stack id="go" lib="go command">
+```bash
+mkdir shelfwise && cd shelfwise
+go mod init github.com/you/shelfwise
+# write main.go (the /health handler from Chapter 1), then:
+go run .
+```
+</Stack>
+<Stack id="fastapi" lib="uv">
+```bash
+uv init shelfwise && cd shelfwise
+uv add "fastapi[standard]"
+# replace the placeholder main.py with the /health app, then:
+uv run fastapi dev main.py
+```
+</Stack>
+</FiveStacks>
+
+Go and Python are the light ones: `go mod init` creates only the module file and `uv init` a placeholder script, so you write the first handler yourself. That is deliberate, especially in Go, which prefers no scaffolding over scaffolding you must understand later.
+
+## The Dev Container
+
+Every companion repository ships this file. Open the folder in VS Code, accept "Reopen in Container", and every toolchain in this book is ready.
+
+```json title=".devcontainer/devcontainer.json"
+{
+  "name": "backend-polyglot",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/dotnet:2": {},
+    "ghcr.io/devcontainers/features/java:1": { "installGradle": true },
+    "ghcr.io/devcontainers/features/go:1": {},
+    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "forwardPorts": [3000, 5432, 6379]
+}
+```
+
+The databases do not live in that container. They run beside it through Docker Compose, so the same services work with local SDKs too:
+
+```yaml title="compose.yaml"
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+```
+
+<Pitfall>
+Those credentials are for your laptop only. Never reuse a Compose file’s passwords in a deployed environment; Chapter 16 covers configuration and secrets properly.
+</Pitfall>
+
+<InterviewLens>
+"How do you make sure a new engineer is productive on day one?" A strong answer covers pinned toolchains, a one-command environment (a Dev Container or a script), local dependencies in Compose, and a README that is tested by CI running the same commands.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch02" questions={quiz} />
+
+<Flashcards cards={cards} />

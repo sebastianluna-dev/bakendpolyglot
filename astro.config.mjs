@@ -27,6 +27,7 @@ export default defineConfig({
       components: { PageTitle: './src/components/overrides/PageTitle.astro' },
       expressiveCode: {
         themes: ['github-light', 'github-dark'],
+        defaultProps: { wrap: true, preserveIndent: true },
         styleOverrides: {
           borderRadius: '2px',
           codeFontFamily: "'IBM Plex Mono', ui-monospace, monospace",
