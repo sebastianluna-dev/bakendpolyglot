@@ -102,10 +102,10 @@ When there is no user, such as a nightly job that releases expired seat holds th
 POST /realms/seatlock/protocol/openid-connect/token
 Content-Type: application/x-www-form-urlencoded
 
-grant_type=client_credentials&client_id=hold-reaper&client_secret=…&scope=holds:admin
+grant_type=client_credentials&client_id=hold-reaper&client_secret=…
 ```
 
-The response is an access token whose `sub` is the client, with the scopes it was granted. Cache it until shortly before `exp`; do not request a new token per call.
+The response is an access token whose `sub` is the client's service account, with the roles and scopes it was granted (in SeatLock, the `box-office` role that the reaper endpoint requires). Cache it until shortly before `exp`; do not request a new token per call.
 
 ## Scopes, roles and claims
 

@@ -10,7 +10,7 @@ import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Q
 
 export const quiz = [
   {
-    q: 'A client retries POST /orders after a timeout, sending the same Idempotency-Key. The first attempt actually succeeded. What should the server return?',
+    q: 'A client retries a checkout after a timeout, sending the same Idempotency-Key. The first attempt actually succeeded. What should the server return?',
     options: ['A new order', '409 Conflict', 'The stored response of the first attempt', '500'],
     answer: 2,
     why: 'The point of the key is that a retry is indistinguishable from the original: same status, same body, no second charge.',
@@ -68,7 +68,7 @@ The flow, in order:
 3. Store the status and response with the key, then return it.
 4. Expire keys after a day or two.
 
-Because step 1 relies on a primary key, two concurrent retries cannot both run the operation. Implement this once as middleware or a filter in each stack and apply it to every unsafe endpoint that moves money or allocates scarce things; in SeatLock, that is `POST /orders`.
+Because step 1 relies on a primary key, two concurrent retries cannot both run the operation. Implement this once as middleware or a filter in each stack and apply it to every unsafe endpoint that moves money or allocates scarce things; in SeatLock, that is `POST /holds/{id}/checkout`.
 
 ## Receiving webhooks
 
