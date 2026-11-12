@@ -15,8 +15,10 @@ The library catalog and loans API from **Part II** of *Backend Polyglot* (Chapte
 | Stack | Status |
 | --- | --- |
 | `express` (Express 5, pg, zod) | ✅ passes the conformance suite |
+| `nest` (NestJS 12, pg, class-validator) | ✅ passes the conformance suite |
 | `fastapi` (FastAPI, asyncpg, Pydantic) | ✅ passes the conformance suite |
-| `go`, `nest`, `aspnet`, `spring-java`, `spring-kotlin`, `django` | Next |
+| `django` (Django 6, DRF, psycopg 3) | ✅ passes the conformance suite |
+| `go`, `aspnet`, `spring-java`, `spring-kotlin` | Next |
 
 ## Run a stack and check it
 

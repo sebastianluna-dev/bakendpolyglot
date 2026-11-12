@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: [express, fastapi]
+        stack: [express, nest, fastapi, django]
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 22
       - uses: astral-sh/setup-uv@v6
-        if: matrix.stack == 'fastapi'
+        if: matrix.stack == 'fastapi' || matrix.stack == 'django'
 
       - name: Lint and unit tests
         run: make -C stacks/${{ matrix.stack }} lint test
