@@ -1,0 +1,87 @@
+name: seatlock
+
+on:
+  push:
+    branches: [main]
+    paths: ["apps/seatlock/**", ".github/workflows/seatlock.yml"]
+  pull_request:
+    paths: ["apps/seatlock/**", ".github/workflows/seatlock.yml"]
+
+defaults:
+  run:
+    working-directory: apps/seatlock
+
+env:
+  HOLD_TTL_SECONDS: "4"          # the expiry test waits HOLD_TTL_SECONDS + 1
+
+jobs:
+  stack:
+    name: ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [nest, django, go]
+    env:
+      SEATLOCK_STACK: ${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+        if: matrix.stack == 'django'
+      - uses: actions/setup-go@v5
+        if: matrix.stack == 'go'
+        with:
+          go-version: "1.24"
+          cache: false
+      - uses: actions/setup-dotnet@v4
+        if: matrix.stack == 'aspnet'
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-java@v5
+        if: startsWith(matrix.stack, 'spring')
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: ${{ matrix.stack == 'spring-java' && 'maven' || '' }}
+
+      # The tail of a failing step is also written as an annotation, which the run page shows
+      # without signing in (raw logs need a GitHub account with access).
+      - name: Lint and unit tests
+        run: |
+          set +e
+          make -C stacks/${{ matrix.stack }} lint test 2>&1 | tee /tmp/unit.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=${{ matrix.stack }} lint/test::$(tail -n 60 /tmp/unit.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          fi
+          exit $status
+
+      - name: Start Postgres and the stack
+        run: |
+          set +e
+          docker compose --profile ${{ matrix.stack }} up --build -d --wait --wait-timeout 300 2>&1 | tee /tmp/up.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            { tail -n 30 /tmp/up.log; docker compose --profile ${{ matrix.stack }} logs --tail 30 ${{ matrix.stack }}; } > /tmp/fail.log 2>&1
+            echo "::error title=${{ matrix.stack }} compose::$(sed 's/%/%25/g' /tmp/fail.log | awk '{printf "%s%%0A", $0}')"
+          fi
+          exit $status
+
+      - name: Conformance suite
+        run: |
+          set +e
+          npm --prefix conformance ci
+          SEATLOCK_URL=http://localhost:3000 npm --prefix conformance test 2>&1 | tee /tmp/conf.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=${{ matrix.stack }} conformance::$(grep -E 'FAIL|AssertionError|Expected|Received|×' /tmp/conf.log | head -n 60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          fi
+          exit $status
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile ${{ matrix.stack }} logs

@@ -1,0 +1,125 @@
+# Postgres, Redis, Keycloak and the fake payment provider, plus one stack per profile:
+#   docker compose --profile nest up --build
+#   npm --prefix conformance test
+# For the conformance suite, start with HOLD_TTL_SECONDS=4 so the expiry test runs in seconds.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app          # local development only (Chapter 16)
+      POSTGRES_DB: seatlock
+    ports: ["5432:5432"]
+    volumes:
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d seatlock"]
+      interval: 2s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 20
+
+  # Chapter 20: the seatlock realm with its clients, roles and test users is imported on start.
+  # KC_HOSTNAME fixes the issuer to the URL clients use (localhost:8081); stacks fetch keys over
+  # the internal network, which the backchannel setting allows.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports: ["8081:8080"]
+    volumes:
+      - ./keycloak/seatlock-realm.json:/opt/keycloak/data/import/seatlock-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 3s
+      retries: 60
+
+  payments:
+    build: ./tools/payments-fake
+    environment:
+      PAYMENT_WEBHOOK_SECRET: whsec_dev
+      AUTO_WEBHOOKS: ${AUTO_WEBHOOKS:-0}                      # 1 for the load test
+      WEBHOOK_URL: http://${SEATLOCK_STACK:-nest}:3000/webhooks/payments
+    ports: ["4000:4000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      retries: 20
+
+  nest:
+    profiles: [nest]
+    build: ./stacks/nest
+    environment: &app-env
+      PORT: "3000"
+      DATABASE_URL: postgres://app:app@postgres:5432/seatlock
+      OIDC_ISSUER: http://localhost:8081/realms/seatlock
+      OIDC_JWKS_URL: http://keycloak:8080/realms/seatlock/protocol/openid-connect/certs
+      REDIS_URL: redis://redis:6379/0
+      PAYMENTS_URL: http://payments:4000
+      PAYMENT_WEBHOOK_SECRET: whsec_dev
+      HOLD_TTL_SECONDS: ${HOLD_TTL_SECONDS:-600}
+    ports: ["3000:3000"]
+    depends_on: &app-deps
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      payments: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      retries: 30
+
+  django:
+    profiles: [django]
+    build: ./stacks/django
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: *app-deps
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3000/health').status == 200 else 1)"]
+      interval: 2s
+      retries: 30
+
+  go:
+    profiles: [go]
+    build: ./stacks/go
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: *app-deps
+    healthcheck:
+      test: ["CMD", "/seatlock", "-healthcheck"]
+      interval: 2s
+      retries: 30
+
+  aspnet:
+    profiles: [aspnet]
+    build: ./stacks/aspnet
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: *app-deps
+    healthcheck:
+      test: ["CMD", "dotnet", "/app/SeatLock.dll", "--healthcheck"]
+      interval: 2s
+      retries: 30
+
+  spring-java:
+    profiles: [spring-java]
+    build: ./stacks/spring-java
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: *app-deps
+    healthcheck:
+      test: ["CMD", "java", "-jar", "/app/seatlock.jar", "--healthcheck"]
+      interval: 3s
+      retries: 40
