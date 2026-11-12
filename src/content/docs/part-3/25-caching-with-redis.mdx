@@ -1,0 +1,167 @@
+---
+title: Caching with Redis
+chapter: 25
+part: Part III · Security and Data under Load
+kicker: The fastest query is the one you do not run, until the data changes.
+sidebar:
+  order: 25
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'In the cache-aside pattern, who loads data into the cache?',
+    options: ['The database, through triggers', 'The application, on a cache miss: read the database, then write the cache', 'The cache itself, automatically', 'A nightly batch job'],
+    answer: 1,
+    why: 'Cache-aside (lazy loading): check the cache; on a miss, load from the source of truth and populate the cache with a TTL.',
+  },
+  {
+    q: 'A popular key expires and 2,000 requests miss at once, all querying the database. What is this called, and what helps?',
+    options: ['A deadlock; use a mutex in the database', 'A cache stampede; single-flight loading, early refresh or jittered TTLs', 'Cache poisoning; disable the cache', 'Replication lag; read from the primary'],
+    answer: 1,
+    why: 'A stampede sends the whole load to the database at once. Let one request load while others wait, refresh before expiry, and spread TTLs.',
+  },
+  {
+    q: 'Which data should SeatLock never cache in a shared cache keyed only by URL?',
+    options: ['The list of events', 'Venue seat maps', 'A user’s orders and holds', 'Static images'],
+    answer: 2,
+    why: 'Per-user data in a shared cache keyed by URL can be served to another user. Include the user in the key, or do not cache it there.',
+  },
+];
+
+export const cards = [
+  { front: 'Cache-aside', back: 'Read the cache; on a miss load from the database and store with a TTL. Invalidate or update on writes.' },
+  { front: 'Cache stampede', back: 'Many concurrent misses for one hot key overload the source. Fix: single-flight, early refresh, jitter.' },
+  { front: 'TTL', back: 'Time to live: how long a cached value is trusted. The simplest invalidation strategy, and a bound on staleness.' },
+];
+
+SeatLock’s event pages are read thousands of times per minute and change a few times per day. Querying PostgreSQL for each view wastes the database on answers it already gave. Caching fixes that, and introduces the second hard problem in computer science: knowing when the cached answer is no longer true. This chapter covers where to cache, the patterns, the failure modes, and Redis as the shared cache for every stack.
+
+<Recall
+  items={[
+    { ref: 'Ch. 10', text: 'Cache-Control and ETags let clients and CDNs cache safely.' },
+    { ref: 'Ch. 22', text: 'In-process rate limiters count per replica; a global limit needs shared state.' },
+  ]}
+/>
+
+## Where to cache
+
+| Layer | Example | Shared across replicas | Invalidation |
+| --- | --- | --- | --- |
+| Client and CDN | `Cache-Control: public, max-age=60` | Yes, globally | TTL, purge API |
+| In-process memory | A map with TTL | No | Per replica |
+| Distributed cache | Redis | Yes | Explicit delete or TTL |
+| Database | Its own buffer cache | n/a | Automatic |
+
+Start at the outside: a public event page with `max-age=30` on a CDN removes most traffic before it reaches you. Use an in-process cache for small, rarely changing data (configuration, venue layouts). Use Redis when replicas must agree, or the data is too large to copy into every process.
+
+## Cache-aside
+
+The default pattern: read the cache, on a miss load from the database and store with a TTL, and on writes delete the key so the next read reloads it.
+
+<FiveStacks note="Event details, cached for five minutes">
+<Stack id="nest" lib="ioredis">
+```ts
+async findEvent(id: string): Promise<EventDto> {
+  const key = `event:${id}:v1`;
+  const hit = await this.redis.get(key);
+  if (hit) return JSON.parse(hit);
+  const event = await this.repo.findEvent(id);
+  await this.redis.set(key, JSON.stringify(event), 'EX', 300);
+  return event;
+}
+```
+</Stack>
+<Stack id="cs" lib="HybridCache">
+```csharp
+// HybridCache combines in-memory and Redis, and lets one caller load
+// while concurrent callers for the same key wait: stampede protection built in.
+public async Task<EventDto> FindEventAsync(Guid id, CancellationToken ct) =>
+    await cache.GetOrCreateAsync(
+        $"event:{id}:v1",
+        async token => await repo.LoadEventAsync(id, token),
+        new HybridCacheEntryOptions { Expiration = TimeSpan.FromMinutes(5) },
+        cancellationToken: ct);
+```
+</Stack>
+<Stack id="java" lib="Spring Cache + Redis">
+```java
+@Cacheable(cacheNames = "events", key = "#id")     // TTL set on the RedisCacheManager
+public EventDto findEvent(UUID id) {
+    return repo.loadEvent(id);
+}
+
+@CacheEvict(cacheNames = "events", key = "#id")
+public void updateEvent(UUID id, EventUpdate update) { /* … */ }
+```
+</Stack>
+<Stack id="go" lib="go-redis + singleflight">
+```go
+func (s *Service) FindEvent(ctx context.Context, id string) (EventDTO, error) {
+	key := "event:" + id + ":v1"
+	if b, err := s.rdb.Get(ctx, key).Bytes(); err == nil {
+		var e EventDTO
+		return e, json.Unmarshal(b, &e)
+	}
+	v, err, _ := s.group.Do(key, func() (any, error) { // one loader per key per process
+		e, err := s.repo.LoadEvent(ctx, id)
+		if err == nil {
+			b, _ := json.Marshal(e)
+			s.rdb.Set(ctx, key, b, 5*time.Minute)
+		}
+		return e, err
+	})
+	if err != nil {
+		return EventDTO{}, err
+	}
+	return v.(EventDTO), nil
+}
+```
+</Stack>
+<Stack id="django" lib="Django cache framework">
+```python
+def find_event(event_id: str) -> dict:
+    return cache.get_or_set(
+        f"event:{event_id}:v1",
+        lambda: EventSerializer(Event.objects.get(pk=event_id)).data,
+        timeout=300,
+    )   # CACHES configured with django.core.cache.backends.redis.RedisCache
+```
+</Stack>
+</FiveStacks>
+
+Notice the `:v1` in each key: when the cached shape changes, bump the version and old entries simply age out, with no flush during a deploy.
+
+## Invalidation
+
+There are only three strategies, and every system combines them:
+
+- **TTL**: accept staleness up to N seconds. Simple and robust; pick N from what the business tolerates.
+- **Delete on write**: after committing a change, delete the key. Precise, but every write path must remember it, and a crash between commit and delete leaves stale data until the TTL. Always keep a TTL as a backstop.
+- **Write-through**: update the cache together with the database. Fresher, but more code and more ways to diverge.
+
+<Pitfall title="Caching what must be exact">
+SeatLock caches event descriptions and seat maps, but **never** seat availability for checkout. A cached "available" that is two seconds old sells a held seat. Cache data where staleness is harmless, and read the source of truth for decisions.
+</Pitfall>
+
+## Stampedes
+
+When a hot key expires, every concurrent request misses and hits the database at the same moment. Three defences: **single-flight** (one loader per key, others wait, as Go’s `singleflight` and .NET’s `HybridCache` do), **early refresh** (reload slightly before expiry), and **jittered TTLs** (300 s ± 10 %) so many keys do not expire together after a deploy.
+
+## Redis beyond caching
+
+Redis is a data-structure server, and backends use it for more than cache entries: counters and sliding windows for **global rate limits**, sorted sets for leaderboards and delayed jobs, pub/sub for fan-out (Chapter 38), and as the store behind BullMQ, Celery and sessions. Treat it as memory with optional persistence: anything that must survive a failure belongs in PostgreSQL.
+
+<InTheWild>
+Distributed locks in Redis are a frequent source of subtle bugs: a lock with a TTL can expire while its holder is paused, and two processes then believe they hold it. If correctness depends on a lock, prefer the database (row locks, unique constraints, advisory locks) or a fencing token. Use Redis locks only to reduce duplicate work, not to guarantee correctness.
+</InTheWild>
+
+<InterviewLens>
+"Add caching to this read-heavy endpoint." A strong answer asks how stale the data may be, picks the outermost layer that works (HTTP caching or CDN first), uses cache-aside with a TTL and delete-on-write, versions keys, includes the user or tenant in keys for personal data, protects against stampedes, measures hit rate, and never caches the data used for decisions that must be exact.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch25" questions={quiz} />
+
+<Flashcards cards={cards} />

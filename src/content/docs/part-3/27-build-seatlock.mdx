@@ -1,0 +1,208 @@
+---
+title: "Build: SeatLock"
+chapter: 27
+part: Part III · Security and Data under Load
+kicker: Holds, checkout, payments and zero seats sold twice.
+sidebar:
+  order: 27
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A user holds four seats, but one of them was taken a millisecond earlier. What should SeatLock do?',
+    options: ['Hold the three free seats', 'Roll back the whole hold and answer 409 with the seats that were unavailable', 'Retry until all four are free', 'Hold all four anyway'],
+    answer: 1,
+    why: 'Seats are usually bought together. The claim runs in one transaction; if fewer rows were updated than requested, roll back and tell the user which seats failed.',
+  },
+  {
+    q: 'Which component makes abandoned holds harmless?',
+    options: ['The payment webhook', 'The hold reaper job that releases seats whose hold expired', 'The CDN cache', 'The rate limiter'],
+    answer: 1,
+    why: 'Holds expire after ten minutes. A scheduled, idempotent job releases them, so seats return to sale even if the user closes the tab.',
+  },
+  {
+    q: 'How does the SeatLock gate check that no seat was sold twice after a load test?',
+    options: ['By reading application logs', 'With SQL invariants: no seat in two confirmed orders, and sold seats equal confirmed order lines', 'By counting HTTP 200 responses', 'By asking users'],
+    answer: 1,
+    why: 'The database is the source of truth. Invariant queries after the test prove correctness regardless of what the API reported.',
+  },
+];
+
+export const cards = [
+  { front: 'Hold', back: 'A short, expiring claim on seats by one user, created with a conditional update so two users cannot hold the same seat.' },
+  { front: 'Hold reaper', back: 'A scheduled job that releases expired holds with one conditional update; idempotent by construction.' },
+  { front: 'Invariant check', back: 'A SQL query that must return zero rows if the system is correct, run after load tests and in monitoring.' },
+];
+
+Part III comes together in **SeatLock**, an event ticketing API. It is small, but it has every hard property a real ticketing system has: authenticated users from an identity provider, ownership rules, a scarce resource fought over by concurrent buyers, payments confirmed by webhook, retries everywhere, and a cache in front of read-heavy pages. It is built in five stacks: NestJS, ASP.NET Core (with controllers, as promised in Chapter 4), Spring Boot in Java, Go and Django. The code lives in the `seatlock` repository.
+
+<Recall
+  items={[
+    { ref: 'Ch. 19–21', text: 'Tokens from Keycloak, validated per request; only the holder may check out a hold.' },
+    { ref: 'Ch. 23', text: 'Claim scarce rows with a conditional UPDATE; zero rows means someone else won.' },
+    { ref: 'Ch. 24', text: 'Idempotency keys on checkout; verified, deduplicated webhooks; idempotent jobs.' },
+  ]}
+/>
+
+## The flow
+
+<Figure n="27.1" caption="A seat moves from available to held to sold, or back to available when a hold expires">
+  <svg viewBox="0 0 720 170" role="img" aria-label="SeatLock seat lifecycle" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="sl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="40" width="150" height="56" rx="2" />
+      <rect x="284" y="40" width="150" height="56" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="562" y="40" width="150" height="56" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle" font-weight="600">
+      <text x="83" y="73">available</text><text x="359" y="73">held (10 min)</text><text x="637" y="73">sold</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M158 60H282" marker-end="url(#sl-arrow)" />
+      <path d="M434 60H560" marker-end="url(#sl-arrow)" />
+      <path d="M359 96V140H83V98" marker-end="url(#sl-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)" font-size="11.5" text-anchor="middle">
+      <text x="220" y="52">POST /holds</text>
+      <text x="220" y="84" fill="var(--bp-muted)">conditional UPDATE</text>
+      <text x="497" y="52">payment webhook</text>
+      <text x="497" y="84" fill="var(--bp-muted)">confirms the order</text>
+      <text x="221" y="158">hold expired: the reaper job releases it</text>
+    </g>
+  </svg>
+</Figure>
+
+1. `GET /events/{id}` and `GET /events/{id}/seats`: public, cached (Chapter 25), seat **map** cached but availability always read fresh.
+2. `POST /holds`: authenticated; claims up to six seats atomically for ten minutes.
+3. `POST /holds/{id}/checkout` with an `Idempotency-Key`: only the holder; creates a pending order and a payment intent with the (simulated) payment provider.
+4. `POST /webhooks/payments`: verified and deduplicated; a job marks the order paid and the seats sold.
+5. The **hold reaper** runs every minute and releases expired holds.
+
+## Claiming seats atomically
+
+The central operation is the hold: several seats, all or nothing, with no chance of two users holding the same seat.
+
+<FiveStacks note="Claim N seats in one transaction, or none">
+<Stack id="nest" lib="Prisma">
+```ts
+return this.prisma.$transaction(async (tx) => {
+  const hold = await tx.hold.create({ data: { userId, expiresAt: addMinutes(this.clock.now(), 10) } });
+  const claimed = await tx.$executeRaw`
+    UPDATE seats SET status = 'held', hold_id = ${hold.id}
+    WHERE event_id = ${eventId} AND id = ANY(${seatIds}) AND status = 'available'`;
+  if (claimed !== seatIds.length) throw new SeatsUnavailable(seatIds); // rolls back the transaction
+  return hold;
+});
+```
+</Stack>
+<Stack id="cs" lib="EF Core ExecuteUpdate">
+```csharp
+await using var tx = await db.Database.BeginTransactionAsync(ct);
+var hold = new Hold(userId, clock.GetUtcNow().AddMinutes(10));
+db.Holds.Add(hold);
+await db.SaveChangesAsync(ct);
+
+var claimed = await db.Seats
+    .Where(s => s.EventId == eventId && seatIds.Contains(s.Id) && s.Status == SeatStatus.Available)
+    .ExecuteUpdateAsync(u => u.SetProperty(s => s.Status, SeatStatus.Held)
+                              .SetProperty(s => s.HoldId, hold.Id), ct);
+if (claimed != seatIds.Count) return Conflict(new SeatsUnavailableProblem(seatIds)); // tx disposed → rollback
+await tx.CommitAsync(ct);
+```
+</Stack>
+<Stack id="java" lib="Spring Data JPA">
+```java
+@Modifying
+@Query("""
+    update Seat s set s.status = 'HELD', s.holdId = :holdId
+    where s.eventId = :eventId and s.id in :ids and s.status = 'AVAILABLE'""")
+int claim(UUID eventId, List<UUID> ids, UUID holdId);
+
+@Transactional
+public Hold hold(UUID eventId, List<UUID> seatIds, String userId) {
+    Hold hold = holds.save(new Hold(userId, clock.instant().plus(10, MINUTES)));
+    if (seats.claim(eventId, seatIds, hold.getId()) != seatIds.size()) {
+        throw new SeatsUnavailable(seatIds);   // runtime exception → rollback → 409
+    }
+    return hold;
+}
+```
+</Stack>
+<Stack id="go" lib="pgx">
+```go
+err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+	if err := tx.QueryRow(ctx, `INSERT INTO holds (user_id, expires_at) VALUES ($1, $2) RETURNING id`,
+		userID, s.now().Add(10*time.Minute)).Scan(&holdID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE seats SET status = 'held', hold_id = $3
+		WHERE event_id = $1 AND id = ANY($2) AND status = 'available'`, eventID, seatIDs, holdID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != int64(len(seatIDs)) {
+		return ErrSeatsUnavailable // BeginFunc rolls back on error
+	}
+	return nil
+})
+```
+</Stack>
+<Stack id="django" lib="Django ORM">
+```python
+with transaction.atomic():
+    hold = Hold.objects.create(user_id=user_id, expires_at=now() + timedelta(minutes=10))
+    claimed = (Seat.objects
+               .filter(event_id=event_id, id__in=seat_ids, status=Seat.AVAILABLE)
+               .update(status=Seat.HELD, hold=hold))
+    if claimed != len(seat_ids):
+        raise SeatsUnavailable(seat_ids)    # leaving atomic() with an exception rolls back
+```
+</Stack>
+</FiveStacks>
+
+Every version uses the same idea from Chapter 23: one conditional update whose row count tells you whether you won. No locks are held while the user thinks; the hold is just state with an expiry.
+
+<Pitfall title="Payment calls inside the transaction">
+It is tempting to create the payment intent inside the checkout transaction. Do not: a slow payment provider then holds database locks and connections for seconds. Commit the pending order first, call the provider with its own idempotency key, and let the webhook move the order forward.
+</Pitfall>
+
+## Repository and local setup
+
+The `seatlock` repository mirrors Shelfwise: `contract/openapi.yaml`, shared SQL migrations, a conformance suite, and `stacks/{nest,aspnet,spring-java,go,django}`. Compose adds Keycloak with the `seatlock` realm (Chapter 20), Redis, and a tiny fake payment provider that sends signed webhooks, sometimes twice and sometimes out of order, on purpose.
+
+## Gate: Phase 3
+
+The gate from the roadmap: **1,000 concurrent checkouts, zero seats oversold.** The repository includes a k6 script that has a thousand virtual users hold and buy random seats for a sold-out event, with retries and duplicate webhooks enabled.
+
+- [ ] Run the load test against at least two stacks.
+- [ ] Run the invariant checks; each must return zero rows:
+
+```sql
+-- no seat belongs to two paid orders
+SELECT seat_id FROM order_lines ol JOIN orders o ON o.id = ol.order_id
+WHERE o.status = 'paid' GROUP BY seat_id HAVING count(*) > 1;
+
+-- every sold seat is in exactly one paid order
+SELECT s.id FROM seats s
+LEFT JOIN order_lines ol ON ol.seat_id = s.id
+LEFT JOIN orders o ON o.id = ol.order_id AND o.status = 'paid'
+WHERE s.status = 'sold' GROUP BY s.id HAVING count(o.id) <> 1;
+```
+
+- [ ] Break the claim on purpose (read, check in code, then write) and watch the invariants fail.
+- [ ] Explain, for your favourite stack, where authentication, authorization, idempotency and the hold claim live in the code.
+
+<InTheWild>
+Real ticketing platforms add a virtual waiting room in front of high-demand sales, so only a controlled number of users reach the hold step at once. The core you built here stays the same; the waiting room only controls how fast traffic arrives.
+</InTheWild>
+
+<InterviewLens>
+"Walk me through your ticketing design end to end." A strong answer traces one purchase through authentication, the atomic hold with expiry, checkout with an idempotency key, the payment provider and its webhook, the reaper job, caching of read-only data, and the invariants and load tests that prove nothing is sold twice.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch27" questions={quiz} />
+
+<Flashcards cards={cards} />

@@ -1,0 +1,203 @@
+---
+title: CQRS and Event Sourcing
+chapter: 30
+part: Part IV · Architecture
+kicker: Separate how you change data from how you read it, and maybe keep every change.
+sidebar:
+  order: 30
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What does CQRS separate?',
+    options: ['Databases from caches', 'The model used to change state (commands) from the models used to read it (queries)', 'Frontend from backend', 'Authentication from authorization'],
+    answer: 1,
+    why: 'Commands go through the aggregate that enforces rules; queries read from models shaped for each screen, possibly in another store.',
+  },
+  {
+    q: 'In an event-sourced aggregate, how is current state obtained?',
+    options: ['Read from a state table', 'By replaying (folding) its events in order, optionally starting from a snapshot', 'From the cache', 'By querying the read model'],
+    answer: 1,
+    why: 'The event stream is the source of truth. State is a left fold over events; snapshots shorten the replay for long streams.',
+  },
+  {
+    q: 'A user places an order and immediately opens "My orders", but it is not there yet. What is the likely cause?',
+    options: ['The order failed', 'The read model is updated asynchronously from events and has not caught up', 'The cache is disabled', 'A database deadlock'],
+    answer: 1,
+    why: 'Asynchronous projections are eventually consistent. Mitigate by returning the new state from the command, reading your own writes, or showing a pending state.',
+  },
+];
+
+export const cards = [
+  { front: 'CQRS', back: 'Command Query Responsibility Segregation: separate write model (rules) from read models (screens).' },
+  { front: 'Projection', back: 'Code that consumes events and updates a read model shaped for a query.' },
+  { front: 'Event sourcing', back: 'Storing every change as an immutable event; state is derived by replaying them.' },
+  { front: 'Snapshot', back: 'A saved state at version N, so replay starts there instead of at the first event.' },
+];
+
+The order aggregate from Chapter 29 is shaped to enforce rules. The "My orders" page wants something else: orders with product names, shipping status and payment state, sorted and filtered, joined from several contexts. Squeezing both needs into one model makes both worse. **CQRS** separates them. **Event sourcing** goes further and stores the history of changes as the source of truth. Both are powerful, and both are frequently applied where they do not belong, so this chapter is as much about when as about how.
+
+<Recall
+  items={[
+    { ref: 'Ch. 29', text: 'Aggregates enforce invariants and record domain events such as OrderPlaced.' },
+    { ref: 'Ch. 15', text: 'EF Core and JPA can project straight into small read models.' },
+  ]}
+/>
+
+## CQRS
+
+**Command Query Responsibility Segregation** splits an application into two paths:
+
+- **Commands** change state: `PlaceOrder`, `CancelOrder`. They load an aggregate, call its methods, save it. They return little: an id, a version, or nothing.
+- **Queries** read state: `GetOrderSummary`, `ListMyOrders`. They never change anything, and they read from models shaped for each screen.
+
+<Figure n="30.1" caption="Commands go through the aggregate; queries read models built from its events">
+  <svg viewBox="0 0 720 200" role="img" aria-label="CQRS with write model, events and read models" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="cq-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="30" width="120" height="44" rx="2" /><rect x="8" y="130" width="120" height="44" rx="2" />
+      <rect x="180" y="30" width="150" height="44" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="380" y="30" width="130" height="44" rx="2" />
+      <rect x="560" y="30" width="152" height="44" rx="2" />
+      <rect x="560" y="130" width="152" height="44" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="68" y="57" font-weight="600">Command</text><text x="68" y="157" font-weight="600">Query</text>
+      <text x="255" y="50" font-weight="600">Order aggregate</text><text x="255" y="66" font-size="11" fill="var(--bp-muted)">rules, write store</text>
+      <text x="445" y="50" font-weight="600">Events</text><text x="445" y="66" font-size="11" fill="var(--bp-muted)">OrderPlaced …</text>
+      <text x="636" y="50" font-weight="600">Projection</text><text x="636" y="66" font-size="11" fill="var(--bp-muted)">updates read model</text>
+      <text x="636" y="150" font-weight="600">Read model</text><text x="636" y="166" font-size="11" fill="var(--bp-muted)">my_orders_view</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M128 52H178" marker-end="url(#cq-arrow)" /><path d="M330 52H378" marker-end="url(#cq-arrow)" /><path d="M510 52H558" marker-end="url(#cq-arrow)" />
+      <path d="M636 74V128" marker-end="url(#cq-arrow)" /><path d="M128 152H558" marker-end="url(#cq-arrow)" />
+    </g>
+    <text x="340" y="146" text-anchor="middle" fill="var(--bp-muted)" font-size="11">reads straight from the view, no aggregate involved</text>
+  </svg>
+</Figure>
+
+CQRS does not require two databases or events. The lightest version is two code paths over one database: commands use the ORM and aggregates; queries use SQL or projections into DTOs, as in Chapter 15. That alone simplifies most services. The heavier version keeps read models in separate tables or stores (a search index, a denormalised view) updated by **projections** that consume events, which brings **eventual consistency** between write and read.
+
+<Pitfall title="Reading your own writes">
+With asynchronous projections, a user who just placed an order may not see it in "My orders" for a moment. Return the data the screen needs from the command, update the view synchronously in the same transaction for that user’s own data, or show an explicit pending state. Never let it look like the order vanished.
+</Pitfall>
+
+## Event sourcing
+
+In a normal system, the database stores current state and history is lost unless you add audit tables. **Event sourcing** stores the history instead: every change is an immutable event appended to the aggregate’s stream, and current state is computed by replaying them.
+
+```text
+order-77  v1  OrderCreated      { customerId: c_12 }
+order-77  v2  LineAdded         { sku: "BK-1", qty: 2, unitPrice: 18.00 EUR }
+order-77  v3  LineAdded         { sku: "BK-9", qty: 1, unitPrice: 24.00 EUR }
+order-77  v4  OrderPlaced       { total: 60.00 EUR }
+order-77  v5  PaymentCaptured   { ref: "pay_31" }
+```
+
+Appending checks the expected version, which is optimistic locking (Chapter 23) for free: if two commands load version 4, only one can append version 5.
+
+Rebuilding state is a **fold**: start from an empty state and apply each event.
+
+<FiveStacks note="Rebuild an order from its events">
+<Stack id="nest" lib="TypeScript">
+```ts
+const apply = (s: OrderState, e: OrderEvent): OrderState => {
+  switch (e.type) {
+    case 'OrderCreated':    return { ...s, id: e.orderId, status: 'draft', lines: [] };
+    case 'LineAdded':       return { ...s, lines: [...s.lines, e.line] };
+    case 'OrderPlaced':     return { ...s, status: 'placed' };
+    case 'PaymentCaptured': return { ...s, status: 'paid' };
+  }
+};
+const state = events.reduce(apply, emptyOrder);
+```
+</Stack>
+<Stack id="cs" lib="C#">
+```csharp
+static OrderState Apply(OrderState s, IOrderEvent e) => e switch
+{
+    OrderCreated c    => s with { Id = c.OrderId, Status = OrderStatus.Draft },
+    LineAdded l       => s with { Lines = s.Lines.Add(l.Line) },
+    OrderPlaced       => s with { Status = OrderStatus.Placed },
+    PaymentCaptured   => s with { Status = OrderStatus.Paid },
+    _ => s,
+};
+var state = events.Aggregate(OrderState.Empty, Apply);
+```
+</Stack>
+<Stack id="kotlin" lib="Kotlin">
+```kotlin
+fun OrderState.apply(e: OrderEvent): OrderState = when (e) {
+    is OrderCreated    -> copy(id = e.orderId, status = OrderStatus.DRAFT)
+    is LineAdded       -> copy(lines = lines + e.line)
+    is OrderPlaced     -> copy(status = OrderStatus.PLACED)
+    is PaymentCaptured -> copy(status = OrderStatus.PAID)
+}
+val state = events.fold(OrderState.EMPTY) { s, e -> s.apply(e) }
+```
+</Stack>
+<Stack id="go" lib="Go">
+```go
+func apply(s OrderState, e Event) OrderState {
+	switch e := e.(type) {
+	case OrderCreated:
+		s.ID, s.Status = e.OrderID, Draft
+	case LineAdded:
+		s.Lines = append(s.Lines, e.Line)
+	case OrderPlaced:
+		s.Status = Placed
+	case PaymentCaptured:
+		s.Status = Paid
+	}
+	return s
+}
+
+state := OrderState{}
+for _, e := range events {
+	state = apply(state, e)
+}
+```
+</Stack>
+<Stack id="fastapi" lib="Python">
+```python
+def apply(s: OrderState, e: OrderEvent) -> OrderState:
+    match e:
+        case OrderCreated(order_id=oid):  return replace(s, id=oid, status="draft")
+        case LineAdded(line=line):        return replace(s, lines=[*s.lines, line])
+        case OrderPlaced():               return replace(s, status="placed")
+        case PaymentCaptured():           return replace(s, status="paid")
+    return s
+
+state = functools.reduce(apply, events, OrderState.empty())
+```
+</Stack>
+</FiveStacks>
+
+Every language here has a natural way to write this: a reducer in TypeScript, switch expressions over records in C#, `when` over sealed classes in Kotlin, a type switch in Go, `match` in Python. Long streams use **snapshots**: save the state at version N and replay only later events.
+
+## When to use which
+
+| Need | Use |
+| --- | --- |
+| Reads and writes have different shapes | CQRS-lite: separate query code over the same database |
+| Heavy read traffic, search, cross-context views | CQRS with projected read models |
+| Full audit history is a business requirement (money, compliance) | Event sourcing for that aggregate |
+| "What was the state on 3 March?" queries | Event sourcing |
+| Ordinary CRUD | Neither |
+
+Event sourcing has real costs: events are a permanent public schema inside your system (you version them, never edit them), projections must be rebuildable, and every developer must learn the model. Apply it per aggregate where history is the product, as in a ledger, not to a whole system by default.
+
+<InTheWild>
+Banking ledgers, payment systems and logistics tracking use event sourcing because their business already thinks in events and needs the history. Parcel event-sources its payments ledger in the ASP.NET service, and keeps orders as plain state with an outbox. That mix is typical.
+</InTheWild>
+
+<InterviewLens>
+"When would you use event sourcing?" A strong answer: when the history itself is valuable (audit, temporal queries, replays into new projections) for a specific aggregate, accepting the costs of event versioning, projections and eventual consistency; and not as a default architecture. It distinguishes CQRS, which is often useful on its own, from event sourcing.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch30" questions={quiz} />
+
+<Flashcards cards={cards} />

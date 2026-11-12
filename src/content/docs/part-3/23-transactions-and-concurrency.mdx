@@ -1,0 +1,203 @@
+---
+title: Transactions and Concurrency
+chapter: 23
+part: Part III · Security and Data under Load
+kicker: Two buyers, one seat, one database.
+sidebar:
+  order: 23
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Two checkouts read seat 14C at version 7. A commits first. What does B’s UPDATE … WHERE version = 7 return?',
+    options: ['A database error', '1 row affected', '0 rows affected', 'A deadlock'],
+    answer: 2,
+    why: 'A’s update moved the version to 8, so B’s condition matches nothing. B learns it lost and answers 409 instead of selling the seat twice.',
+  },
+  {
+    q: 'What is PostgreSQL’s default isolation level?',
+    options: ['Read Uncommitted', 'Read Committed', 'Repeatable Read', 'Serializable'],
+    answer: 1,
+    why: 'Read Committed: each statement sees data committed before it started. It prevents dirty reads but allows lost updates if you read then write without care.',
+  },
+  {
+    q: 'When is pessimistic locking (SELECT … FOR UPDATE) usually the better choice?',
+    options: ['Low contention, short reads', 'High contention on a few hot rows', 'Read-only reports', 'Databases without transactions'],
+    answer: 1,
+    why: 'With heavy contention, optimistic locking causes many retries. Locking the row makes others wait briefly instead of failing and retrying.',
+  },
+  {
+    q: 'Under SERIALIZABLE isolation in PostgreSQL, what must the application be ready to do?',
+    options: ['Nothing; it never fails', 'Retry transactions that fail with a serialization error (SQLSTATE 40001)', 'Lock every table manually', 'Disable indexes'],
+    answer: 1,
+    why: 'Serializable Snapshot Isolation detects dangerous patterns and aborts one transaction. Correctness is guaranteed only if you retry it.',
+  },
+];
+
+export const cards = [
+  { front: 'Lost update', back: 'Two transactions read the same row; the second write silently overwrites the first.' },
+  { front: 'Optimistic lock', back: 'A conditional write on a version column; zero rows matched means someone else won.' },
+  { front: 'SELECT … FOR UPDATE', back: 'Locks the selected rows until the transaction ends; other writers wait.' },
+  { front: 'SKIP LOCKED', back: 'Skips rows other transactions have locked: perfect for job queues and seat pickers.' },
+];
+
+Two people press **Buy** on the last seat at the same instant. Both requests read the seat as free, both write it as sold, and the database happily accepts both. Nothing crashed; you simply sold one seat twice. This chapter is about making that impossible, and about choosing how much you pay for it.
+
+<Recall
+  items={[
+    { ref: 'Ch. 14', text: 'An index turns WHERE id = ? into a B-tree lookup, not a scan.' },
+    { ref: 'Ch. 15', text: 'An ORM’s save() issues one UPDATE per changed entity.' },
+    { ref: 'Ch. 21', text: 'Only the user holding a seat may confirm its purchase.' },
+  ]}
+/>
+
+## ACID without the slogans
+
+A **transaction** groups statements so they succeed or fail together. **Atomicity**: all or nothing. **Consistency**: constraints hold at commit. **Durability**: once committed, it survives a crash. The interesting letter is **I**, isolation: how much concurrent transactions see of each other. Full isolation is expensive, so databases offer levels, and the default is weaker than most people assume.
+
+## Isolation levels and their anomalies
+
+| Anomaly | What happens | Read Committed | Repeatable Read | Serializable |
+| --- | --- | --- | --- | --- |
+| Dirty read | See another transaction’s uncommitted data | Prevented | Prevented | Prevented |
+| Non-repeatable read | Read a row twice, get different values | Possible | Prevented | Prevented |
+| Phantom | Re-run a range query, get new rows | Possible | Prevented in Postgres | Prevented |
+| Lost update | Two read-modify-writes, one is lost | Possible | Detected (error) | Prevented |
+| Write skew | Two transactions each keep a rule true alone, break it together | Possible | Possible | Prevented |
+
+PostgreSQL defaults to **Read Committed**. Its **Repeatable Read** is snapshot isolation, and its **Serializable** level detects dangerous interleavings and aborts one transaction with SQLSTATE `40001`, which your code must retry. Other databases differ: MySQL’s InnoDB defaults to Repeatable Read with different semantics, so never assume.
+
+## The last-seat problem
+
+<Figure n="23.1" caption="Both buyers read version 7; only one conditional write can match it">
+  <svg viewBox="0 0 720 150" role="img" aria-label="Optimistic locking race between two buyers" font-family="IBM Plex Sans, sans-serif" font-size="11.5">
+    <defs><marker id="ol-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="var(--bp-ink)" font-weight="600"><text x="8" y="52">Buyer A</text><text x="8" y="118">Buyer B</text></g>
+    <text x="700" y="16" text-anchor="end" fill="var(--bp-muted)">time →</text>
+    <g fill="var(--bp-paper-2)" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="80" y="28" width="170" height="44" rx="2" /><rect x="80" y="94" width="170" height="44" rx="2" /></g>
+    <g fill="none" stroke="var(--bp-ink)" stroke-width="1.25"><rect x="282" y="28" width="210" height="44" rx="2" /><rect x="524" y="28" width="188" height="44" rx="2" /></g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2"><rect x="282" y="94" width="210" height="44" rx="2" /><rect x="524" y="94" width="188" height="44" rx="2" /></g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25"><path d="M250 50H280" marker-end="url(#ol-arrow)" /><path d="M492 50H522" marker-end="url(#ol-arrow)" /><path d="M250 116H280" marker-end="url(#ol-arrow)" /><path d="M492 116H522" marker-end="url(#ol-arrow)" /></g>
+    <g fill="var(--bp-ink)">
+      <text x="92" y="46" font-family="IBM Plex Mono, monospace">read seat 14C</text><text x="92" y="62" fill="var(--bp-muted)">version = 7</text>
+      <text x="92" y="112" font-family="IBM Plex Mono, monospace">read seat 14C</text><text x="92" y="128" fill="var(--bp-muted)">version = 7</text>
+      <text x="294" y="46" font-family="IBM Plex Mono, monospace">UPDATE … WHERE version = 7</text><text x="294" y="62" fill="var(--bp-muted)">1 row · now version 8</text>
+      <text x="294" y="112" font-family="IBM Plex Mono, monospace">UPDATE … WHERE version = 7</text><text x="294" y="128" fill="var(--bp-muted)">0 rows matched</text>
+      <text x="536" y="46" font-family="IBM Plex Mono, monospace">200 OK</text><text x="536" y="62" fill="var(--bp-muted)">seat held for A</text>
+      <text x="536" y="112" font-family="IBM Plex Mono, monospace">409 Conflict</text><text x="536" y="128" fill="var(--bp-muted)">retry or pick a seat</text>
+    </g>
+  </svg>
+</Figure>
+
+The naive code reads the seat, checks `status == 'available'` in the application, and writes `status = 'held'`. Under Read Committed both transactions pass the check before either writes. There are three reliable fixes, from simplest to most general.
+
+### 1. Make the write conditional
+
+Put the check inside the write so the database evaluates it atomically:
+
+```sql
+UPDATE seats SET status = 'held', held_by = $2, hold_expires_at = now() + interval '10 minutes'
+WHERE id = $1 AND status = 'available'
+RETURNING id;
+```
+
+Zero rows returned means someone else got it. This is the cheapest fix and covers most "claim a thing" operations, including holding several seats in one statement.
+
+### 2. Optimistic locking
+
+When the change is computed in application code (a price recalculated, several fields edited), add a `version` column, read it with the data, and make the write conditional on it being unchanged. Every ORM supports this natively:
+
+<FiveStacks note="Optimistic locking on the seat row">
+<Stack id="nest" lib="Prisma">
+```ts
+const res = await prisma.seat.updateMany({
+  where: { id, version },
+  data: { status: 'HELD', heldBy: userId, version: { increment: 1 } },
+});
+if (res.count === 0) throw new ConflictException('Seat was taken');
+```
+</Stack>
+<Stack id="cs" lib="EF Core">
+```csharp
+// Seat.Version is configured with .IsConcurrencyToken()
+seat.Hold(userId, clock.UtcNow);
+try { await db.SaveChangesAsync(ct); }
+catch (DbUpdateConcurrencyException) { return Results.Conflict(); }
+```
+</Stack>
+<Stack id="java" lib="Spring Data JPA">
+```java
+@Version private long version;                // on the Seat entity
+
+seat.hold(userId, clock.instant());
+seatRepository.saveAndFlush(seat);           // throws ObjectOptimisticLockingFailureException
+```
+</Stack>
+<Stack id="go" lib="pgx">
+```go
+tag, err := db.Exec(ctx, `UPDATE seats SET status = 'held', held_by = $3, version = version + 1
+                          WHERE id = $1 AND version = $2`, id, version, userID)
+if err != nil {
+	return err
+}
+if tag.RowsAffected() == 0 {
+	return ErrConflict
+}
+```
+</Stack>
+<Stack id="django" lib="Django ORM">
+```python
+updated = Seat.objects.filter(id=seat_id, version=version).update(
+    status="held", held_by=user_id, version=F("version") + 1)
+if updated == 0:
+    raise Conflict("Seat was taken")
+```
+</Stack>
+</FiveStacks>
+
+<FromTS>
+Node’s single thread does not save you here. Two requests interleave at every `await`, and the race lives in the database, not in your process. The same is true in every stack in this book, and doubly so once you run more than one replica.
+</FromTS>
+
+### 3. Pessimistic locking
+
+Lock the rows first, then decide. Other transactions trying to lock the same rows wait until you commit:
+
+```sql
+BEGIN;
+SELECT id, status FROM seats WHERE event_id = $1 AND id = ANY($2) FOR UPDATE;
+-- check in code, then:
+UPDATE seats SET status = 'held', held_by = $3 WHERE id = ANY($2);
+COMMIT;
+```
+
+Every stack exposes it: `FOR UPDATE` in raw SQL, `@Lock(PESSIMISTIC_WRITE)` in Spring Data, `select_for_update()` in Django, a raw query or `FromSql` in EF Core. Add `SKIP LOCKED` to grab whatever rows are free instead of waiting, which makes "give me any two seats in row F" and job queues (Chapter 24) fast under contention.
+
+## Choosing
+
+| Situation | Choose |
+| --- | --- |
+| Claim or decrement with a simple condition | Conditional `UPDATE … WHERE` |
+| Edits computed in code, low contention | Optimistic locking (version) |
+| Hot rows, many writers at once | Pessimistic `FOR UPDATE`, short transactions |
+| Pick any free rows | `FOR UPDATE SKIP LOCKED` |
+| Invariants across many rows (write skew) | Serializable isolation with retries, or a constraint |
+
+<Pitfall title="Long transactions and deadlocks">
+Locks are held until commit, so never call an external API, send an email or wait on user input inside a transaction. Keep transactions short, and acquire locks in a consistent order (for example by seat id) so two transactions cannot wait on each other forever. Databases detect deadlocks and kill one transaction; your code must handle that error like a conflict.
+</Pitfall>
+
+<InTheWild>
+Ticketing, inventory and booking systems all solve this problem, and most of them combine the techniques: a short "hold" claimed with a conditional update or `SKIP LOCKED`, an expiry job that releases stale holds, unique constraints as the final guard, and idempotency keys so retried checkouts do not double-charge (next chapter).
+</InTheWild>
+
+<InterviewLens>
+"Design checkout for a sold-out concert." A strong answer names the race, picks a lock strategy for the contention level (conditional updates or SKIP LOCKED for seat claims, optimistic versions for edits), keeps transactions short, adds a hold with expiry so abandoned carts free seats, and adds an idempotency key for retries. It mentions what the database guarantees at its default isolation level.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch23" questions={quiz} />
+
+<Flashcards cards={cards} />

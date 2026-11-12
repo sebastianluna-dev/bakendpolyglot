@@ -1,0 +1,140 @@
+---
+title: Modular Monolith vs Microservices
+chapter: 31
+part: Part IV · Architecture
+kicker: Boundaries first, network later, if ever.
+sidebar:
+  order: 31
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What is a distributed monolith?',
+    options: ['A monolith deployed in several regions', 'Services that must be deployed together and call each other synchronously for every request, with the costs of both styles', 'A monolith with a database replica', 'A microservice written in several languages'],
+    answer: 1,
+    why: 'If services share a database or need lockstep releases, you pay for network calls and distributed failures without gaining independence.',
+  },
+  {
+    q: 'Which is the strongest reason to extract a module into its own service?',
+    options: ['It is fashionable', 'It needs to scale, deploy or fail independently, or a separate team must own it end to end', 'The codebase has more than 100 files', 'A different language is more fun'],
+    answer: 1,
+    why: 'Independent scaling, deployment, failure isolation and team ownership are what services buy. Without one of those needs, a module is cheaper.',
+  },
+  {
+    q: 'What does Conway’s law say?',
+    options: ['Systems get slower over time', 'Systems tend to mirror the communication structure of the organisation that builds them', 'Every service needs its own database', 'Microservices double operational cost'],
+    answer: 1,
+    why: 'Boundaries that cut across team lines become friction. Teams and service boundaries are designed together (the "inverse Conway manoeuvre").',
+  },
+];
+
+export const cards = [
+  { front: 'Modular monolith', back: 'One deployable with strictly enforced internal module boundaries and data ownership per module.' },
+  { front: 'Distributed monolith', back: 'Services coupled so tightly they must deploy and run together: the worst of both styles.' },
+  { front: 'Strangler fig', back: 'Replace a system piece by piece by routing traffic for one capability at a time to the new implementation.' },
+  { front: 'Database per service', back: 'Each service owns its data; others go through its API or events, never its tables.' },
+];
+
+With bounded contexts drawn, the next question is physical: one deployable or many? The industry swung from monoliths to microservices and part of the way back. The useful answer is neither fashion: get the **boundaries** right inside one process first, and pay for a network boundary only where it buys something specific. Parcel is a deliberate exception, split into five services in five languages because that is what this book is teaching; this chapter explains what that costs.
+
+<Recall
+  items={[
+    { ref: 'Ch. 29', text: 'Parcel has five bounded contexts: Catalog, Ordering, Payments, Inventory, Shipping.' },
+    { ref: 'Ch. 28', text: 'Ports and adapters keep each context’s core independent of infrastructure.' },
+  ]}
+/>
+
+## Three shapes
+
+<Figure n="31.1" caption="The same contexts as a tangled monolith, a modular monolith and services">
+  <svg viewBox="0 0 720 200" role="img" aria-label="Monolith, modular monolith and microservices" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="30" width="216" height="140" rx="8" />
+      <rect x="252" y="30" width="216" height="140" rx="8" stroke="var(--bp-accent)" stroke-width="2" />
+      <rect x="496" y="30" width="96" height="62" rx="8" /><rect x="616" y="30" width="96" height="62" rx="8" />
+      <rect x="496" y="108" width="96" height="62" rx="8" /><rect x="616" y="108" width="96" height="62" rx="8" />
+    </g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.25">
+      <rect x="268" y="48" width="88" height="50" rx="2" /><rect x="364" y="48" width="88" height="50" rx="2" />
+      <rect x="268" y="106" width="88" height="50" rx="2" /><rect x="364" y="106" width="88" height="50" rx="2" />
+    </g>
+    <g stroke="var(--bp-muted)" stroke-width="1" fill="none">
+      <path d="M40 60L190 150M60 150L200 60M30 100H210M120 40V160M50 50L170 140" />
+      <path d="M592 61H616M592 139H616M544 92V108M664 92V108" />
+    </g>
+    <g fill="var(--bp-ink)" font-weight="600" text-anchor="middle">
+      <text x="116" y="20">Monolith</text><text x="360" y="20">Modular monolith</text><text x="604" y="20">Services</text>
+    </g>
+    <g fill="var(--bp-ink)" font-size="11" text-anchor="middle">
+      <text x="312" y="77">Catalog</text><text x="408" y="77">Ordering</text><text x="312" y="135">Payments</text><text x="408" y="135">Inventory</text>
+      <text x="544" y="65">Catalog</text><text x="664" y="65">Ordering</text><text x="544" y="143">Payments</text><text x="664" y="143">Inventory</text>
+    </g>
+    <g fill="var(--bp-muted)" font-size="11" text-anchor="middle">
+      <text x="116" y="190">everything calls everything</text><text x="360" y="190">one deploy, enforced boundaries</text><text x="604" y="190">separate deploys and data</text>
+    </g>
+  </svg>
+</Figure>
+
+| | Modular monolith | Microservices |
+| --- | --- | --- |
+| Deploy | One artefact | One per service |
+| Calls between contexts | In-process function calls | Network: HTTP, gRPC, messages |
+| Transactions across contexts | Possible (avoid relying on it) | Not available: sagas, outbox |
+| Failure | Whole process up or down | Partial failures, timeouts, retries |
+| Scaling | Scale everything together | Scale each service separately |
+| Team autonomy | Shared release train | Independent releases |
+| Operational cost | Low | High: CI/CD, observability, platform per service |
+| Refactoring a boundary | Move code, run the tests | Change contracts, migrate data |
+
+## The modular monolith
+
+A **modular monolith** is one deployable whose modules follow the rules services would: each module owns its tables, exposes a small public API (ports, events), and never reaches into another module’s internals or data. Every stack has a way to enforce that, and enforcement is what separates a modular monolith from the tangled kind:
+
+| Stack | How boundaries are enforced |
+| --- | --- |
+| TypeScript | Nest modules exporting only their public providers; dependency-cruiser rules in CI |
+| C# | One project per module; `internal` by default; references only to other modules’ contracts |
+| Java / Kotlin | Spring Modulith (verifies module dependencies in a test); Java modules or ArchUnit |
+| Go | `internal/` packages: the compiler forbids imports from outside the parent |
+| Python | Django apps plus import-linter contracts in CI |
+
+Modules can still publish events to each other in-process. When a module later becomes a service, the events move to a broker and the calls become HTTP or gRPC, but the boundary, and most of the code, stays the same.
+
+## When services pay off
+
+Extract a module into a service when at least one of these is true, and you can say which:
+
+- **Independent scaling**: it needs ten times the resources of everything else (search, image processing).
+- **Independent deployment**: a separate team must ship it on its own schedule.
+- **Failure isolation**: its failure must not take down the rest (payments vs. recommendations).
+- **Different technology**: it genuinely needs another runtime (an ML model in Python, a high-throughput component in Go).
+- **Security or compliance boundary**: card data, health data.
+
+Each service then needs its own CI/CD, observability, on-call, data, API versioning and contract tests. That platform cost is fixed per service, which is why small teams with many services drown.
+
+<Pitfall title="The distributed monolith">
+Services that share a database, call each other synchronously in long chains for every request, or must be released together have every cost of microservices and none of the benefits. If changing one feature always means deploying three services, the boundaries are wrong; merge them back or redraw them.
+</Pitfall>
+
+## Data ownership
+
+The rule that makes services independent: **each service owns its data**. Other services never read its tables; they call its API or keep their own copy updated from its events. Ordering does not join to Catalog’s `products` table; it stores the product name and price it accepted at order time, which is also what the business wants (prices change, orders do not).
+
+## Getting there: the strangler fig
+
+Existing systems are not rewritten in one go. The **strangler fig** pattern puts a routing layer in front of the old system and moves one capability at a time to a new module or service, routing its traffic over when ready, until the old system has nothing left to do. Each step is small, reversible and delivers value.
+
+<InTheWild>
+Many well-known companies run large, successful monoliths, and several publicly moved parts of their microservice estates back into fewer services. The consensus among experienced architects: start with a well-modularised monolith, split for concrete reasons, and align services with teams. Parcel is split for teaching; in a real five-person team it would start as one modular application.
+</InTheWild>
+
+<InterviewLens>
+"Monolith or microservices for a new product?" A strong answer: a modular monolith first, with bounded contexts as enforced modules and data owned per module, because the domain is still being learned and refactoring is cheap in one process; then extract services for specific reasons (scaling, team autonomy, isolation, technology), with the platform investments that each one requires.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch31" questions={quiz} />
+
+<Flashcards cards={cards} />

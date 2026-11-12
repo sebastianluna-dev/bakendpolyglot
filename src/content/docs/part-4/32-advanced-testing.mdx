@@ -1,0 +1,190 @@
+---
+title: Advanced Testing
+chapter: 32
+part: Part IV · Architecture
+kicker: Test the contracts between services and the rules of your architecture.
+sidebar:
+  order: 32
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'In consumer-driven contract testing, who writes the contract?',
+    options: ['The provider team, from its OpenAPI file', 'The consumer, from the requests it actually makes and the fields it actually reads; the provider then verifies it', 'A QA team, manually', 'The API gateway'],
+    answer: 1,
+    why: 'Consumers record expectations (Pact files); providers verify them in CI. A provider change that breaks a real consumer fails before deployment.',
+  },
+  {
+    q: 'What does an architecture test check?',
+    options: ['Response times under load', 'Rules about code dependencies, such as "the core must not import adapters or frameworks"', 'That the database schema matches migrations', 'Browser compatibility'],
+    answer: 1,
+    why: 'Architecture tests turn diagrams into failing builds, so a boundary is not eroded by one convenient import.',
+  },
+  {
+    q: 'A mutation testing tool reports many surviving mutants in your pricing code. What does that mean?',
+    options: ['The code has bugs', 'Tests run the code but would not notice if its logic changed: assertions are weak', 'Tests are too slow', 'Coverage is 0%'],
+    answer: 1,
+    why: 'Mutation testing changes the code (flips a comparison, removes a line) and expects tests to fail. Survivors show code that is covered but not really checked.',
+  },
+];
+
+export const cards = [
+  { front: 'Consumer-driven contract', back: 'Expectations written by a consumer and verified by the provider in CI, so breaking changes fail early.' },
+  { front: 'Architecture test', back: 'A test that fails when code violates a structural rule, such as forbidden dependencies between layers.' },
+  { front: 'Mutation testing', back: 'Change the code slightly and check that tests fail; surviving mutants reveal weak assertions.' },
+];
+
+Once a system has several services and a deliberate structure, two new kinds of failure appear. A service changes a response field and a consumer in another repository breaks in production. Or, over months, convenient imports quietly erase the boundaries Chapters 28 to 31 drew. This chapter adds tests for both: **contract tests** between services and **architecture tests** inside them, plus two techniques that sharpen the suites you already have.
+
+<Recall
+  items={[
+    { ref: 'Ch. 17', text: 'Unit tests for logic, integration tests against real dependencies, few end-to-end tests.' },
+    { ref: 'Ch. 28', text: 'The dependency rule: the core imports no framework, driver or adapter.' },
+    { ref: 'Ch. 31', text: 'Modular monoliths need enforced boundaries; services need contracts.' },
+  ]}
+/>
+
+## Contract tests between services
+
+End-to-end tests across five services are slow and flaky, and they find contract breaks late. **Consumer-driven contract testing** finds them in each service’s own CI. With Pact, the consumer (Parcel’s gateway) records what it sends and which fields it reads:
+
+```ts
+const provider = new PactV3({ consumer: 'parcel-gateway', provider: 'parcel-catalog' });
+
+provider
+  .given('product BK-1 exists')
+  .uponReceiving('a request for product BK-1')
+  .withRequest({ method: 'GET', path: '/products/BK-1' })
+  .willRespondWith({
+    status: 200,
+    body: { sku: 'BK-1', name: like('Dune'), price: { amount: like(1800), currency: 'EUR' } },
+  });
+
+await provider.executeTest(async (mock) => {
+  const product = await catalogClient(mock.url).getProduct('BK-1');
+  expect(product.sku).toBe('BK-1');
+});
+```
+
+That produces a contract file, published to a broker. The provider (Catalog, in FastAPI) runs a **verification** in its CI that replays every consumer’s expectations against the real service. If Catalog renames `name` to `title`, its build fails and names the consumer it would break. Pact has libraries for all five stacks, which is exactly what a polyglot system needs.
+
+Contract tests complement, not replace, the OpenAPI document: the document says what the provider offers; contracts say what consumers actually depend on, so providers know what they can change freely.
+
+## Architecture tests
+
+Diagrams do not stop imports. **Architecture tests** do: they read the code’s dependencies and fail the build when a rule is broken. Here is "the order core must not depend on adapters or frameworks" in each stack:
+
+<FiveStacks note="The core must not depend on adapters or frameworks">
+<Stack id="nest" lib="dependency-cruiser">
+```js
+// .dependency-cruiser.cjs
+module.exports = {
+  forbidden: [{
+    name: 'core-is-pure',
+    severity: 'error',
+    from: { path: '^src/orders/core' },
+    to: { path: ['^src/orders/adapters', 'node_modules/@nestjs', 'node_modules/@prisma'] },
+  }],
+};
+```
+</Stack>
+<Stack id="cs" lib="NetArchTest + xUnit">
+```csharp
+[Fact]
+public void Core_does_not_depend_on_infrastructure()
+{
+    var result = Types.InAssembly(typeof(Order).Assembly)
+        .ShouldNot()
+        .HaveDependencyOnAny("Microsoft.AspNetCore", "Microsoft.EntityFrameworkCore", "Parcel.Payments.Infrastructure")
+        .GetResult();
+    Assert.True(result.IsSuccessful);
+}
+```
+</Stack>
+<Stack id="kotlin" lib="ArchUnit">
+```kotlin
+@AnalyzeClasses(packages = ["parcel.orders"])
+class ArchitectureTest {
+    @ArchTest
+    val coreIsPure: ArchRule = noClasses().that().resideInAPackage("..core..")
+        .should().dependOnClassesThat()
+        .resideInAnyPackage("..adapters..", "org.springframework..", "jakarta.persistence..")
+}
+```
+</Stack>
+<Stack id="go" lib="golangci-lint depguard">
+```yaml
+# .golangci.yml
+version: "2"
+linters:
+  enable: [depguard]
+  settings:
+    depguard:
+      rules:
+        core:
+          files: ["**/inventory/core/**"]
+          deny:
+            - pkg: "net/http"
+              desc: the core must not depend on transport
+            - pkg: "github.com/jackc/pgx/v5"
+              desc: the core must not depend on the database
+```
+</Stack>
+<Stack id="fastapi" lib="import-linter">
+```toml
+# pyproject.toml
+[tool.importlinter]
+root_package = "catalog"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Core does not import adapters or frameworks"
+type = "forbidden"
+source_modules = ["catalog.core"]
+forbidden_modules = ["catalog.adapters", "fastapi", "sqlalchemy"]
+```
+</Stack>
+</FiveStacks>
+
+Start with two or three rules that protect what matters (core purity, no cross-module data access, no cycles between modules) and add more only when a real erosion happens. In Go, remember that the compiler already enforces `internal/` packages for free.
+
+## Test doubles, precisely
+
+Teams argue about mocks partly because they use the word for everything. The precise vocabulary helps in code review:
+
+| Double | What it does | Use it for |
+| --- | --- | --- |
+| Dummy | Fills a parameter, never used | Satisfying a signature |
+| Stub | Returns canned answers | Driving the code down a path |
+| Fake | A working, lightweight implementation | In-memory repository, fake payment provider |
+| Spy | Records calls for later assertions | Checking that an event was published |
+| Mock | Pre-programmed expectations that fail if unmet | When the interaction is the behaviour |
+
+Prefer **fakes** for driven ports: a `FakePaymentGateway` written once, shared by many tests, and checked against the real adapter with a small contract test of its own, so the fake cannot drift.
+
+## Testing event-driven code
+
+When services communicate through events (Part V), test three things separately: the producer writes the right event to its outbox in the same transaction as the state change; the consumer handles an event correctly **and idempotently** (feed it twice, assert one effect); and the event schema is compatible with consumers, using the same contract-testing idea for messages, which Pact also supports.
+
+## Mutation testing
+
+Coverage says which lines ran, not whether tests would notice them being wrong. **Mutation testing** changes the code (flips `<` to `<=`, removes a call, returns a constant) and reruns the tests; a mutant that survives shows code whose behaviour is not really checked. Tools: Stryker (TypeScript and C#), PIT (Java and Kotlin), mutmut (Python), and community tools for Go. It is slow, so run it on the domain core, nightly or before releases, not on every commit.
+
+<Pitfall title="Contract tests as integration tests">
+Pact contracts should capture what the consumer needs, not every field and every business scenario of the provider. Over-specified contracts break on harmless changes and teams start ignoring them. Use flexible matchers (`like`, `eachLike`), and keep business-rule testing in the provider’s own suite.
+</Pitfall>
+
+<InTheWild>
+Polyglot organisations lean on contract testing because no single team can run everyone’s end-to-end suite. A typical CI pipeline for a provider runs its unit and integration tests, verifies consumer contracts from the broker, and asks the broker whether the version is safe to deploy against what is in production ("can I deploy?").
+</InTheWild>
+
+<InterviewLens>
+"How do you stop one team’s API change from breaking another team’s service?" A strong answer: versioned contracts (OpenAPI or schemas), consumer-driven contract tests verified in the provider’s CI with a broker, additive changes by default, deprecation windows for breaking ones, and architecture tests to keep each service’s internal boundaries honest.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch32" questions={quiz} />
+
+<Flashcards cards={cards} />

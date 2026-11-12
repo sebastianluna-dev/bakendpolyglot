@@ -1,0 +1,153 @@
+---
+title: OAuth2 and OpenID Connect
+chapter: 20
+part: Part III · Security and Data under Load
+kicker: Delegated access, and identity on top of it.
+sidebar:
+  order: 20
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Which OAuth2 flow should a single-page app or mobile app use to sign users in today?',
+    options: ['Implicit flow', 'Resource owner password credentials', 'Authorization code with PKCE', 'Client credentials'],
+    answer: 2,
+    why: 'Authorization code with PKCE keeps tokens out of the URL and protects the code exchange without a client secret. Implicit and password flows are deprecated.',
+  },
+  {
+    q: 'A background service calls SeatLock’s API with no user involved. Which flow fits?',
+    options: ['Authorization code', 'Client credentials', 'Device code', 'Refresh token only'],
+    answer: 1,
+    why: 'Client credentials lets a confidential client authenticate as itself and receive an access token for machine-to-machine calls.',
+  },
+  {
+    q: 'What does OpenID Connect add on top of OAuth2?',
+    options: ['Encryption of access tokens', 'A standard identity layer: the ID token, the userinfo endpoint and discovery', 'Rate limiting', 'Password hashing'],
+    answer: 1,
+    why: 'OAuth2 is about delegated access. OIDC standardises who the user is: an ID token for the client, userinfo, and discovery metadata.',
+  },
+  {
+    q: 'Your API receives an ID token in the Authorization header. What should it do?',
+    options: ['Accept it; it identifies the user', 'Reject it: APIs accept access tokens meant for them (correct aud), not ID tokens', 'Exchange it for a session', 'Decode it without validation'],
+    answer: 1,
+    why: 'ID tokens are for the client application. Access tokens are for APIs, with the API as audience and scopes that describe what is allowed.',
+  },
+];
+
+export const cards = [
+  { front: 'PKCE', back: 'Proof Key for Code Exchange: the client sends a hash of a secret with the request and the secret with the code exchange.' },
+  { front: 'Scope', back: 'A permission the client asks for and the user grants, such as holds:write. Carried in the access token.' },
+  { front: 'ID token vs access token', back: 'ID token: who the user is, for the client. Access token: what the caller may do, for the API.' },
+  { front: 'Discovery document', back: '/.well-known/openid-configuration: endpoints, supported algorithms and the JWKS URL of the issuer.' },
+];
+
+Chapter 19 had SeatLock validate tokens from an identity provider. This chapter explains where those tokens come from. **OAuth2** is a framework for delegated access: a user lets an app call an API on their behalf without giving the app their password. **OpenID Connect** (OIDC) adds a standard identity layer on top. Together they power "Sign in with…" buttons, mobile logins and service-to-service auth.
+
+<Recall
+  items={[
+    { ref: 'Ch. 19', text: 'APIs validate signature, algorithm, exp, iss and aud; keys come from the issuer’s JWKS.' },
+    { ref: 'Ch. 19', text: 'Short access tokens plus rotating refresh tokens; browsers use a BFF with HttpOnly cookies.' },
+  ]}
+/>
+
+## Four roles
+
+- **Resource owner**: the user.
+- **Client**: the app acting for the user (SeatLock’s web or mobile app).
+- **Authorization server**: issues tokens after authenticating the user (Keycloak in this book).
+- **Resource server**: the API that accepts access tokens (SeatLock’s API).
+
+## Authorization code with PKCE
+
+This is the flow for every user-facing client today:
+
+<Figure n="20.1" caption="Authorization code with PKCE: the code travels through the browser, tokens never do">
+  <svg viewBox="0 0 720 300" role="img" aria-label="Authorization code flow with PKCE" font-family="IBM Plex Sans, sans-serif" font-size="11.5">
+    <defs><marker id="oa-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="var(--bp-ink)" font-weight="600" text-anchor="middle" font-size="12">
+      <text x="70" y="18">User + browser</text><text x="260" y="18">Client (BFF)</text><text x="470" y="18">Keycloak</text><text x="650" y="18">SeatLock API</text>
+    </g>
+    <g stroke="var(--bp-rule)" stroke-width="1.25"><path d="M70 28V292" /><path d="M260 28V292" /><path d="M470 28V292" /><path d="M650 28V292" /></g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M70 50H256" marker-end="url(#oa-arrow)" />
+      <path d="M260 78H74" marker-end="url(#oa-arrow)" />
+      <path d="M70 106H466" marker-end="url(#oa-arrow)" />
+      <path d="M470 140H74" marker-end="url(#oa-arrow)" />
+      <path d="M70 168H256" marker-end="url(#oa-arrow)" />
+      <path d="M260 202H466" marker-end="url(#oa-arrow)" stroke="var(--bp-accent)" stroke-width="2" />
+      <path d="M470 230H264" marker-end="url(#oa-arrow)" stroke="var(--bp-accent)" stroke-width="2" />
+      <path d="M260 268H646" marker-end="url(#oa-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)">
+      <text x="80" y="44">1 click “Sign in”</text>
+      <text x="80" y="72">2 redirect: /authorize?code_challenge=…</text>
+      <text x="80" y="100">3 log in, consent</text>
+      <text x="80" y="134">4 redirect back with ?code=…</text>
+      <text x="80" y="162">5 browser delivers the code</text>
+      <text x="270" y="196" fill="var(--bp-accent)">6 POST /token: code + code_verifier</text>
+      <text x="270" y="224" fill="var(--bp-accent)">7 access, refresh and ID tokens</text>
+      <text x="270" y="262">8 GET /holds · Authorization: Bearer access-token</text>
+    </g>
+  </svg>
+</Figure>
+
+The client creates a random **code verifier** and sends its hash, the **code challenge**, in step 2. In step 6 it sends the verifier itself. An attacker who intercepts the code in step 4 cannot redeem it without the verifier. The browser only ever sees a short-lived, single-use code; the tokens go straight from Keycloak to the client.
+
+## Client credentials for services
+
+When there is no user, such as a nightly job that releases expired seat holds through the API, a confidential client authenticates as itself:
+
+```http
+POST /realms/seatlock/protocol/openid-connect/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=hold-reaper&client_secret=…&scope=holds:admin
+```
+
+The response is an access token whose `sub` is the client, with the scopes it was granted. Cache it until shortly before `exp`; do not request a new token per call.
+
+## Scopes, roles and claims
+
+**Scopes** describe what a client may do on a user’s behalf (`holds:write`), and the user can see and consent to them. **Roles** describe what the user is (`customer`, `box-office`). Identity providers put both in the access token, and your API’s authorization (Chapter 21) reads them. Keep scopes coarse and stable; put fine-grained rules in the API.
+
+## OpenID Connect
+
+OIDC standardises three things OAuth2 left open:
+
+- The **ID token**: a JWT for the client, saying who signed in (`sub`, `email`, `name`, `auth_time`).
+- The **userinfo** endpoint, for more profile claims.
+- **Discovery**: `/.well-known/openid-configuration` lists every endpoint, supported algorithm and the JWKS URL. This is what `Authority` in ASP.NET and `issuer-uri` in Spring read.
+
+<Pitfall title="Using the wrong token">
+APIs accept **access tokens** issued for them (`aud` is the API). Clients use **ID tokens** to know who signed in. Sending an ID token to an API, or using an access token in the client to display the user, mixes the two and breaks as soon as the identity provider changes token formats.
+</Pitfall>
+
+## Keycloak for local development
+
+Every companion app that needs identity runs Keycloak in Docker Compose with a realm file committed to the repository: a `seatlock` realm, a public client for the web app with PKCE, a confidential client for the hold reaper, two roles and three test users. Tests get tokens from it exactly as production clients will.
+
+```yaml title="compose.yaml (excerpt)"
+keycloak:
+  image: quay.io/keycloak/keycloak:26.0
+  command: start-dev --import-realm
+  environment:
+    KC_BOOTSTRAP_ADMIN_USERNAME: admin
+    KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+  volumes: ["./keycloak/seatlock-realm.json:/opt/keycloak/data/import/seatlock-realm.json"]
+  ports: ["8081:8080"]
+```
+
+<InTheWild>
+In companies, you rarely run the authorization server yourself; a platform team or a SaaS provider does. Your daily work is registering clients, choosing flows and scopes, validating tokens in services, and debugging token claims. Paste a token into a JWT debugger when something fails: wrong `aud` and expired `exp` explain most 401s.
+</InTheWild>
+
+<InterviewLens>
+"Explain OAuth2 authorization code with PKCE." A strong answer names the four roles, walks the redirects, explains what PKCE protects against (an intercepted code), says why tokens never pass through the browser URL, distinguishes ID and access tokens, and mentions client credentials for machine-to-machine calls.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch20" questions={quiz} />
+
+<Flashcards cards={cards} />

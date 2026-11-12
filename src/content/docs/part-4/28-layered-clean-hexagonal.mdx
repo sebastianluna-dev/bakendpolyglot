@@ -1,0 +1,210 @@
+---
+title: Layered, Clean and Hexagonal Architecture
+chapter: 28
+part: Part IV · Architecture
+kicker: Keep the business rules in the middle, and everything else at the edges.
+sidebar:
+  order: 28
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What is the dependency rule in clean and hexagonal architecture?',
+    options: ['Outer layers may not call inner layers', 'Source dependencies point inwards: the domain depends on nothing; adapters depend on the domain', 'Every layer depends on the database', 'Controllers depend on repositories directly'],
+    answer: 1,
+    why: 'The core defines ports (interfaces) it needs; adapters at the edge implement them. The domain never imports a framework or a driver.',
+  },
+  {
+    q: 'In hexagonal terms, what is a payment provider client that implements the PaymentGateway interface?',
+    options: ['A port', 'A driven (secondary) adapter', 'A domain entity', 'A use case'],
+    answer: 1,
+    why: 'The port is the interface the core needs; the provider client is a driven adapter that implements it. HTTP controllers are driving adapters.',
+  },
+  {
+    q: 'When is a full hexagonal structure usually not worth it?',
+    options: ['For a domain with complex rules and several integrations', 'For a small CRUD service with little logic beyond validation and storage', 'For a long-lived core system', 'When you need to swap infrastructure in tests'],
+    answer: 1,
+    why: 'Ports and adapters pay off when there are rules to protect and integrations to isolate. A thin CRUD service gains ceremony and little else.',
+  },
+];
+
+export const cards = [
+  { front: 'Port', back: 'An interface owned by the core describing something it needs (a repository, a gateway) or offers (a use case).' },
+  { front: 'Adapter', back: 'Code at the edge that connects a port to the world: HTTP controllers (driving) or database and API clients (driven).' },
+  { front: 'Dependency rule', back: 'Source dependencies point inwards. The domain imports no framework, driver or HTTP type.' },
+];
+
+Part IV builds the first half of **Parcel**, an e-commerce order pipeline whose services are written in different languages. Before splitting anything into services, we need to agree on how one service is organised inside. This chapter compares the three common shapes, layered, clean and hexagonal, which are really one idea seen from different angles: keep business rules independent of frameworks, databases and transports.
+
+<Recall
+  items={[
+    { ref: 'Ch. 18', text: 'Shelfwise used three layers: handler, service, repository.' },
+    { ref: 'Ch. 7', text: 'Go defines small interfaces where they are used, not where they are implemented.' },
+  ]}
+/>
+
+## From layers to hexagons
+
+The **layered** architecture you used in Shelfwise stacks presentation on top of business logic on top of data access. It is simple and familiar, with one flaw: the business layer usually depends on the data layer, so domain code ends up importing ORM types and the database shape leaks upwards.
+
+**Clean** and **hexagonal** (ports and adapters) architectures fix that by inverting the last dependency. The core defines interfaces for what it needs, and the database code implements them:
+
+<Figure n="28.1" caption="The core owns the ports; adapters on both sides depend on it, never the reverse">
+  <svg viewBox="0 0 720 260" role="img" aria-label="Hexagonal architecture with ports and adapters" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="hx-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <polygon points="360,20 500,80 500,180 360,240 220,180 220,80" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="360" y="112" font-weight="600">Domain + use cases</text>
+      <text x="360" y="130" font-size="11">Order, Money, PlaceOrder</text>
+      <text x="360" y="148" font-size="11" fill="var(--bp-muted)">no framework imports</text>
+    </g>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="50" width="150" height="44" rx="2" /><rect x="8" y="166" width="150" height="44" rx="2" />
+      <rect x="562" y="50" width="150" height="44" rx="2" /><rect x="562" y="166" width="150" height="44" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="83" y="70" font-weight="600">HTTP controller</text><text x="83" y="86" font-size="11" fill="var(--bp-muted)">driving adapter</text>
+      <text x="83" y="186" font-weight="600">Message consumer</text><text x="83" y="202" font-size="11" fill="var(--bp-muted)">driving adapter</text>
+      <text x="637" y="70" font-weight="600">Postgres repository</text><text x="637" y="86" font-size="11" fill="var(--bp-muted)">driven adapter</text>
+      <text x="637" y="186" font-weight="600">Payment client</text><text x="637" y="202" font-size="11" fill="var(--bp-muted)">driven adapter</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M158 72H228" marker-end="url(#hx-arrow)" /><path d="M158 188H228" marker-end="url(#hx-arrow)" />
+      <path d="M562 72H494" marker-end="url(#hx-arrow)" /><path d="M562 188H494" marker-end="url(#hx-arrow)" />
+    </g>
+    <g fill="var(--bp-muted)" font-size="11" text-anchor="middle">
+      <text x="190" y="64">calls</text><text x="530" y="64">implements</text>
+      <text x="530" y="180">implements</text><text x="190" y="180">calls</text>
+    </g>
+  </svg>
+</Figure>
+
+- A **port** is an interface owned by the core: `OrderRepository`, `PaymentGateway`, or the use case `PlaceOrder` itself.
+- A **driving adapter** calls into the core: an HTTP controller, a message consumer, a CLI.
+- A **driven adapter** is called by the core through a port: the Postgres repository, the payment provider client, an email sender.
+
+The **dependency rule**: source code dependencies point inwards. The domain imports nothing from ASP.NET, Spring, Express, `net/http` or Django; adapters import the domain.
+
+## A port and its adapter, five ways
+
+Parcel’s order service needs to charge a payment. The core declares what it needs; an adapter at the edge talks to the provider.
+
+<FiveStacks note="The PaymentGateway port and a provider adapter">
+<Stack id="nest" lib="TypeScript">
+```ts
+// core/ports.ts — owned by the domain
+export interface PaymentGateway {
+  charge(orderId: OrderId, amount: Money, idempotencyKey: string): Promise<PaymentRef>;
+}
+export const PAYMENT_GATEWAY = Symbol('PaymentGateway');
+
+// adapters/acme-pay.gateway.ts — depends on the core, not the reverse
+@Injectable()
+export class AcmePayGateway implements PaymentGateway {
+  constructor(private readonly http: HttpService) {}
+  async charge(orderId: OrderId, amount: Money, key: string) { /* call the provider */ }
+}
+// module: { provide: PAYMENT_GATEWAY, useClass: AcmePayGateway }
+```
+</Stack>
+<Stack id="cs" lib="C#">
+```csharp
+// Parcel.Orders.Core — no ASP.NET or EF references in this project
+public interface IPaymentGateway
+{
+    Task<PaymentRef> ChargeAsync(OrderId orderId, Money amount, string idempotencyKey, CancellationToken ct);
+}
+
+// Parcel.Orders.Infrastructure — references Core
+public sealed class AcmePayGateway(HttpClient http) : IPaymentGateway
+{
+    public async Task<PaymentRef> ChargeAsync(OrderId id, Money amount, string key, CancellationToken ct) { /* … */ }
+}
+// Program.cs: builder.Services.AddHttpClient<IPaymentGateway, AcmePayGateway>();
+```
+</Stack>
+<Stack id="kotlin" lib="Kotlin">
+```kotlin
+// orders.core — plain Kotlin, no Spring annotations
+interface PaymentGateway {
+    fun charge(orderId: OrderId, amount: Money, idempotencyKey: String): PaymentRef
+}
+
+// orders.adapters — Spring lives here
+@Component
+class AcmePayGateway(private val client: RestClient) : PaymentGateway {
+    override fun charge(orderId: OrderId, amount: Money, idempotencyKey: String): PaymentRef = TODO()
+}
+```
+</Stack>
+<Stack id="go" lib="Go">
+```go
+// package orders (the core) declares the interface it needs
+type PaymentGateway interface {
+	Charge(ctx context.Context, id OrderID, amount Money, idempotencyKey string) (PaymentRef, error)
+}
+
+// package acmepay implements it implicitly; it imports orders for the types
+type Client struct{ http *http.Client; baseURL string }
+
+func (c *Client) Charge(ctx context.Context, id orders.OrderID, amount orders.Money, key string) (orders.PaymentRef, error) {
+	/* … */
+}
+// main.go: svc := orders.NewService(repo, &acmepay.Client{...})
+```
+</Stack>
+<Stack id="fastapi" lib="Python">
+```python
+# orders/core/ports.py
+class PaymentGateway(Protocol):
+    async def charge(self, order_id: OrderId, amount: Money, idempotency_key: str) -> PaymentRef: ...
+
+# orders/adapters/acme_pay.py
+class AcmePayGateway:              # satisfies the Protocol structurally
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self._client = client
+    async def charge(self, order_id: OrderId, amount: Money, idempotency_key: str) -> PaymentRef: ...
+```
+</Stack>
+</FiveStacks>
+
+The payoff shows in tests and change. The `PlaceOrder` use case is unit-tested with a fake gateway in milliseconds. Switching payment providers, or adding a message consumer that places orders from a queue, touches one adapter and no business code.
+
+<FromTS>
+Go’s and Python’s structural typing make ports almost free: the adapter satisfies the interface without naming it. C#, Java and Kotlin need explicit `implements`, and C# teams usually enforce the rule with separate projects, so the compiler stops the core from referencing infrastructure at all.
+</FromTS>
+
+## Folders that show the architecture
+
+A package structure should make the architecture visible. Parcel’s order service, in any stack:
+
+```text
+orders/
+├── core/            # entities, value objects, domain errors, ports, use cases
+├── adapters/
+│   ├── http/        # controllers, DTOs, Problem Details mapping
+│   ├── postgres/    # repository implementations, SQL, migrations
+│   └── acmepay/     # payment gateway client
+└── main / bootstrap # wiring: the only place that knows every piece
+```
+
+Prefer packaging **by feature** at the top level (`orders/`, `payments/`), and by layer inside each feature, over one global `controllers/`, `services/`, `repositories/` split that scatters every feature across the codebase.
+
+<Pitfall title="Architecture as ceremony">
+Ports for every table, mappers between identical classes, and use-case objects that only forward a call make simple code slow to change. Apply the full structure where rules and integrations justify it, such as Parcel’s orders and payments, and keep CRUD-heavy corners as plain handler, service, repository.
+</Pitfall>
+
+<InTheWild>
+You will hear all three names, often used interchangeably, plus "onion architecture". What teams actually agree on is the dependency rule and keeping frameworks out of the domain. Spring Modulith, .NET solution templates and many Go project layouts encode some version of it.
+</InTheWild>
+
+<InterviewLens>
+"How would you structure a service so business logic is testable and infrastructure is replaceable?" A strong answer describes ports owned by the core, driving and driven adapters, the dependency rule enforced by modules or projects, wiring at the composition root, and the judgment to use it only where the domain is rich enough to justify it.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch28" questions={quiz} />
+
+<Flashcards cards={cards} />

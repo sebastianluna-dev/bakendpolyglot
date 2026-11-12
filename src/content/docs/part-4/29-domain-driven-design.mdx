@@ -1,0 +1,268 @@
+---
+title: Domain-Driven Design
+chapter: 29
+part: Part IV · Architecture
+kicker: Draw the boundaries where the language changes.
+sidebar:
+  order: 29
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What is a bounded context?',
+    options: ['A database schema', 'A boundary within which a model and its language are consistent; the same word may mean something else outside it', 'A microservice', 'A class with many methods'],
+    answer: 1,
+    why: '"Product" in Catalog (descriptions, images) and in Inventory (stock per warehouse) are different models. Each context owns its own.',
+  },
+  {
+    q: 'What is the main rule for an aggregate?',
+    options: ['It maps to exactly one table', 'It is a consistency boundary: changes go through its root, and one transaction changes one aggregate', 'It must have no behaviour', 'It contains every related entity'],
+    answer: 1,
+    why: 'The root enforces invariants for everything inside. Keeping one aggregate per transaction keeps aggregates small and contention low.',
+  },
+  {
+    q: 'How should two aggregates reference each other?',
+    options: ['By holding direct object references', 'By id', 'Through a shared base class', 'Through a global registry'],
+    answer: 1,
+    why: 'Referencing by id keeps boundaries clear, avoids loading huge graphs, and lets aggregates live in different services later.',
+  },
+  {
+    q: 'What is a value object?',
+    options: ['An entity with a numeric id', 'An immutable object defined by its values, with no identity, such as Money or an Address', 'Any DTO', 'A database view'],
+    answer: 1,
+    why: 'Two Money(10, "EUR") values are interchangeable. Value objects carry rules (no negative amounts, currency must match) and remove primitive obsession.',
+  },
+];
+
+export const cards = [
+  { front: 'Ubiquitous language', back: 'The shared vocabulary of domain experts and code within one bounded context.' },
+  { front: 'Aggregate root', back: 'The single entry point to an aggregate; it enforces the invariants of everything inside.' },
+  { front: 'Domain event', back: 'A fact that happened in the domain, named in the past tense: OrderPlaced, PaymentCaptured.' },
+  { front: 'Context map', back: 'A diagram of bounded contexts and how they integrate: upstream, downstream, shared contracts.' },
+];
+
+Hexagonal architecture says to keep the domain in the middle. **Domain-Driven Design** (DDD) says how to find the right domain, and where one domain ends and the next begins. Its strategic half draws boundaries between parts of a business; its tactical half gives you building blocks for the code inside each boundary. Parcel’s service split in Part V comes directly from this chapter.
+
+<Recall
+  items={[
+    { ref: 'Ch. 28', text: 'Ports and adapters keep the domain free of frameworks; the core owns its interfaces.' },
+    { ref: 'Ch. 23', text: 'Transactions should be short and touch as little as possible.' },
+  ]}
+/>
+
+## Strategic design: bounded contexts
+
+In a real business, the same word means different things to different teams. To the catalog team, a **product** has a description, images and a price. To the warehouse, a product is a SKU with stock levels per location. To shipping, it is a parcel with a weight and dimensions. Forcing one `Product` class to serve all three produces a god object nobody can change.
+
+A **bounded context** is a boundary inside which one model and one vocabulary are consistent: the **ubiquitous language** that domain experts and code share. Parcel has five:
+
+<Figure n="29.1" caption="Parcel’s context map: each context owns its model; arrows show who depends on whose published contract">
+  <svg viewBox="0 0 720 220" role="img" aria-label="Parcel bounded contexts" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="cm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="20" width="160" height="64" rx="8" />
+      <rect x="280" y="20" width="160" height="64" rx="8" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="552" y="20" width="160" height="64" rx="8" />
+      <rect x="140" y="140" width="160" height="64" rx="8" />
+      <rect x="420" y="140" width="160" height="64" rx="8" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="88" y="46" font-weight="600">Catalog</text><text x="88" y="64" font-size="11" fill="var(--bp-muted)">FastAPI · products, prices</text>
+      <text x="360" y="46" font-weight="600">Ordering</text><text x="360" y="64" font-size="11" fill="var(--bp-muted)">Spring Kotlin · orders</text>
+      <text x="632" y="46" font-weight="600">Payments</text><text x="632" y="64" font-size="11" fill="var(--bp-muted)">ASP.NET · charges, refunds</text>
+      <text x="220" y="166" font-weight="600">Inventory</text><text x="220" y="184" font-size="11" fill="var(--bp-muted)">Go · stock, reservations</text>
+      <text x="500" y="166" font-weight="600">Shipping</text><text x="500" y="184" font-size="11" fill="var(--bp-muted)">later · parcels, carriers</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M168 52H278" marker-end="url(#cm-arrow)" />
+      <path d="M440 52H550" marker-end="url(#cm-arrow)" />
+      <path d="M320 84L250 138" marker-end="url(#cm-arrow)" />
+      <path d="M400 84L470 138" marker-end="url(#cm-arrow)" />
+    </g>
+    <g fill="var(--bp-muted)" font-size="11" text-anchor="middle">
+      <text x="223" y="44">prices (query)</text><text x="495" y="44">PaymentRequested</text>
+      <text x="262" y="108">OrderPlaced</text><text x="462" y="108">OrderPaid</text>
+    </g>
+  </svg>
+</Figure>
+
+A **context map** like this one shows each context, who depends on whom, and how they integrate: synchronous queries for data needed now (Ordering asks Catalog for the current price), and domain events for facts others react to (Inventory reserves stock when it hears `OrderPlaced`). Each context owns its data; nobody reads another context’s tables.
+
+Bounded contexts are the best starting point for service boundaries, but they are not the same thing: one service can host several small contexts, and Chapter 31 argues that it often should at first.
+
+## Tactical design: the building blocks
+
+Inside a context, DDD offers a small vocabulary:
+
+| Block | What it is | Parcel example |
+| --- | --- | --- |
+| Entity | Has identity that persists as attributes change | `Order`, `Customer` |
+| Value object | Defined only by its values; immutable | `Money`, `Address`, `Sku` |
+| Aggregate | A cluster of objects changed as one unit, with a root | `Order` with its `OrderLine`s |
+| Domain event | A fact that happened, past tense | `OrderPlaced` |
+| Repository | Loads and saves whole aggregates | `OrderRepository` |
+| Domain service | Logic that belongs to no single entity | `PricingPolicy` |
+
+The **aggregate** is the important one. It is a **consistency boundary**: every rule that must hold immediately ("an order’s total equals the sum of its lines", "you cannot add lines after the order is placed") is enforced by the **root**, and nothing outside may change the inside directly. Rules that span aggregates ("stock must not go negative across all orders") are enforced eventually, through events, or by the aggregate that owns the data.
+
+## An aggregate, five ways
+
+<FiveStacks note="Order: lines only while draft; placing raises OrderPlaced">
+<Stack id="nest" lib="TypeScript">
+```ts
+export class Order {
+  private readonly lines: OrderLine[] = [];
+  private status: 'draft' | 'placed' = 'draft';
+  readonly events: DomainEvent[] = [];
+
+  constructor(readonly id: OrderId, readonly customerId: CustomerId) {}
+
+  addLine(sku: Sku, qty: number, unitPrice: Money) {
+    if (this.status !== 'draft') throw new OrderNotEditable(this.id);
+    if (qty < 1 || qty > 10) throw new InvalidQuantity(qty);
+    this.lines.push(new OrderLine(sku, qty, unitPrice));
+  }
+
+  place() {
+    if (this.lines.length === 0) throw new EmptyOrder(this.id);
+    this.status = 'placed';
+    this.events.push(new OrderPlaced(this.id, this.total()));
+  }
+
+  total(): Money { return this.lines.reduce((sum, l) => sum.add(l.subtotal()), Money.zero('EUR')); }
+}
+```
+</Stack>
+<Stack id="cs" lib="C#">
+```csharp
+public sealed class Order
+{
+    private readonly List<OrderLine> _lines = [];
+    private readonly List<IDomainEvent> _events = [];
+    public OrderId Id { get; }
+    public OrderStatus Status { get; private set; } = OrderStatus.Draft;
+    public IReadOnlyList<IDomainEvent> Events => _events;
+
+    public void AddLine(Sku sku, int qty, Money unitPrice)
+    {
+        if (Status != OrderStatus.Draft) throw new OrderNotEditable(Id);
+        if (qty is < 1 or > 10) throw new InvalidQuantity(qty);
+        _lines.Add(new OrderLine(sku, qty, unitPrice));
+    }
+
+    public void Place()
+    {
+        if (_lines.Count == 0) throw new EmptyOrder(Id);
+        Status = OrderStatus.Placed;
+        _events.Add(new OrderPlaced(Id, Total));
+    }
+
+    public Money Total => _lines.Aggregate(Money.Zero("EUR"), (sum, l) => sum + l.Subtotal);
+}
+```
+</Stack>
+<Stack id="kotlin" lib="Kotlin">
+```kotlin
+class Order(val id: OrderId, val customerId: CustomerId) {
+    private val lines = mutableListOf<OrderLine>()
+    var status = OrderStatus.DRAFT; private set
+    val events = mutableListOf<DomainEvent>()
+
+    fun addLine(sku: Sku, qty: Int, unitPrice: Money) {
+        check(status == OrderStatus.DRAFT) { "Order $id is not editable" }
+        require(qty in 1..10) { "Invalid quantity $qty" }
+        lines += OrderLine(sku, qty, unitPrice)
+    }
+
+    fun place() {
+        if (lines.isEmpty()) throw EmptyOrder(id)
+        status = OrderStatus.PLACED
+        events += OrderPlaced(id, total())
+    }
+
+    fun total(): Money = lines.fold(Money.zero("EUR")) { sum, l -> sum + l.subtotal() }
+}
+```
+</Stack>
+<Stack id="go" lib="Go">
+```go
+type Order struct {
+	id     OrderID
+	lines  []OrderLine
+	status Status
+	events []Event
+}
+
+func (o *Order) AddLine(sku Sku, qty int, unitPrice Money) error {
+	if o.status != Draft {
+		return ErrOrderNotEditable
+	}
+	if qty < 1 || qty > 10 {
+		return fmt.Errorf("%w: %d", ErrInvalidQuantity, qty)
+	}
+	o.lines = append(o.lines, OrderLine{Sku: sku, Qty: qty, UnitPrice: unitPrice})
+	return nil
+}
+
+func (o *Order) Place() error {
+	if len(o.lines) == 0 {
+		return ErrEmptyOrder
+	}
+	o.status = Placed
+	o.events = append(o.events, OrderPlaced{OrderID: o.id, Total: o.Total()})
+	return nil
+}
+```
+</Stack>
+<Stack id="fastapi" lib="Python">
+```python
+class Order:
+    def __init__(self, id: OrderId, customer_id: CustomerId) -> None:
+        self.id, self.customer_id = id, customer_id
+        self._lines: list[OrderLine] = []
+        self.status = OrderStatus.DRAFT
+        self.events: list[DomainEvent] = []
+
+    def add_line(self, sku: Sku, qty: int, unit_price: Money) -> None:
+        if self.status is not OrderStatus.DRAFT:
+            raise OrderNotEditable(self.id)
+        if not 1 <= qty <= 10:
+            raise InvalidQuantity(qty)
+        self._lines.append(OrderLine(sku, qty, unit_price))
+
+    def place(self) -> None:
+        if not self._lines:
+            raise EmptyOrder(self.id)
+        self.status = OrderStatus.PLACED
+        self.events.append(OrderPlaced(self.id, self.total()))
+
+    def total(self) -> Money:
+        return sum((l.subtotal() for l in self._lines), Money.zero("EUR"))
+```
+</Stack>
+</FiveStacks>
+
+Every version keeps its state private, exposes behaviour named in the domain’s language, and records events instead of calling other systems. The repository saves the order and, in the same transaction, the events to an outbox (Chapter 34), so they are published reliably.
+
+<Pitfall title="Anaemic domain models">
+Entities that are only getters and setters, with all rules in "service" classes, lose the main benefit of an aggregate: one place that guarantees its invariants. If `order.status = 'placed'` can be written from anywhere, the rule "only place non-empty orders" lives wherever someone remembered it.
+</Pitfall>
+
+<FromTS>
+Value objects such as `Money` replace "primitive obsession": passing `amount: number, currency: string` pairs around invites adding euros to dollars. A small immutable type with `add` that checks currencies removes a whole class of bugs. Records in C#, Java and Kotlin, frozen dataclasses in Python and plain structs in Go make them cheap.
+</FromTS>
+
+<InTheWild>
+Most teams use DDD selectively: strategic design to agree on boundaries and vocabulary (often in an event-storming workshop with domain experts), tactical patterns only in the contexts with real rules. A context that is really CRUD over a few tables does not need aggregates and domain events.
+</InTheWild>
+
+<InterviewLens>
+"How would you split this system into services?" A strong answer starts with bounded contexts discovered from the business language and workflows, draws a context map with upstream and downstream relationships, keeps data owned per context, sizes aggregates around invariants that must hold immediately, and treats services as a deployment decision made after the boundaries are understood.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch29" questions={quiz} />
+
+<Flashcards cards={cards} />

@@ -1,0 +1,157 @@
+---
+title: Authorization
+chapter: 21
+part: Part III · Security and Data under Load
+kicker: Who may do what, to which thing.
+sidebar:
+  order: 21
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A customer requests GET /orders/981, which belongs to another customer. What is usually the best response?',
+    options: ['200 with the order', '403 Forbidden', '404 Not Found, so the API does not reveal that the order exists', '500'],
+    answer: 2,
+    why: 'For resources owned by users, answering 404 avoids confirming that an id exists. 403 fits when the caller may know the resource exists but lacks a permission.',
+  },
+  {
+    q: 'What is IDOR (insecure direct object reference)?',
+    options: ['A SQL injection variant', 'Accessing another user’s object by changing an id, because the server checks the role but not ownership', 'A cross-site scripting attack', 'A broken CORS policy'],
+    answer: 1,
+    why: 'Broken object-level authorization is the most common API vulnerability: the endpoint checks "is a customer" but never "is this customer’s order".',
+  },
+  {
+    q: 'Which model fits "box-office staff may refund any order; customers may cancel their own holds before checkout"?',
+    options: ['Pure RBAC', 'Roles plus resource-based rules (attributes of the user and the resource)', 'Scopes only', 'Network-level allow lists'],
+    answer: 1,
+    why: 'The first rule is a role; the second depends on the resource’s owner and state. Real systems combine roles with resource-based policies.',
+  },
+];
+
+export const cards = [
+  { front: 'RBAC', back: 'Role-based access control: permissions attached to roles, roles assigned to users.' },
+  { front: 'ABAC', back: 'Attribute-based access control: rules over attributes of the user, the resource and the context.' },
+  { front: 'IDOR / BOLA', back: 'Reading or changing another user’s object by guessing its id. Fix: check ownership on every object access.' },
+  { front: 'Deny by default', back: 'Every endpoint requires authorization unless explicitly marked public.' },
+];
+
+Authentication told SeatLock who is calling. Authorization decides what they may do, and it is where most API vulnerabilities live: not in cryptography, but in a missing `if`. This chapter covers the models, where checks belong, and the resource-based rule that every stack must get right: **only the user who holds a seat may check it out**.
+
+<Recall
+  items={[
+    { ref: 'Ch. 11', text: 'Authorization is a policy stop: after routing, before binding, often needing the resource.' },
+    { ref: 'Ch. 19', text: 'After validation, the token’s sub, roles and scopes describe the caller.' },
+    { ref: 'Ch. 20', text: 'Scopes are coarse client permissions; fine-grained rules live in the API.' },
+  ]}
+/>
+
+## Three levels of checks
+
+| Level | Question | SeatLock example | Where |
+| --- | --- | --- | --- |
+| Endpoint | May this caller use this operation at all? | Only `box-office` may call `POST /refunds` | Route attributes, guards, security config |
+| Object | May this caller act on **this** object? | A customer may only check out **their own** hold | Service, with the loaded object |
+| Field | May this caller see or change this field? | Only staff see a customer’s phone number | Output DTOs per role |
+
+Endpoint checks are easy and every framework has declarative support for them. Object-level checks need data, so they live in the service or a resource-based policy, and they are the ones teams forget.
+
+## Models
+
+**RBAC** attaches permissions to roles: simple, auditable, enough for endpoint checks. **ABAC** evaluates rules over attributes of the user, the resource and the context ("owner of the hold, and the hold has not expired"): expressive, needed for object checks. Most systems combine both: roles for coarse permissions, attribute rules for ownership and state. When rules grow complex or must be shared across services, teams move them to a policy engine (OPA, Cedar, or a relationship-based system such as OpenFGA).
+
+## The ownership check, five ways
+
+<FiveStacks note="Only the holder may check out a seat hold">
+<Stack id="nest" lib="service check">
+```ts
+async checkout(holdId: string, user: Claims) {
+  const hold = await this.holds.find(holdId);
+  if (!hold || hold.userId !== user.sub) throw new NotFoundException(); // do not reveal it exists
+  if (hold.expiresAt < this.clock.now()) throw new HoldExpired(holdId);
+  return this.orders.createFrom(hold);
+}
+```
+</Stack>
+<Stack id="cs" lib="resource-based policy">
+```csharp
+public class HoldOwnerHandler : AuthorizationHandler<OwnerRequirement, Hold>
+{
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext ctx, OwnerRequirement req, Hold hold)
+    {
+        if (hold.UserId == ctx.User.FindFirstValue("sub")) ctx.Succeed(req);
+        return Task.CompletedTask;
+    }
+}
+
+// in the endpoint, after loading the hold:
+var result = await authz.AuthorizeAsync(User, hold, "HoldOwner");
+if (!result.Succeeded) return Results.NotFound();
+```
+</Stack>
+<Stack id="java" lib="@PreAuthorize with a bean">
+```java
+@PostMapping("/holds/{holdId}/checkout")
+@PreAuthorize("@holdAccess.isHolder(#holdId, authentication)")
+OrderResponse checkout(@PathVariable UUID holdId) { return checkoutService.checkout(holdId); }
+
+@Component("holdAccess")
+class HoldAccess {
+    boolean isHolder(UUID holdId, Authentication auth) {
+        return holds.findById(holdId).map(h -> h.userId().equals(auth.getName())).orElse(false);
+    }
+}
+```
+</Stack>
+<Stack id="go" lib="explicit">
+```go
+hold, err := s.holds.Find(ctx, holdID)
+if errors.Is(err, ErrNotFound) || (err == nil && hold.UserID != claims.Subject) {
+	return Order{}, ErrNotFound // same answer for missing and not yours
+}
+if err != nil {
+	return Order{}, err
+}
+```
+</Stack>
+<Stack id="django" lib="DRF object permission">
+```python
+class IsHolder(BasePermission):
+    def has_object_permission(self, request, view, obj: Hold) -> bool:
+        return obj.user_id == request.user.id
+
+class CheckoutView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated, IsHolder]
+    def get_queryset(self):
+        return Hold.objects.filter(user=self.request.user)   # scope the query too
+```
+</Stack>
+</FiveStacks>
+
+Two techniques appear. The first checks ownership after loading. The second, in the Django example, **scopes the query** to the caller, so another user’s hold is simply not found. Scoping queries by owner (or tenant) is the stronger default, because a forgotten check still cannot leak data.
+
+<Pitfall title="Role check without ownership check">
+`@Roles('customer')` on `GET /orders/:id` proves the caller is a customer, not that the order is theirs. This is broken object-level authorization, the top item in the OWASP API Security Top 10. Every endpoint that takes an id needs an ownership or tenant check, and a test that tries another user’s id.
+</Pitfall>
+
+## Multi-tenancy
+
+When one deployment serves many organisations, every query must be filtered by tenant. Put the tenant id in the token, set it per request, and enforce it in one place: EF Core global query filters, Hibernate filters, a repository base class, or PostgreSQL **row-level security**, which makes the database itself reject cross-tenant reads.
+
+## Deny by default
+
+Configure every stack so that endpoints require authentication unless explicitly marked public: `RequireAuthorization` as a fallback policy in ASP.NET, `anyRequest().authenticated()` in Spring, a global guard in Nest, `DEFAULT_PERMISSION_CLASSES` in DRF, and middleware on the whole router in Go. A forgotten attribute should fail closed, not open.
+
+<InTheWild>
+Penetration tests on APIs find object-level authorization bugs far more often than anything exotic. Mature teams add an authorization test for every endpoint that takes an id: call it as a second user and expect 404. It is boring, and it catches the bugs that matter.
+</InTheWild>
+
+<InterviewLens>
+"How do you prevent users from accessing each other’s data?" A strong answer: deny by default; endpoint checks with roles or scopes; object-level checks in the service on every load, preferably by scoping queries to the owner or tenant; 404 rather than 403 for owned resources; tenant isolation enforced centrally (query filters or row-level security); and tests that try another user’s ids.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch21" questions={quiz} />
+
+<Flashcards cards={cards} />

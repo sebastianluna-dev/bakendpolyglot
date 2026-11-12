@@ -1,0 +1,203 @@
+---
+title: Idempotency, Webhooks and Background Jobs
+chapter: 24
+part: Part III · Security and Data under Load
+kicker: Every message may arrive twice. Design for it.
+sidebar:
+  order: 24
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A client retries POST /orders after a timeout, sending the same Idempotency-Key. The first attempt actually succeeded. What should the server return?',
+    options: ['A new order', '409 Conflict', 'The stored response of the first attempt', '500'],
+    answer: 2,
+    why: 'The point of the key is that a retry is indistinguishable from the original: same status, same body, no second charge.',
+  },
+  {
+    q: 'What should a webhook receiver do first with an incoming request?',
+    options: ['Process the business logic', 'Verify the signature over the raw body, then record the event id', 'Return 500 to force a retry', 'Forward it to the frontend'],
+    answer: 1,
+    why: 'Anyone can POST to your URL. Verify the HMAC on the exact bytes received, deduplicate by event id, acknowledge fast, process asynchronously.',
+  },
+  {
+    q: 'Most job queues guarantee at-least-once delivery. What does that require of job handlers?',
+    options: ['Nothing', 'They must be idempotent, because a job can run more than once', 'They must finish in under a second', 'They must never throw'],
+    answer: 1,
+    why: 'Workers crash after doing the work but before acknowledging. The job runs again; an idempotent handler makes that harmless.',
+  },
+];
+
+export const cards = [
+  { front: 'Idempotency key', back: 'A client-chosen key that makes a retried request produce the same single effect and response.' },
+  { front: 'Webhook signature', back: 'HMAC of the raw body with a shared secret, compared in constant time.' },
+  { front: 'At-least-once', back: 'A message or job may be delivered more than once. Handlers must be idempotent.' },
+  { front: 'Postgres as a queue', back: 'SELECT … FOR UPDATE SKIP LOCKED lets many workers take different jobs from one table.' },
+];
+
+Networks lose responses, clients retry, payment providers send the same webhook three times, and workers crash halfway through a job. None of these are rare in production; at SeatLock’s scale they happen every hour. This chapter covers the three tools that make "it arrived twice" harmless: idempotency keys for API calls, careful webhook handling, and idempotent background jobs.
+
+<Recall
+  items={[
+    { ref: 'Ch. 10', text: 'POST is not idempotent; clients and proxies retry anyway after timeouts.' },
+    { ref: 'Ch. 23', text: 'Unique constraints and SKIP LOCKED: the database settles races your code cannot see.' },
+  ]}
+/>
+
+## Idempotency keys
+
+The client generates a unique key per logical operation and sends it with the request: `Idempotency-Key: 6f1c…`. The server stores the key with the outcome. A retry with the same key gets the stored response instead of running the operation again.
+
+```sql
+CREATE TABLE idempotency_keys (
+  key          text        NOT NULL,
+  user_id      text        NOT NULL,
+  request_hash text        NOT NULL,          -- detect the same key reused for a different body
+  status       int,
+  response     jsonb,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key)
+);
+```
+
+The flow, in order:
+
+1. Insert the key with no response. If the insert hits the primary key, the key exists: return its stored response, or `409` if the first attempt is still running, or `422` if the body hash differs.
+2. Run the operation, in the same transaction as the business writes when possible.
+3. Store the status and response with the key, then return it.
+4. Expire keys after a day or two.
+
+Because step 1 relies on a primary key, two concurrent retries cannot both run the operation. Implement this once as middleware or a filter in each stack and apply it to every unsafe endpoint that moves money or allocates scarce things; in SeatLock, that is `POST /orders`.
+
+## Receiving webhooks
+
+SeatLock learns that a payment succeeded through a **webhook** from the payment provider. Four rules:
+
+1. **Verify the signature** over the **raw** request body, before parsing JSON, with a constant-time comparison.
+2. **Deduplicate** by the provider’s event id (a unique constraint on a `processed_events` table).
+3. **Acknowledge fast** with `2xx`, and do the real work in a background job; providers time out and retry slow endpoints.
+4. **Do not trust ordering**: "payment succeeded" can arrive before "payment created". Make handlers depend on current state, not on sequence.
+
+<FiveStacks note="Verify an HMAC-SHA256 webhook signature">
+<Stack id="express" lib="node:crypto">
+```ts
+app.post('/webhooks/payments', express.raw({ type: 'application/json' }), (req, res) => {
+  const expected = createHmac('sha256', SECRET).update(req.body).digest('hex');
+  const given = String(req.get('x-signature') ?? '');
+  const ok = given.length === expected.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+  if (!ok) return res.status(401).end();
+  enqueue('payment-event', JSON.parse(req.body.toString()));
+  res.status(204).end();
+});
+```
+</Stack>
+<Stack id="cs" lib="System.Security.Cryptography">
+```csharp
+app.MapPost("/webhooks/payments", async (HttpRequest req, IJobQueue jobs) =>
+{
+    using var ms = new MemoryStream();
+    await req.Body.CopyToAsync(ms);
+    var body = ms.ToArray();
+    var expected = Convert.ToHexStringLower(HMACSHA256.HashData(secret, body));
+    var given = req.Headers["X-Signature"].ToString();
+    if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(given), Encoding.ASCII.GetBytes(expected)))
+        return Results.Unauthorized();
+    await jobs.EnqueueAsync("payment-event", body);
+    return Results.NoContent();
+});
+```
+</Stack>
+<Stack id="java" lib="javax.crypto">
+```java
+@PostMapping("/webhooks/payments")
+ResponseEntity<Void> payment(@RequestBody byte[] body, @RequestHeader("X-Signature") String given) throws Exception {
+    Mac mac = Mac.getInstance("HmacSHA256");
+    mac.init(new SecretKeySpec(secret, "HmacSHA256"));
+    String expected = HexFormat.of().formatHex(mac.doFinal(body));
+    if (!MessageDigest.isEqual(given.getBytes(UTF_8), expected.getBytes(UTF_8))) return ResponseEntity.status(401).build();
+    jobs.enqueue("payment-event", body);
+    return ResponseEntity.noContent().build();
+}
+```
+</Stack>
+<Stack id="go" lib="crypto/hmac">
+```go
+func paymentWebhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(r.Header.Get("X-Signature")), []byte(expected)) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	jobs.Enqueue(r.Context(), "payment-event", body)
+	w.WriteHeader(http.StatusNoContent)
+}
+```
+</Stack>
+<Stack id="django" lib="hmac">
+```python
+@csrf_exempt
+@require_POST
+def payment_webhook(request: HttpRequest) -> HttpResponse:
+    expected = hmac.new(SECRET, request.body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(request.headers.get("X-Signature", ""), expected):
+        return HttpResponse(status=401)
+    handle_payment_event.delay(request.body.decode())     # Celery task
+    return HttpResponse(status=204)
+```
+</Stack>
+</FiveStacks>
+
+Real providers add a timestamp to the signed payload and reject old ones to stop replays; follow your provider’s exact scheme, usually through its SDK.
+
+<Pitfall title="Signing the parsed body">
+If a framework parses JSON before you see it, re-serialising produces different bytes (key order, whitespace) and the signature never matches, so developers "temporarily" disable the check. Read the raw body for webhook routes, as every example above does.
+</Pitfall>
+
+## Background jobs
+
+Anything slow, retryable or scheduled leaves the request path: processing webhook events, sending emails, releasing expired seat holds every minute. Each stack has a standard job library:
+
+| Stack | Common choice | Backed by |
+| --- | --- | --- |
+| TypeScript | BullMQ | Redis |
+| C# | Hangfire, or a `BackgroundService` plus a queue | SQL / Redis |
+| Java / Kotlin | Spring `@Scheduled`, JobRunr, Quartz | SQL |
+| Go | River, Asynq | Postgres / Redis |
+| Python | Celery, Dramatiq, RQ | Redis / RabbitMQ |
+
+Almost all of them deliver **at least once**: if a worker dies after doing the work but before acknowledging it, the job runs again. So every handler must be **idempotent**: check state before acting ("is this order already paid?"), use unique constraints, and use the event or job id as an idempotency key for side effects such as emails.
+
+For moderate volumes, PostgreSQL itself is a fine queue, and it lets you enqueue in the same transaction as your business write:
+
+```sql
+-- a worker takes one job; others skip it instead of waiting
+SELECT id, payload FROM jobs
+WHERE run_at <= now() AND status = 'queued'
+ORDER BY run_at
+FOR UPDATE SKIP LOCKED
+LIMIT 1;
+```
+
+SeatLock’s **hold reaper** runs every minute and releases seats whose hold expired with one conditional update, which is idempotent by construction: running it twice releases nothing extra.
+
+<InTheWild>
+Payment providers document their webhook retries and duplicates explicitly, and they mean it. Teams that skip deduplication find out during an incident when a provider replays a day of events. The pattern (verify, record event id, acknowledge, process idempotently) is identical whether the sender is Stripe, GitHub or an internal service.
+</InTheWild>
+
+<InterviewLens>
+"How do you make payment processing safe against retries?" A strong answer: idempotency keys on the client-facing API stored with the response; payment provider calls made with the provider’s own idempotency key; webhooks verified, deduplicated by event id and processed asynchronously; job handlers idempotent through state checks and unique constraints; and reconciliation as a final safety net.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch24" questions={quiz} />
+
+<Flashcards cards={cards} />

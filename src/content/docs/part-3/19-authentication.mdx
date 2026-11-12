@@ -1,0 +1,219 @@
+---
+title: Authentication
+chapter: 19
+part: Part III · Security and Data under Load
+kicker: Proving who is calling, without becoming a password company.
+sidebar:
+  order: 19
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Which password storage is acceptable today?',
+    options: ['SHA-256 of the password', 'AES-encrypted passwords', 'A slow, salted password hash such as Argon2id or bcrypt', 'Base64 with a secret pepper'],
+    answer: 2,
+    why: 'Password hashes must be slow and salted so stolen hashes are expensive to crack. Fast hashes and reversible encryption are both unacceptable.',
+  },
+  {
+    q: 'A service receives a JWT. Which checks must it perform besides the signature?',
+    options: ['None; a valid signature is enough', 'Expiry (exp), issuer (iss), audience (aud) and the expected algorithm', 'Only that the token is not empty', 'That the payload is valid JSON'],
+    answer: 1,
+    why: 'A token signed by your identity provider for another API, or one that expired yesterday, has a valid signature. Pin the algorithm and validate exp, iss and aud.',
+  },
+  {
+    q: 'What is the main drawback of long-lived JWT access tokens?',
+    options: ['They are too large for headers', 'They cannot be revoked before expiry without extra infrastructure', 'They require a database lookup on every request', 'They only work with HTTPS'],
+    answer: 1,
+    why: 'Self-contained tokens are valid until exp. Keep access tokens short (minutes) and use refresh tokens, which are stored server-side and can be revoked.',
+  },
+  {
+    q: 'In a browser app, where is the safest place to keep a session or refresh credential?',
+    options: ['localStorage', 'A JavaScript variable', 'An HttpOnly, Secure, SameSite cookie', 'The URL query string'],
+    answer: 2,
+    why: 'HttpOnly cookies are not readable by JavaScript, so an XSS bug cannot steal them. SameSite reduces CSRF exposure.',
+  },
+];
+
+export const cards = [
+  { front: 'Authentication vs authorization', back: 'Authentication: who are you? (401 if unknown). Authorization: may you do this? (403 if not).' },
+  { front: 'JWT', back: 'header.payload.signature, base64url-encoded. Signed, not encrypted: anyone can read the payload.' },
+  { front: 'Refresh token rotation', back: 'Each refresh returns a new refresh token and invalidates the old one; reuse of an old one signals theft.' },
+  { front: 'Argon2id', back: 'The recommended password hashing algorithm: slow, salted, memory-hard. bcrypt is the common alternative.' },
+];
+
+Part III builds **SeatLock**, an event ticketing service where users hold seats and check out. Before anyone can hold a seat, the system needs to know who they are. This chapter covers the two families of authentication you will meet in every stack, sessions and tokens, the rules for passwords, and how each framework validates a token on every request.
+
+<Recall
+  items={[
+    { ref: 'Ch. 10', text: 'Authorization travels in a header; 401 means not authenticated, 403 means not allowed.' },
+    { ref: 'Ch. 11', text: 'Authentication belongs in middleware, early in the pipeline, because it only reads headers.' },
+    { ref: 'Ch. 16', text: 'Signing keys are secrets: in a secret manager, rotated, never in Git.' },
+  ]}
+/>
+
+## Sessions or tokens
+
+<Figure n="19.1" caption="A session is a key to state on the server; a token carries its own claims and is checked with a key">
+  <svg viewBox="0 0 720 190" role="img" aria-label="Session versus token authentication" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="8" width="344" height="174" rx="2" />
+      <rect x="368" y="8" width="344" height="174" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" font-weight="600"><text x="24" y="32">Session cookie</text><text x="384" y="32">Bearer token (JWT)</text></g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.25">
+      <rect x="24" y="48" width="130" height="30" rx="2" /><rect x="206" y="48" width="130" height="30" rx="2" />
+      <rect x="384" y="48" width="160" height="30" rx="2" /><rect x="576" y="48" width="120" height="30" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" font-size="11.5" text-anchor="middle">
+      <text x="89" y="67">sid=8f3c… (random)</text><text x="271" y="67">session store</text>
+      <text x="464" y="67">eyJhbGci… (claims)</text><text x="636" y="67">public key</text>
+    </g>
+    <g stroke="var(--bp-muted)" stroke-width="1.25"><path d="M154 63H204" /><path d="M544 63H574" /></g>
+    <g fill="var(--bp-ink)" font-size="11.5">
+      <text x="24" y="104">+ revoke instantly: delete the row</text>
+      <text x="24" y="122">+ tiny cookie, nothing to leak in it</text>
+      <text x="24" y="140">− a store lookup on every request</text>
+      <text x="24" y="158">− CSRF to handle (Chapter 22)</text>
+      <text x="384" y="104">+ any service can verify with the public key</text>
+      <text x="384" y="122">+ no lookup, works across services</text>
+      <text x="384" y="140">− cannot revoke before exp</text>
+      <text x="384" y="158">− payload readable by anyone</text>
+    </g>
+  </svg>
+</Figure>
+
+A **session** is a random identifier in a cookie that points to state stored on the server (Redis or a table). A **token** is a signed document that carries its own claims; the server verifies the signature and reads the claims without a lookup. Neither is "more secure": sessions are simpler for a single web app and its own backend; tokens shine when many services must verify the same caller, which is why SeatLock’s API accepts tokens from an identity provider (Chapter 20).
+
+## Passwords, if you must store them
+
+The best password storage is none: delegate login to an identity provider. When you must store passwords, the rules are short and non-negotiable:
+
+- Hash with a slow, salted, memory-hard algorithm: **Argon2id** first, **bcrypt** as the common alternative. Every stack has a maintained library or a built-in (`PasswordHasher` in ASP.NET Identity, `PasswordEncoder` in Spring Security, Django’s hashers).
+- Never encrypt passwords (encryption is reversible), never use a fast hash (SHA-256 is designed to be fast, which helps attackers).
+- Rate-limit login attempts, return the same error for unknown user and wrong password, and support multi-factor authentication.
+
+## JWTs, correctly
+
+A **JWT** is three base64url parts: a header (algorithm, key id), a payload of claims, and a signature. It is signed, not encrypted: never put anything secret in it.
+
+```json
+{ "iss": "https://id.seatlock.dev", "sub": "user_8121", "aud": "seatlock-api",
+  "exp": 1794510000, "iat": 1794509100, "scope": "holds:write orders:read", "roles": ["customer"] }
+```
+
+Validation is where most bugs are. A service must:
+
+1. Verify the signature with a key it trusts, looked up by `kid` from the issuer’s JWKS endpoint.
+2. **Pin the algorithm** (for example RS256 or ES256); never accept `none` or let the token choose.
+3. Check `exp` (with a small clock skew), `iss` (the issuer you trust) and `aud` (this API).
+4. Only then read `sub`, scopes and roles.
+
+<FiveStacks note="Validate a bearer token from the identity provider">
+<Stack id="nest" lib="jose in a guard">
+```ts
+const JWKS = createRemoteJWKSet(new URL(`${ISSUER}/protocol/openid-connect/certs`));
+
+@Injectable()
+export class JwtGuard implements CanActivate {
+  async canActivate(ctx: ExecutionContext) {
+    const req = ctx.switchToHttp().getRequest();
+    const token = req.headers.authorization?.replace(/^Bearer /, '');
+    if (!token) throw new UnauthorizedException();
+    const { payload } = await jwtVerify(token, JWKS, { issuer: ISSUER, audience: 'seatlock-api', algorithms: ['RS256'] })
+      .catch(() => { throw new UnauthorizedException(); });
+    req.user = payload;
+    return true;
+  }
+}
+```
+</Stack>
+<Stack id="cs" lib="JwtBearer">
+```csharp
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(o =>
+    {
+        o.Authority = "https://id.seatlock.dev/realms/seatlock";   // discovers JWKS
+        o.Audience = "seatlock-api";
+    });
+builder.Services.AddAuthorization();
+
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapPost("/holds", CreateHold).RequireAuthorization();
+```
+</Stack>
+<Stack id="java" lib="Spring Security resource server">
+```java
+@Bean
+SecurityFilterChain api(HttpSecurity http) throws Exception {
+    return http
+        .authorizeHttpRequests(a -> a.requestMatchers("/health").permitAll().anyRequest().authenticated())
+        .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()))
+        .build();
+}
+// application.yml
+// spring.security.oauth2.resourceserver.jwt.issuer-uri: https://id.seatlock.dev/realms/seatlock
+// spring.security.oauth2.resourceserver.jwt.audiences: seatlock-api
+```
+</Stack>
+<Stack id="go" lib="golang-jwt + keyfunc">
+```go
+jwks, err := keyfunc.NewDefaultCtx(ctx, []string{issuer + "/protocol/openid-connect/certs"})
+// …
+func authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		tok, err := jwt.Parse(raw, jwks.Keyfunc,
+			jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(issuer),
+			jwt.WithAudience("seatlock-api"), jwt.WithExpirationRequired())
+		if err != nil || !tok.Valid {
+			writeProblem(w, Problem{Status: 401, Title: "Unauthenticated"})
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withClaims(r.Context(), tok.Claims)))
+	})
+}
+```
+</Stack>
+<Stack id="fastapi" lib="PyJWT">
+```python
+jwks = PyJWKClient(f"{ISSUER}/protocol/openid-connect/certs")
+bearer = HTTPBearer()
+
+def current_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> Claims:
+    try:
+        key = jwks.get_signing_key_from_jwt(creds.credentials)
+        return jwt.decode(creds.credentials, key.key, algorithms=["RS256"],
+                          audience="seatlock-api", issuer=ISSUER)
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Unauthenticated")
+```
+</Stack>
+</FiveStacks>
+
+ASP.NET Core and Spring discover the keys from the issuer’s metadata and do every check for you, given the right configuration. Nest, Go and FastAPI use small libraries; the checks are explicit, which makes them easy to review.
+
+## Access tokens, refresh tokens and logout
+
+Keep **access tokens short-lived** (5 to 15 minutes) so a stolen one expires soon. A **refresh token**, stored server-side by the identity provider and revocable, obtains new access tokens. With **rotation**, every refresh returns a new refresh token and invalidates the old one; if an old one is used again, the provider revokes the whole family, because it has probably been stolen.
+
+Logout then means revoking the refresh token and letting the short access token expire. If you need instant revocation of access tokens (an employee is fired, an account is compromised), add a small denylist of token ids checked at the gateway, or use opaque tokens checked by introspection.
+
+<Pitfall title="Tokens in localStorage">
+Anything JavaScript can read, an XSS bug can steal. For browser apps, the safest pattern is a **backend for frontend** (BFF): the browser holds an `HttpOnly`, `Secure`, `SameSite` session cookie for the BFF, and the BFF holds the tokens and calls APIs. Mobile apps and services, which have no cookies or XSS, use bearer tokens directly.
+</Pitfall>
+
+<InTheWild>
+Most companies no longer build login themselves. They run an identity provider (Keycloak, Auth0, Okta, Microsoft Entra ID, AWS Cognito) and their APIs only validate tokens. As a backend engineer you are expected to configure token validation correctly, understand the claims, and know when sessions are the simpler answer.
+</InTheWild>
+
+<InterviewLens>
+"Sessions or JWTs?" A strong answer refuses the false choice: sessions for a first-party web app with its own backend (simple, instantly revocable), tokens from an identity provider when several APIs or clients need to verify identity, with short access tokens, rotating refresh tokens, cookies via a BFF in browsers, and correct validation of signature, algorithm, exp, iss and aud.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch19" questions={quiz} />
+
+<Flashcards cards={cards} />

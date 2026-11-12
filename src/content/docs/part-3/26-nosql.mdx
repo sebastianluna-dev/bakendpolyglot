@@ -1,0 +1,106 @@
+---
+title: NoSQL
+chapter: 26
+part: Part III · Security and Data under Load
+kicker: Different shapes of data, different databases, and when Postgres is still the answer.
+sidebar:
+  order: 26
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What is the first step when designing a DynamoDB or Cassandra table?',
+    options: ['Normalise the entities', 'List the access patterns (the queries) and design keys to serve them', 'Choose the largest instance', 'Add secondary indexes for every column'],
+    answer: 1,
+    why: 'Key-value and wide-column stores serve queries by key. You design the partition and sort keys from the queries you need, not from the entities.',
+  },
+  {
+    q: 'When does a document database such as MongoDB fit better than a relational one?',
+    options: ['When you need joins across many entities', 'When data is read and written as self-contained documents with varied shape', 'When you need multi-row transactions everywhere', 'Always for new projects'],
+    answer: 1,
+    why: 'Documents shine when an aggregate is read as a whole and its shape varies. Heavy relationships and cross-entity transactions favour relational databases.',
+  },
+  {
+    q: 'You need flexible per-event attributes inside an otherwise relational SeatLock schema. What is the lightest option?',
+    options: ['Add MongoDB', 'A jsonb column in PostgreSQL, indexed with GIN if queried', 'One column per possible attribute', 'Store a serialised string'],
+    answer: 1,
+    why: 'jsonb gives document flexibility inside your transactional database, with indexing and constraints, and no second system to operate.',
+  },
+];
+
+export const cards = [
+  { front: 'Partition key', back: 'Decides which node stores an item. All queries in key-value and wide-column stores start from it.' },
+  { front: 'Access-pattern design', back: 'List the queries first, then shape keys and duplicate data so each query is one lookup.' },
+  { front: 'jsonb', back: 'PostgreSQL’s binary JSON type: flexible attributes with GIN indexes, inside ACID transactions.' },
+];
+
+"NoSQL" is not one thing. It is a family of databases that gave up some relational features (joins, flexible queries, sometimes transactions) to gain something else: horizontal scale, flexible shapes, or extreme speed for one access pattern. This chapter maps the family, shows how modelling changes, and gives you the honest default: start relational, add a specialised store when a specific need proves it.
+
+<Recall
+  items={[
+    { ref: 'Ch. 14', text: 'Relational modelling normalises facts and uses joins and indexes to answer any query.' },
+    { ref: 'Ch. 25', text: 'Redis is memory with optional persistence; truth stays in PostgreSQL.' },
+  ]}
+/>
+
+## The family
+
+| Type | Examples | Data model | Best at | Watch out for |
+| --- | --- | --- | --- | --- |
+| Key-value | Redis, DynamoDB | Key → value or item | Lookups by key at any scale | Queries you did not design keys for |
+| Document | MongoDB, Couchbase | JSON documents in collections | Self-contained aggregates with varied shape | Relationships, cross-document consistency |
+| Wide-column | Cassandra, ScyllaDB, Bigtable | Partitions of sorted rows | Huge write volumes, time series | Ad hoc queries, deletes, modelling discipline |
+| Search | OpenSearch, Elasticsearch | Inverted indexes | Full-text, faceted search, logs | Being treated as a primary database |
+| Graph | Neo4j, Neptune | Nodes and edges | Deep relationship traversal | Everything else |
+
+## Modelling by access pattern
+
+Relational modelling starts from entities and answers any query later. Key-value and wide-column modelling starts from the **queries** and shapes the data to answer each one with a single lookup. For SeatLock’s "show a user’s orders, newest first" in DynamoDB:
+
+```text
+PK = USER#8121          SK = ORDER#2026-11-12T19:20:05Z#o_77   → order summary
+PK = USER#8121          SK = ORDER#2026-11-09T10:02:41Z#o_61   → order summary
+PK = EVENT#e_42         SK = SEAT#F-14                          → seat state
+```
+
+One query on `PK = USER#8121` with `SK` beginning `ORDER#`, sorted descending, returns the page. The price is duplication: the order summary also lives elsewhere, and you keep the copies consistent in code. Add a query later that the keys do not serve, and you add a secondary index or a new copy of the data.
+
+Document databases sit in the middle: store each order as one document with its line items embedded, because it is always read and written whole, and reference the user by id.
+
+<Pitfall title="Choosing NoSQL for scale you do not have">
+A well-indexed PostgreSQL on one machine handles tens of thousands of transactions per second, with joins, constraints and ad hoc queries. Teams that start on a key-value store for future scale often spend the first year rebuilding joins, transactions and reports in application code. Choose by access patterns and operational needs, not by fashion.
+</Pitfall>
+
+## Consistency trade-offs
+
+Distributed databases replicate data across nodes, and they let you choose how many replicas must agree on reads and writes. DynamoDB offers eventually consistent reads by default and strongly consistent reads at higher cost; Cassandra tunes consistency per query (`ONE`, `QUORUM`, `ALL`). Eventually consistent reads may return data that is a moment old. Chapter 46 covers the theory (CAP, PACELC); for now, know which kind of read each query uses.
+
+## The relational middle ground
+
+PostgreSQL covers more of the NoSQL space than its reputation suggests:
+
+- **jsonb** columns for flexible attributes, indexed with GIN, queried with operators, inside transactions.
+- **Full-text search** with `tsvector` for moderate needs, before you run a search cluster.
+- **Partitioning** for large time-series tables.
+- Extensions such as PostGIS for geospatial data and pgvector for embeddings.
+
+```sql
+ALTER TABLE events ADD COLUMN attributes jsonb NOT NULL DEFAULT '{}';
+CREATE INDEX events_attributes_idx ON events USING gin (attributes);
+SELECT id, name FROM events WHERE attributes @> '{"accessible": true}';
+```
+
+<InTheWild>
+Typical production systems are polyglot in storage: PostgreSQL as the system of record, Redis for caching and rate limits, a search cluster fed from the database for full-text search, and perhaps DynamoDB or Cassandra for one very high-volume stream such as events or telemetry. Each extra store is another thing to back up, monitor, secure and keep in sync, so each one needs a reason.
+</InTheWild>
+
+<InterviewLens>
+"SQL or NoSQL for this system?" A strong answer lists the access patterns, consistency needs, data relationships, scale and the team’s operational experience; defaults to a relational database as system of record; and adds specialised stores for specific needs (search, cache, extreme write volume) with a clear plan for keeping them in sync.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch26" questions={quiz} />
+
+<Flashcards cards={cards} />

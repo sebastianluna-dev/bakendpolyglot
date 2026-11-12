@@ -1,0 +1,176 @@
+---
+title: Web Security
+chapter: 22
+part: Part III · Security and Data under Load
+kicker: The attacks that actually happen, and the defaults that stop them.
+sidebar:
+  order: 22
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What does CORS protect?',
+    options: ['Your API from all cross-origin requests', 'Browser users: it controls which other origins’ scripts may read your API’s responses', 'Your database from injection', 'Server-to-server calls'],
+    answer: 1,
+    why: 'CORS is enforced by browsers. curl and other servers ignore it. It is not an access-control mechanism for your API.',
+  },
+  {
+    q: 'Which defence prevents SQL injection?',
+    options: ['Escaping quotes by hand', 'Parameterised queries (bind variables), which every ORM and driver supports', 'A web application firewall only', 'Validating that input is short'],
+    answer: 1,
+    why: 'With parameters, input is never parsed as SQL. Validation and WAFs help, but parameterisation is the actual fix.',
+  },
+  {
+    q: 'An endpoint fetches a URL supplied by the user to generate a preview. Which attack must you consider?',
+    options: ['CSRF', 'SSRF: the server can be made to call internal addresses such as cloud metadata endpoints', 'XSS', 'Clickjacking'],
+    answer: 1,
+    why: 'Server-side request forgery turns your server into a proxy into your network. Allow-list destinations and block private and metadata IP ranges.',
+  },
+  {
+    q: 'When does CSRF matter for an API?',
+    options: ['Always', 'When the browser sends credentials automatically, such as cookies', 'Only for GET requests', 'Never, if you use HTTPS'],
+    answer: 1,
+    why: 'CSRF abuses ambient credentials. Bearer tokens in headers are not sent automatically; cookie sessions are, so they need SameSite and CSRF tokens.',
+  },
+];
+
+export const cards = [
+  { front: 'CORS preflight', back: 'An OPTIONS request the browser sends before a non-simple cross-origin request, asking which origins, methods and headers are allowed.' },
+  { front: 'SSRF', back: 'Making a server request internal resources on the attacker’s behalf. Allow-list outbound destinations.' },
+  { front: 'Token bucket', back: 'Rate limiting with a bucket of N tokens refilled at a steady rate; each request takes one.' },
+  { front: 'SameSite cookie', back: 'Lax or Strict stops the browser sending the cookie on most cross-site requests, the main CSRF defence today.' },
+];
+
+Security incidents in backends rarely involve clever cryptography. They involve a query built with string concatenation, a CORS policy set to `*` with credentials, an endpoint that fetches any URL it is given, or a login that can be tried a million times. This chapter walks through the attacks that keep appearing in the OWASP Top 10 lists, and the default in each stack that stops them.
+
+<Recall
+  items={[
+    { ref: 'Ch. 13', text: 'Input DTOs with allow-listed fields prevent mass assignment.' },
+    { ref: 'Ch. 19', text: 'Browsers should hold HttpOnly, Secure, SameSite cookies, not tokens in localStorage.' },
+    { ref: 'Ch. 21', text: 'Broken object-level authorization is the most common API vulnerability.' },
+  ]}
+/>
+
+## Injection
+
+Any time input is concatenated into something that is later parsed (SQL, shell commands, LDAP filters, HTML), an attacker can change its meaning. The fix is never to concatenate: use **parameters**, which every driver and ORM in this book supports.
+
+```sql
+-- never: "SELECT * FROM events WHERE city = '" + city + "'"
+SELECT * FROM events WHERE city = $1;   -- the value is sent separately, never parsed as SQL
+```
+
+Watch the escape hatches: raw SQL methods (`$queryRawUnsafe`, `FromSqlRaw` with interpolation, `JdbcTemplate` with string building, `fmt.Sprintf` into a query, Django’s `.extra()` and `raw()` with formatting). Code review should flag every one.
+
+## CORS
+
+Browsers stop a script from one origin reading responses from another, unless the server allows it. **CORS** is how the server says which origins may read. For requests with custom headers or methods, the browser first sends a **preflight** `OPTIONS` request and only proceeds if the answer allows it.
+
+Configure CORS in each stack’s middleware with an explicit list of your frontends’ origins. Never combine a wildcard origin with credentials, and never reflect the `Origin` header back without checking it against the list. Remember that CORS protects users’ browsers, not your API: a script on any server can call your API regardless.
+
+## CSRF
+
+Cross-site request forgery tricks a logged-in user’s browser into sending a request your site did not intend, carrying the user’s cookies automatically. APIs that authenticate with bearer tokens in headers are not exposed, because browsers do not attach them on their own. Cookie-based sessions are: use `SameSite=Lax` or `Strict` cookies, and for state-changing requests add an anti-CSRF token (built into Django, ASP.NET and Spring Security for cookie sessions).
+
+## SSRF
+
+Server-side request forgery happens when your server fetches a URL the user controls: link previews, webhooks to user-supplied endpoints, image imports. The attacker supplies `http://169.254.169.254/` (the cloud metadata service) or `http://localhost:8080/admin` and your server dutifully fetches it from inside the network. Defend with an allow-list of destinations where possible, block private, loopback and link-local ranges after DNS resolution, disable redirects or re-check them, and run such fetches from an isolated egress proxy.
+
+## Rate limiting
+
+Rate limits protect against credential stuffing, scraping and accidental overload. The common algorithms:
+
+| Algorithm | Behaviour | Good for |
+| --- | --- | --- |
+| Fixed window | N requests per clock minute | Simple quotas; bursty at window edges |
+| Sliding window | N requests in any rolling minute | Fairer limits |
+| Token bucket | Bucket of N tokens refilled steadily | Allowing short bursts with a steady average |
+| Concurrency limit | At most N in flight | Protecting expensive endpoints |
+
+<FiveStacks note="100 requests per minute per client on the API">
+<Stack id="nest" lib="@nestjs/throttler">
+```ts
+@Module({
+  imports: [ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }])],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],   // 429 when exceeded
+})
+export class AppModule {}
+```
+</Stack>
+<Stack id="cs" lib="built-in rate limiter">
+```csharp
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddFixedWindowLimiter("api", w => { w.PermitLimit = 100; w.Window = TimeSpan.FromMinutes(1); });
+});
+app.UseRateLimiter();
+app.MapGroup("/").RequireRateLimiting("api");
+```
+</Stack>
+<Stack id="java" lib="Bucket4j">
+```java
+Bucket bucketFor(String clientId) {
+    return buckets.computeIfAbsent(clientId, id -> Bucket.builder()
+        .addLimit(limit -> limit.capacity(100).refillGreedy(100, Duration.ofMinutes(1)))
+        .build());
+}
+// in a filter: if (!bucketFor(clientId).tryConsume(1)) { res.setStatus(429); return; }
+```
+</Stack>
+<Stack id="go" lib="x/time/rate">
+```go
+func (l *limiters) get(client string) *rate.Limiter {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lim, ok := l.m[client]
+	if !ok {
+		lim = rate.NewLimiter(rate.Every(time.Minute/100), 100) // token bucket
+		l.m[client] = lim
+	}
+	return lim
+}
+// middleware: if !lims.get(clientID(r)).Allow() { writeProblem(w, Problem{Status: 429, Title: "Too many requests"}); return }
+```
+</Stack>
+<Stack id="fastapi" lib="slowapi">
+```python
+limiter = Limiter(key_func=client_id)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.get("/events")
+@limiter.limit("100/minute")
+async def list_events(request: Request): ...
+```
+</Stack>
+</FiveStacks>
+
+These limiters keep state in the process, so with several replicas each replica allows its own 100. For a global limit, keep counters in Redis (Chapter 25) or enforce limits at the API gateway, which is where most companies put them.
+
+## Security headers and transport
+
+Serve only over HTTPS and send `Strict-Transport-Security`. For APIs, `Content-Type` must be accurate and `X-Content-Type-Options: nosniff` set; for anything that renders HTML, a `Content-Security-Policy` is the strongest XSS mitigation. Libraries such as `helmet` (Express) and the defaults in Spring Security set most headers for you.
+
+## Dependencies and secrets
+
+Most compromised applications are compromised through a dependency or a leaked credential, not their own code. Run dependency scanning in CI (Dependabot or Renovate plus `npm audit`, `dotnet list package --vulnerable`, OWASP Dependency-Check or Snyk, `govulncheck`, `pip-audit`), pin versions with lockfiles, and enable secret scanning on every repository.
+
+<Pitfall title="Error messages that help attackers">
+"User not found" versus "wrong password" lets an attacker enumerate accounts; detailed SQL errors reveal your schema; stack traces reveal frameworks and versions. Return generic messages to clients, detailed ones to logs, linked by the request id.
+</Pitfall>
+
+<InTheWild>
+Companies run security in layers: a WAF and rate limits at the edge, an API gateway validating tokens, services enforcing authorization, databases with least-privilege users, and scanners in CI. As the senior on a team, you are expected to know which layer stops which attack, and to notice when a change removes one.
+</InTheWild>
+
+<InterviewLens>
+"Review this endpoint for security issues." A strong answer walks a checklist: authentication and deny-by-default, object-level authorization, input validation and mass assignment, parameterised queries, output DTOs, rate limits, SSRF if it fetches URLs, CSRF if it uses cookies, error messages, logging without secrets, and dependency health.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch22" questions={quiz} />
+
+<Flashcards cards={cards} />

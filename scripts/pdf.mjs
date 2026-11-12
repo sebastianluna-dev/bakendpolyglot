@@ -22,10 +22,11 @@ const port = server.address().port;
 
 const browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
 const page = await browser.newPage();
+page.setDefaultTimeout(600_000);
 page.on('pageerror', (e) => console.error('[page error]', e.message));
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warn') console.error('[console]', m.text()); });
-await page.goto(`http://localhost:${port}/print/`, { waitUntil: 'networkidle0' });
-await page.waitForFunction('window.__pagedDone === true', { timeout: 60_000 });
+await page.goto(`http://localhost:${port}/print/`, { waitUntil: 'load', timeout: 600_000 });
+await page.waitForFunction('window.__pagedDone === true', { timeout: 600_000 });
 await page.pdf({ path: OUT, preferCSSPageSize: true, printBackground: true });
 const pages = await page.evaluate(() => document.querySelectorAll('.pagedjs_page').length);
 await browser.close();
