@@ -27,7 +27,7 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
+      <!-- compile scope: data/Constraints reads PSQLException's constraint name -->
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
