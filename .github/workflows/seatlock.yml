@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: [nest, django, go]
+        stack: [nest, django, go, aspnet, spring-java]
     env:
       SEATLOCK_STACK: ${{ matrix.stack }}
     steps:
