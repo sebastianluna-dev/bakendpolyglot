@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/SeatLock/SeatLock.csproj" />
+  <Project Path="tests/SeatLock.Tests/SeatLock.Tests.csproj" />
+</Solution>
