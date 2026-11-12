@@ -1,0 +1,227 @@
+---
+title: Python, Django and FastAPI
+chapter: 8
+part: Part I · Five Languages
+kicker: Dynamic at heart, typed by choice, two very different frameworks.
+sidebar:
+  order: 8
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What does CPython do with type hints at runtime?',
+    options: ['Enforces them and raises TypeError', 'Nothing by default: they are stored as annotations that tools and libraries may read', 'Compiles them to C', 'Uses them to pick faster bytecode'],
+    answer: 1,
+    why: 'Hints are checked by tools such as mypy or pyright. Libraries like Pydantic and FastAPI read them at runtime to validate data, which is why they matter so much there.',
+  },
+  {
+    q: 'Inside an async def FastAPI endpoint you call requests.get(), a blocking HTTP client. What happens?',
+    options: ['FastAPI runs it in a thread automatically', 'The event loop is blocked, so every other request on that worker waits', 'It raises an error', 'It becomes non-blocking'],
+    answer: 1,
+    why: 'async def runs on the event loop, exactly like Node. Use an async client (httpx.AsyncClient) there, or declare the endpoint with plain def so FastAPI runs it in a thread pool.',
+  },
+  {
+    q: 'In standard CPython, why do threads not speed up CPU-bound Python code?',
+    options: ['Python has no threads', 'The Global Interpreter Lock lets only one thread execute Python bytecode at a time', 'Threads always run on one core by OS policy', 'The garbage collector stops threads'],
+    answer: 1,
+    why: 'The GIL serialises bytecode execution. Threads still help for I/O, which releases the GIL. For CPU work, use processes, native extensions, or the optional free-threaded build.',
+  },
+  {
+    q: 'Which statement about Django is accurate?',
+    options: ['It has no ORM', 'It is batteries-included: ORM, migrations, admin, auth, forms and templates in one framework', 'It only supports async views', 'It generates OpenAPI docs automatically'],
+    answer: 1,
+    why: 'Django’s strength is everything included and integrated. REST APIs usually add Django REST Framework; OpenAPI needs an add-on such as drf-spectacular.',
+  },
+  {
+    q: 'What is a Python context manager used for?',
+    options: ['Dependency injection', 'Guaranteeing setup and cleanup around a block with the with statement', 'Defining routes', 'Thread scheduling'],
+    answer: 1,
+    why: 'with opens something and guarantees it is closed, even on exceptions: files, transactions, locks. It is C#’s using and Java’s try-with-resources.',
+  },
+];
+
+export const cards = [
+  { front: 'GIL', back: 'The Global Interpreter Lock: in standard CPython, one thread runs Python bytecode at a time.' },
+  { front: 'WSGI vs ASGI', back: 'WSGI is the synchronous server interface (Gunicorn); ASGI is the async one (Uvicorn), needed for async and WebSockets.' },
+  { front: 'Depends (FastAPI)', back: 'Declares a dependency as a function parameter; FastAPI calls it per request and injects the result.' },
+  { front: 'Pydantic model', back: 'A class whose type hints are validated and coerced at runtime; FastAPI uses it for request and response bodies.' },
+];
+
+Python is the only dynamically typed language in this book, and the most widely used. Its backend world splits in two. **Django** is a batteries-included framework from 2005 that runs a huge share of the web’s products. **FastAPI** is a modern, async, type-driven framework that has become the default for new APIs and anything near machine learning. You will learn both, because both are hiring targets.
+
+<Recall
+  items={[
+    { ref: 'Ch. 2', text: 'uv installs Python, manages the virtual environment and locks dependencies in pyproject.toml.' },
+    { ref: 'Ch. 3', text: 'Blocking code on an event loop stalls every request on that process.' },
+  ]}
+/>
+
+## The interpreter
+
+**CPython**, the standard implementation, compiles your source to bytecode and interprets it. There is no JIT in the default build, so pure Python is much slower than the other four runtimes for CPU work. That rarely matters for I/O-bound APIs, and heavy lifting usually happens in native libraries (NumPy, Pydantic’s Rust core, database drivers).
+
+Memory is managed by reference counting plus a cycle collector. The famous constraint is the **GIL**, the Global Interpreter Lock: in standard CPython, only one thread executes Python bytecode at a time. Threads still help with I/O, because waiting releases the lock. An optional free-threaded build without the GIL exists since Python 3.13, but it is not the default, and most deployments still assume the GIL.
+
+## Types are optional, and that is the point
+
+Python checks types only if you ask a tool to. Type hints are annotations that **mypy** or **pyright** check before you run, and that the interpreter ignores.
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Book:
+    id: int
+    title: str
+    author: str
+    year: int | None = None
+
+def era(book: Book) -> str:
+    match book:
+        case Book(year=None):
+            return "unknown"
+        case Book(year=y) if y < 1950:
+            return "classic"
+        case _:
+            return "modern"
+```
+
+`@dataclass` generates the constructor, equality and `repr`; `frozen=True` makes it immutable. `match` (Python 3.10+) does structural pattern matching.
+
+<FromTS>
+Think of type hints as TypeScript with `--noEmit` and no compile step: the checker is a separate tool, and running the code never looks at the types. Run pyright (it powers Pylance in VS Code) in strict mode in CI, and treat its errors the way you treat `tsc` errors. The exception is Pydantic and FastAPI, which read hints at runtime to validate input.
+</FromTS>
+
+## Three features you will meet everywhere
+
+**Decorators** wrap functions. Every route in both frameworks is declared with one, and the pattern is the same as a NestJS decorator, minus the metadata reflection.
+
+**Generators** produce values lazily with `yield`. They are how Python streams large responses and how FastAPI dependencies run cleanup code.
+
+**Context managers** guarantee setup and cleanup with `with`, like `using` in C#:
+
+```python
+with open("loans.csv") as f:          # closed even if an exception is raised
+    rows = f.readlines()
+
+with transaction.atomic():           # Django: commit at the end, roll back on error
+    loan = Loan.objects.create(book=book, user=user)
+    book.available = False
+    book.save()
+```
+
+## Concurrency: sync, threads and asyncio
+
+Python offers every model, which is exactly why it confuses newcomers:
+
+| Model | How it serves requests | Used by |
+| --- | --- | --- |
+| Processes | Several worker processes, one request at a time each | Gunicorn with Django, the classic setup |
+| Threads | Several threads per process; I/O releases the GIL | Gunicorn threaded workers, FastAPI’s plain `def` endpoints |
+| asyncio | One event loop per process, like Node | FastAPI `async def` endpoints, Django async views |
+
+The server interface follows the model: **WSGI** is the synchronous standard (Django’s default, served by Gunicorn); **ASGI** is the async one (FastAPI, served by Uvicorn), and it also supports WebSockets.
+
+<Pitfall title="async def does not make code non-blocking">
+An `async def` endpoint runs on the event loop. Call a blocking library inside it (`requests`, `time.sleep`, a sync database driver) and the whole worker stops, exactly the Node problem from Chapter 3. In FastAPI, either use async libraries (`httpx.AsyncClient`, `asyncpg`) or declare the endpoint with plain `def`, which FastAPI runs in a thread pool.
+</Pitfall>
+
+## Django in one page
+
+A Django **project** is made of **apps**, each with models, views, URLs and an admin. You define models in Python; Django generates the migrations.
+
+```python
+# catalog/models.py
+class Book(models.Model):
+    title = models.CharField(max_length=200)
+    author = models.CharField(max_length=200)
+    year = models.IntegerField(null=True, blank=True)
+```
+
+```bash
+uv run python manage.py makemigrations   # diff models against migrations
+uv run python manage.py migrate          # apply them to the database
+```
+
+Register the model in `admin.py` and you get a complete, permissioned back office for free; for many companies, that admin alone justifies Django. For JSON APIs, teams add **Django REST Framework** (DRF): serializers validate and render data, and views or viewsets handle HTTP.
+
+## FastAPI in one page
+
+FastAPI turns type hints into validation, serialisation and documentation. Declare a parameter as `int` and a non-number becomes a 422 with a precise error message; declare a body as a Pydantic model and JSON is parsed and validated. Interactive OpenAPI docs appear at `/docs`.
+
+**Dependencies** are FastAPI’s DI: a parameter declared with `Depends(fn)` is resolved per request by calling `fn`, and a dependency that `yield`s runs cleanup after the response, which is how database sessions are opened and closed.
+
+```python
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with SessionLocal() as session:
+        yield session                     # code after yield runs after the response
+```
+
+## The same endpoint in both
+
+<FiveStacks title="Two styles" note="Same endpoint, GET /books/:id" sync={false}>
+<Stack id="django" lib="Django REST Framework">
+```python
+class BookSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Book
+        fields = ["id", "title", "author", "year"]
+
+class BookDetail(generics.RetrieveAPIView):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer       # 404 for a missing id is built in
+
+# urls.py
+urlpatterns = [path("books/<int:pk>", BookDetail.as_view())]
+```
+</Stack>
+<Stack id="fastapi" lib="FastAPI">
+```python
+class BookOut(BaseModel):
+    id: int
+    title: str
+    author: str
+    year: int | None = None
+
+@app.get("/books/{book_id}", response_model=BookOut)
+async def find_book(book_id: int, session: AsyncSession = Depends(get_session)):
+    book = await session.get(Book, book_id)
+    if book is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
+```
+</Stack>
+</FiveStacks>
+
+DRF is declarative: you describe the model and the view class does the work, including the 404. FastAPI is explicit: types drive validation, and you write the logic. Neither has a DI container like Spring’s; FastAPI’s `Depends` is the closest thing, and Django wires things through settings and imports.
+
+<InTheWild>
+Django powers large, long-lived products and is often chosen when a team wants admin, auth and ORM out of the box. FastAPI is the common choice for new microservices, internal APIs and anything that serves machine-learning models. Both teams use the same tools around them: uv, Ruff for linting and formatting, pytest, and pyright or mypy for types.
+</InTheWild>
+
+## Testing with pytest
+
+pytest discovers `test_*.py` files and uses plain `assert`. **Fixtures** provide setup through function parameters, a pattern similar to FastAPI’s `Depends`:
+
+```python
+@pytest.fixture
+def client() -> TestClient:
+    app.dependency_overrides[get_session] = fake_session   # swap the real database
+    return TestClient(app)
+
+def test_missing_book_returns_404(client: TestClient):
+    assert client.get("/books/999").status_code == 404
+```
+
+Django ships its own test runner, and `pytest-django` lets you use pytest with it.
+
+<InterviewLens>
+"What is the GIL and when does it matter?" A strong answer: it lets one thread run Python bytecode at a time in CPython. It does not matter much for I/O-bound web APIs, because waiting releases it, and asyncio avoids threads anyway. It matters for CPU-bound work, which you move to processes, native code, a task queue such as Celery, or another service. Mention that a free-threaded build exists but is not yet the norm.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch08" questions={quiz} />
+
+<Flashcards cards={cards} />

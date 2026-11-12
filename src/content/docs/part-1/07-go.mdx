@@ -1,0 +1,301 @@
+---
+title: Go
+chapter: 7
+part: Part I · Five Languages
+kicker: No classes, no exceptions, no framework. On purpose.
+sidebar:
+  order: 7
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'How does a Go type implement an interface?',
+    options: ['With an implements clause', 'By embedding the interface', 'Implicitly: by having all of its methods', 'By registering it in init()'],
+    answer: 2,
+    why: 'Go interfaces are satisfied structurally, much like TypeScript shapes. A type with the right method set satisfies the interface without naming it.',
+  },
+  {
+    q: 'You pass a slice to a function, which appends to it beyond its capacity. What does the caller’s slice see?',
+    options: ['The new elements', 'Nothing new: append reallocated, and the function’s slice now points to a different array', 'A runtime panic', 'A compile error'],
+    answer: 1,
+    why: 'A slice is a small header (pointer, length, capacity). append may allocate a new array; the caller still holds the old header. Return the slice and reassign it.',
+  },
+  {
+    q: 'What is the idiomatic way to add context to an error while keeping it checkable with errors.Is?',
+    options: ['panic(err)', 'errors.New(err.Error() + " context")', 'fmt.Errorf("loading book %d: %w", id, err)', 'log.Fatal(err)'],
+    answer: 2,
+    why: 'The %w verb wraps the original error. errors.Is and errors.As look through the chain, so callers can still detect sql.ErrNoRows or your own sentinel errors.',
+  },
+  {
+    q: 'What does Go’s net/http server do for each incoming request?',
+    options: ['Queues it on a single event loop', 'Runs the handler in its own goroutine', 'Takes a thread from a fixed pool of 200', 'Forks a process'],
+    answer: 1,
+    why: 'Each request gets a goroutine. Goroutines are cheap (a few KB of stack) and the runtime multiplexes them onto a small number of OS threads.',
+  },
+  {
+    q: 'Why should every function that does I/O for a request accept a context.Context?',
+    options: ['It is required by the compiler', 'It carries cancellation and deadlines, so work stops when the client disconnects or time runs out', 'It holds the database connection', 'It makes logging faster'],
+    answer: 1,
+    why: 'r.Context() is cancelled when the request ends. Passing it down to database and HTTP calls lets them abort instead of finishing work nobody will read.',
+  },
+];
+
+export const cards = [
+  { front: 'Zero value', back: 'Every Go type has a usable default: 0, "", false, nil. Variables are never uninitialised.' },
+  { front: 'Slice header', back: 'Pointer to an array, length and capacity. append may allocate a new array, so always use its return value.' },
+  { front: 'Error wrapping', back: 'fmt.Errorf("...: %w", err) adds context; errors.Is and errors.As search the chain.' },
+  { front: 'context.Context', back: 'Carries cancellation, deadlines and request-scoped values down the call chain. First parameter by convention.' },
+];
+
+Go is the language in this book that disagrees with the others most often, and the disagreements are deliberate. There are no classes, no inheritance, no exceptions and almost no magic. The standard library includes a production-grade HTTP server, so most Go services use little or no framework. The result is code that is verbose to write and very easy to read, compile and run.
+
+<Recall
+  items={[
+    { ref: 'Ch. 2', text: 'go mod init creates go.mod, and the go command downloads the toolchain the module asks for.' },
+    { ref: 'Ch. 3', text: 'Node runs one event loop; ASP.NET and Spring run thread pools.' },
+  ]}
+/>
+
+## The toolchain is the language
+
+`go build` produces a **single static binary**: no runtime to install, no virtual machine, startup in milliseconds, which makes for tiny container images. Compilation is fast enough that `go run .` feels like a scripting language. Formatting is not a debate: `gofmt` decides, and every Go codebase looks the same. `go vet` and `go test` ship with the compiler.
+
+A **module** (one `go.mod`) holds **packages** (one per folder). Visibility is decided by the first letter: `Book` is exported from its package, `book` is private to it. Code under an `internal/` folder can only be imported by its parent tree, which is how Go projects enforce boundaries.
+
+## Structs, methods and interfaces
+
+Go has structs, and methods attached to them. Composition replaces inheritance: you **embed** one struct in another and its fields and methods are promoted.
+
+```go
+type Book struct {
+	ID     int64  `json:"id"`
+	Title  string `json:"title"`
+	Author string `json:"author"`
+	Year   *int   `json:"year,omitempty"` // pointer: may be absent
+}
+
+type BookStore interface {
+	Find(ctx context.Context, id int64) (Book, error)
+}
+
+type PostgresStore struct{ db *pgxpool.Pool }
+
+// PostgresStore satisfies BookStore just by having this method.
+func (s *PostgresStore) Find(ctx context.Context, id int64) (Book, error) { /* ... */ }
+```
+
+<FromTS>
+Here, finally, is a structural type system. Interfaces are satisfied **implicitly**: if a type has the methods, it fits, exactly like a TypeScript shape. Go’s convention is the reverse of Java’s: define small interfaces where they are **used**, not where they are implemented. Your handler declares the one-method `BookStore` it needs; any type with that method can be passed in, including a fake in tests.
+</FromTS>
+
+The receiver `(s *PostgresStore)` is a **pointer receiver**: the method can modify `s`, and calling it does not copy the struct. Use pointer receivers for anything with state or that is large; value receivers for small immutable values.
+
+## Zero values, pointers, slices and maps
+
+Every type has a **zero value** (`0`, `""`, `false`, `nil`), so there is no undefined. Pointers exist but have no arithmetic; you use them to share and to express "maybe absent", as `Year *int` does above.
+
+**Slices** are views over arrays: a header with a pointer, a length and a capacity. They are the source of Go’s most common surprise:
+
+```go
+func addDefault(tags []string) {
+	tags = append(tags, "new") // may allocate a new array; the caller never sees it
+}
+
+tags = append(tags, "new")    // correct: always use append's return value
+```
+
+**Maps** are hash maps. Reading a missing key returns the zero value; use the two-value form to tell the difference: `year, ok := years[id]`.
+
+<Pitfall title="Maps are not safe for concurrent writes">
+Two goroutines writing to the same map can crash the program with "concurrent map writes". Every HTTP request runs in its own goroutine, so a package-level map used as a cache needs a `sync.Mutex` (or `sync.Map`). Writing to a nil map panics, too: create maps with `make` or a literal.
+</Pitfall>
+
+## Errors are values
+
+Go has no exceptions for ordinary failures. Functions return an `error` as their last value, and the caller checks it right away. It is repetitive, and it makes every failure path visible.
+
+```go
+book, err := store.Find(ctx, id)
+if errors.Is(err, ErrNotFound) {
+	http.Error(w, "book not found", http.StatusNotFound)
+	return
+}
+if err != nil {
+	return fmt.Errorf("loading book %d: %w", id, err) // wrap with context, keep the cause
+}
+```
+
+`%w` wraps the original error, so `errors.Is` (compare with a sentinel such as `ErrNotFound`) and `errors.As` (extract a typed error) still work after any number of wraps. `panic` exists, but only for programmer bugs; a panic in a handler is recovered by `net/http` and logged, never used for control flow.
+
+## Generics
+
+Go added generics in 1.18. They are deliberately modest: type parameters with constraints, no variance gymnastics.
+
+```go
+func Map[T, U any](items []T, fn func(T) U) []U {
+	out := make([]U, 0, len(items))
+	for _, it := range items {
+		out = append(out, fn(it))
+	}
+	return out
+}
+
+titles := Map(books, func(b Book) string { return b.Title })
+```
+
+The standard `slices` and `maps` packages cover most of what you would reach for lodash to do.
+
+## Goroutines, channels and context
+
+A **goroutine** is a function running concurrently, started with `go`. It starts with a few kilobytes of stack, so a server can hold hundreds of thousands. The runtime scheduler multiplexes them onto a few OS threads:
+
+<Figure n="7.1" caption="The Go scheduler runs many goroutines on a few OS threads, one logical processor per CPU core">
+  <svg viewBox="0 0 720 190" role="img" aria-label="Goroutines scheduled onto processors and OS threads" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <g fill="var(--bp-ink)" font-weight="600">
+      <text x="8" y="30">Goroutines</text>
+      <text x="8" y="100">Processors (P)</text>
+      <text x="8" y="160">OS threads (M)</text>
+    </g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.25">
+      <circle cx="170" cy="26" r="9" /><circle cx="196" cy="26" r="9" /><circle cx="222" cy="26" r="9" /><circle cx="248" cy="26" r="9" />
+      <circle cx="350" cy="26" r="9" /><circle cx="376" cy="26" r="9" /><circle cx="402" cy="26" r="9" />
+      <circle cx="510" cy="26" r="9" /><circle cx="536" cy="26" r="9" /><circle cx="562" cy="26" r="9" /><circle cx="588" cy="26" r="9" /><circle cx="614" cy="26" r="9" />
+    </g>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="160" y="78" width="100" height="36" rx="2" />
+      <rect x="340" y="78" width="100" height="36" rx="2" />
+      <rect x="520" y="78" width="100" height="36" rx="2" />
+      <rect x="160" y="140" width="100" height="36" rx="2" />
+      <rect x="340" y="140" width="100" height="36" rx="2" />
+      <rect x="520" y="140" width="100" height="36" rx="2" />
+      <path d="M210 38V76M390 38V76M570 38V76M210 114V138M390 114V138M570 114V138" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="210" y="100">P0 run queue</text>
+      <text x="390" y="100">P1 run queue</text>
+      <text x="570" y="100">P2 run queue</text>
+      <text x="210" y="162">thread</text>
+      <text x="390" y="162">thread</text>
+      <text x="570" y="162">thread</text>
+    </g>
+    <text x="640" y="30" fill="var(--bp-muted)" font-size="11">thousands</text>
+    <text x="640" y="100" fill="var(--bp-muted)" font-size="11">GOMAXPROCS</text>
+    <text x="640" y="162" fill="var(--bp-muted)" font-size="11">a few</text>
+  </svg>
+</Figure>
+
+When a goroutine blocks on the network, the scheduler parks it and runs another; idle processors steal work from busy ones. You write straightforward blocking code, and the runtime makes it concurrent, the same promise as Java’s virtual threads, built into Go since the beginning.
+
+**Channels** pass values between goroutines; `select` waits on several of them. **`context.Context`** carries cancellation and deadlines through the call chain. Together they make fan-out with a timeout short and explicit:
+
+```go
+func loanSummary(ctx context.Context, userID int64) (Summary, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	g, ctx := errgroup.WithContext(ctx) // golang.org/x/sync/errgroup
+	var loans []Loan
+	var fines []Fine
+	g.Go(func() (err error) { loans, err = loanClient.ForUser(ctx, userID); return })
+	g.Go(func() (err error) { fines, err = fineClient.ForUser(ctx, userID); return })
+	if err := g.Wait(); err != nil { // first error cancels the other call
+		return Summary{}, err
+	}
+	return Summary{Loans: loans, Fines: fines}, nil
+}
+```
+
+<Pitfall title="Goroutine leaks">
+A goroutine blocked forever on a channel nobody will send to is never collected. Every goroutine you start needs a way to end: a context that is cancelled, a channel that is closed, or a `WaitGroup` that someone waits on.
+</Pitfall>
+
+## net/http without a framework
+
+Since Go 1.22, the standard router understands methods and path parameters, which removed the main reason to reach for a framework.
+
+```go
+func main() {
+	store := &PostgresStore{db: mustConnect()}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /books/{id}", findBook(store))
+	log.Fatal(http.ListenAndServe(":3000", logging(mux)))
+}
+
+func findBook(store BookStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			http.Error(w, "id must be a number", http.StatusBadRequest)
+			return
+		}
+		book, err := store.Find(r.Context(), id)
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "book not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(book)
+	}
+}
+
+func logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		slog.Info("request", "path", r.URL.Path, "took", time.Since(start))
+	})
+}
+```
+
+Notice what is missing. There is no DI container: `findBook` receives its dependency as an argument, a closure captures it, and `main` wires everything by hand. Middleware is just a function that takes a handler and returns one. Everything is visible from `main`.
+
+<InTheWild>
+Go dominates infrastructure: Docker, Kubernetes, Terraform and most of the cloud-native tooling are written in it, and it is a common choice for high-throughput APIs. Teams split between the standard library plus a thin router such as `chi`, and frameworks such as Gin or Echo; the standard library approach has gained ground since 1.22. Expect `sqlc` or `pgx` for databases more often than a heavy ORM.
+</InTheWild>
+
+## Testing
+
+Tests live next to the code in `_test.go` files and run with `go test ./...`. The idiom is the **table-driven test**, and `httptest` lets you exercise handlers without a network:
+
+```go
+func TestFindBook(t *testing.T) {
+	store := fakeStore{books: map[int64]Book{1: {ID: 1, Title: "Dune"}}}
+	tests := []struct {
+		name string
+		path string
+		want int
+	}{
+		{"found", "/books/1", http.StatusOK},
+		{"missing", "/books/2", http.StatusNotFound},
+		{"bad id", "/books/abc", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /books/{id}", findBook(store))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest("GET", tt.path, nil))
+			if rec.Code != tt.want {
+				t.Fatalf("got %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+```
+
+`fakeStore` is a ten-line struct with a `Find` method. Because interfaces are implicit and small, Go rarely needs a mocking library.
+
+<InterviewLens>
+"How would you cancel downstream work when a client disconnects?" A strong answer threads `r.Context()` into every call, uses `context.WithTimeout` for a deadline, checks `ctx.Err()` in long loops, and uses `errgroup` so the first failure cancels sibling calls. Mention that `database/sql` and `net/http` clients honour the context.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch07" questions={quiz} />
+
+<Flashcards cards={cards} />

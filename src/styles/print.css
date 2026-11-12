@@ -153,3 +153,7 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 .bp-review-start { break-before: page; }
 .bp-review-start h2 { margin-top: 0; font-size: 22pt; }
 .bp-stacks__head { display: flex; }
+
+/* Task lists print as empty boxes to tick by hand */
+.bp-body .contains-task-list { list-style: none; padding-left: 0; }
+.bp-body .task-list-item input[type='checkbox'] { appearance: none; -webkit-appearance: none; width: 10px; height: 10px; border: 1.2px solid var(--bp-ink); border-radius: 1px; margin: 0 9px 0 0; vertical-align: -1px; background: transparent; }

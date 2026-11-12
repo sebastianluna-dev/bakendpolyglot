@@ -1,0 +1,272 @@
+---
+title: Java and Spring Boot
+chapter: 5
+part: Part I · Five Languages
+kicker: The enterprise reference everyone else borrowed from.
+sidebar:
+  order: 5
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'At runtime, what is the difference between a List<String> and a List<Integer> in Java?',
+    options: ['They are different classes', 'None: generic type arguments are erased, both are just List', 'List<Integer> stores primitives', 'Only List<String> can be serialised'],
+    answer: 1,
+    why: 'Java erases generics at compile time, like TypeScript and unlike C#. That is why you cannot write new T() or check instanceof List<String>.',
+  },
+  {
+    q: 'What does a checked exception force the caller to do?',
+    options: ['Nothing; it is only documentation', 'Catch it or declare it with throws', 'Retry the call', 'Log it'],
+    answer: 1,
+    why: 'Checked exceptions are part of the method signature. Modern frameworks, Spring included, mostly use unchecked (runtime) exceptions to avoid throws clauses everywhere.',
+  },
+  {
+    q: 'How does Spring Boot decide to create a DataSource bean for you?',
+    options: ['It always creates one', 'Auto-configuration classes check conditions such as a JDBC driver on the classpath and no DataSource bean of yours', 'You must list it in application.yml', 'Maven generates it'],
+    answer: 1,
+    why: 'Auto-configuration is conditional: @ConditionalOnClass, @ConditionalOnMissingBean and friends. Add a driver and it appears; define your own bean and it backs off.',
+  },
+  {
+    q: 'A @Service method calls another method of the same class that is annotated @Transactional. What happens?',
+    options: ['A new transaction starts as expected', 'No transaction starts, because the call does not go through the Spring proxy', 'The application fails to start', 'Spring retries the call'],
+    answer: 1,
+    why: 'Spring applies @Transactional through a proxy around the bean. A call on this skips the proxy, so the annotation has no effect. Move the method to another bean.',
+  },
+  {
+    q: 'What do virtual threads (Java 21) change for a Spring MVC application?',
+    options: ['Nothing; Spring cannot use them', 'Blocking I/O no longer ties up an OS thread, so thread-per-request scales to many more concurrent requests', 'They make CPU-heavy code run faster', 'They replace the garbage collector'],
+    answer: 1,
+    why: 'A virtual thread unmounts from its carrier OS thread while it waits on I/O. You keep simple blocking code and get concurrency close to async frameworks.',
+  },
+];
+
+export const cards = [
+  { front: 'Type erasure', back: 'Java generics exist only at compile time; at runtime List<String> is just List.' },
+  { front: 'Bean', back: 'An object created, configured and managed by the Spring IoC container. Singleton scope by default.' },
+  { front: 'Auto-configuration', back: 'Spring Boot classes that create beans when conditions hold (a class on the classpath, a property set, no user bean).' },
+  { front: 'Virtual thread', back: 'A cheap JVM-managed thread that releases its OS carrier thread while blocked on I/O.' },
+];
+
+Spring is the framework NestJS and ASP.NET Core learned from: dependency injection, annotations, a container that builds your object graph, and a convention for everything. Java itself has changed a lot in the last decade. Records, pattern matching and virtual threads make modern Java much less verbose than its reputation, so we will write the modern dialect from the start.
+
+<Recall
+  items={[
+    { ref: 'Ch. 3', text: 'Nest modules declare providers; the DI container builds the graph at startup.' },
+    { ref: 'Ch. 4', text: 'C# generics are reified, structs are value types, and ASP.NET serves requests on a thread pool.' },
+  ]}
+/>
+
+## The JVM
+
+`javac` compiles Java to **bytecode** in `.class` files, packed into a JAR. The JVM loads that bytecode, interprets it at first, and its JIT compiler (HotSpot) compiles hot methods to optimised machine code. Long-running servers get very fast; startup is slower than Go or .NET, which is why you will see GraalVM native images mentioned for serverless work.
+
+Memory is garbage-collected. The default collector, **G1**, balances throughput and pause times; **ZGC** keeps pauses in the low milliseconds for latency-sensitive services. You pick one with a JVM flag, not in code.
+
+## Modern Java in one page
+
+Java is nominal and class-based like C#. Here is the dialect you will actually write:
+
+```java
+public record Book(long id, String title, String author, Integer year) {}
+
+sealed interface LoanResult permits Granted, Refused {}
+record Granted(long loanId) implements LoanResult {}
+record Refused(String reason) implements LoanResult {}
+
+String describe(LoanResult result) {
+    return switch (result) {                       // exhaustive: the compiler knows every case
+        case Granted g -> "Loan " + g.loanId();
+        case Refused r -> "Refused: " + r.reason();
+    };
+}
+```
+
+**Records** are immutable data carriers with `equals`, `hashCode` and accessors generated. **Sealed** interfaces list their implementations, so a `switch` over them is checked for exhaustiveness: the closest thing Java has to a TypeScript discriminated union. `var` gives you local type inference.
+
+<FromTS>
+Generics are **erased**, exactly as in TypeScript: `List<String>` is just `List` at runtime. Unlike TypeScript, the type system is nominal, and primitives (`int`, `long`) are separate from their boxed classes (`Integer`, `Long`). A `List<int>` is not allowed; you write `List<Integer>`, and `null` can hide inside a boxed value.
+</FromTS>
+
+## Collections, streams and Optional
+
+Collections are interfaces (`List`, `Map`, `Set`) with implementations (`ArrayList`, `HashMap`). `List.of(...)` creates an immutable list. **Streams** are Java’s LINQ: lazy pipelines that run when a terminal operation such as `toList()` is called.
+
+```java
+List<String> titles = books.stream()
+    .filter(b -> b.year() != null && b.year() >= 2000)
+    .sorted(Comparator.comparing(Book::title))
+    .map(Book::title)
+    .toList();
+
+Optional<Book> found = repository.findById(42L);
+Book book = found.orElseThrow(() -> new BookNotFound(42L));
+```
+
+`Optional<T>` is how Java APIs say "maybe absent" without returning `null`. Use it for return values, not for fields or parameters.
+
+## Exceptions: checked and unchecked
+
+Java is the only language in this book with **checked exceptions**. If a method can throw `IOException`, its signature must say `throws IOException`, and every caller must catch it or declare it too. Exceptions that extend `RuntimeException` are unchecked and need no declaration.
+
+In backend code, prefer unchecked exceptions for domain errors (`BookNotFound extends RuntimeException`) and translate them to HTTP once, at the edge. Spring itself wraps checked exceptions from JDBC and friends into its own unchecked hierarchy for this reason.
+
+## Threads, and why virtual threads matter
+
+Spring MVC uses **thread-per-request**: each request is served by one thread from the start to the end, and blocking calls (JDBC, HTTP clients) simply block that thread. It is easy to reason about, and it used to be expensive, because each platform thread is an OS thread with a megabyte-scale stack.
+
+Java 21’s **virtual threads** change the economics. A virtual thread is managed by the JVM and, when it blocks on I/O, it unmounts from its OS carrier thread so the carrier can run another one. You keep plain blocking code and can run hundreds of thousands of concurrent requests. In Spring Boot it is one property:
+
+```yaml title="application.yml"
+spring:
+  threads:
+    virtual:
+      enabled: true
+```
+
+<Pitfall title="Pinned virtual threads">
+On JDKs before 24, a virtual thread that blocks inside a `synchronized` block stays pinned to its carrier and loses the benefit. Prefer `ReentrantLock` in code you control, and keep JDK and drivers current.
+</Pitfall>
+
+## Build tools
+
+Two build tools dominate. **Maven** uses `pom.xml`, declarative and verbose; **Gradle** uses a Kotlin or Groovy script, faster and more flexible. Spring Boot projects include a wrapper (`./mvnw` or `./gradlew`), so the right version downloads itself, just as Go fetches its toolchain.
+
+Spring Boot **starters** are curated dependency bundles: `spring-boot-starter-web` brings Spring MVC, Jackson for JSON and an embedded Tomcat; `spring-boot-starter-data-jpa` brings Hibernate and Spring Data. You add starters, not dozens of individual libraries.
+
+## The IoC container
+
+At startup Spring scans your packages for classes annotated as components, reads configuration, and builds every **bean**: an object it creates, wires and manages. Use constructor injection; with a single constructor, no annotation is needed.
+
+```java
+@Service
+public class LoanService {
+    private final BookRepository books;
+    private final Clock clock;
+
+    public LoanService(BookRepository books, Clock clock) {   // injected by the container
+        this.books = books;
+        this.clock = clock;
+    }
+}
+
+@Configuration
+class TimeConfig {
+    @Bean
+    Clock clock() { return Clock.systemUTC(); }   // a bean for a class you do not own
+}
+```
+
+Beans are **singletons** by default, like Nest providers. `@Component`, `@Service`, `@Repository` and `@Controller` are the same mechanism with different names; the names document intent, and `@Repository` also translates database exceptions.
+
+### Auto-configuration: the "magic", explained
+
+Spring Boot’s reputation for magic comes from **auto-configuration**: hundreds of `@Configuration` classes that create beans only when their conditions hold.
+
+<Figure n="5.1" caption="Spring Boot startup: your beans first, then auto-configuration fills the gaps you left">
+  <svg viewBox="0 0 720 150" role="img" aria-label="Spring Boot startup sequence" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs>
+      <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker>
+    </defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="20" width="128" height="64" rx="2" />
+      <rect x="152" y="20" width="128" height="64" rx="2" />
+      <rect x="296" y="20" width="128" height="64" rx="2" stroke="var(--bp-accent)" stroke-width="2" fill="var(--bp-accent-soft)" />
+      <rect x="440" y="20" width="128" height="64" rx="2" />
+      <rect x="584" y="20" width="128" height="64" rx="2" />
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M136 52H150" marker-end="url(#sb-arrow)" />
+      <path d="M280 52H294" marker-end="url(#sb-arrow)" />
+      <path d="M424 52H438" marker-end="url(#sb-arrow)" />
+      <path d="M568 52H582" marker-end="url(#sb-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="72" y="46" font-weight="600">Read config</text>
+      <text x="72" y="64" fill="var(--bp-muted)" font-size="11">application.yml, profile</text>
+      <text x="216" y="46" font-weight="600">Scan your code</text>
+      <text x="216" y="64" fill="var(--bp-muted)" font-size="11">@Service, @Bean …</text>
+      <text x="360" y="46" font-weight="600">Auto-configure</text>
+      <text x="360" y="64" fill="var(--bp-muted)" font-size="11">if conditions hold</text>
+      <text x="504" y="46" font-weight="600">Create and wire</text>
+      <text x="504" y="64" fill="var(--bp-muted)" font-size="11">wrap in proxies</text>
+      <text x="648" y="46" font-weight="600">Start server</text>
+      <text x="648" y="64" fill="var(--bp-muted)" font-size="11">embedded Tomcat</text>
+    </g>
+    <g fill="var(--bp-muted)" font-size="11">
+      <text x="296" y="110">@ConditionalOnClass(DataSource.class)  → a JDBC driver is on the classpath</text>
+      <text x="296" y="128">@ConditionalOnMissingBean  → you did not define your own</text>
+    </g>
+  </svg>
+</Figure>
+
+Add the Postgres driver and a `spring.datasource.url`, and a connection pool bean appears. Define your own `DataSource` bean and the auto-configured one backs off. When something surprises you, start the app with `--debug`: Spring prints the condition report, every auto-configuration and why it did or did not apply.
+
+**Profiles** switch configuration by environment: `application.yml` holds defaults, `application-prod.yml` overrides them when the `prod` profile is active. Bind groups of settings to typed objects with `@ConfigurationProperties` instead of scattering `@Value` strings.
+
+## Proxies: how annotations work
+
+`@Transactional`, `@Cacheable` and `@Async` are not compiler features. Spring wraps your bean in a **proxy** and the proxy starts the transaction, checks the cache or hands off to another thread before calling your method.
+
+<Pitfall title="Self-invocation skips the proxy">
+Calling a `@Transactional` method from another method of the same class goes through `this`, not through the proxy, so no transaction starts. The code looks right and silently is not. Put the transactional method in a separate bean, or make the outer method the transactional one.
+</Pitfall>
+
+## A REST controller
+
+```java
+@RestController
+@RequestMapping("/books")
+class BookController {
+    private final BookRepository books;
+
+    BookController(BookRepository books) { this.books = books; }
+
+    @GetMapping("/{id}")
+    Book find(@PathVariable long id) {
+        return books.findById(id).orElseThrow(() -> new BookNotFound(id));
+    }
+}
+
+@RestControllerAdvice
+class ApiErrors {
+    @ExceptionHandler(BookNotFound.class)
+    ProblemDetail notFound(BookNotFound e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+}
+```
+
+`@RestControllerAdvice` is Spring’s exception filter: domain exceptions are thrown anywhere and translated to HTTP in one place. `ProblemDetail` produces the standard `application/problem+json` body we adopt for every stack in Chapter 12.
+
+## Testing slices
+
+`@SpringBootTest` starts the whole context, which is thorough and slow. **Test slices** start only what one layer needs: `@WebMvcTest` loads controllers and MVC infrastructure with your services mocked, `@DataJpaTest` loads repositories against a database.
+
+```java
+@WebMvcTest(BookController.class)
+class BookControllerTest {
+    @Autowired MockMvc mvc;
+    @MockitoBean BookRepository books;
+
+    @Test
+    void returns404WhenMissing() throws Exception {
+        when(books.findById(7L)).thenReturn(Optional.empty());
+        mvc.perform(get("/books/7")).andExpect(status().isNotFound());
+    }
+}
+```
+
+<InTheWild>
+Spring Boot is the most common backend stack in large companies, banks and governments, and many codebases are a decade old. Expect Java 8 and 11 code next to Java 21, field injection with `@Autowired` that you should migrate to constructors, and `javax.*` packages that became `jakarta.*` in Spring Boot 3. Senior Spring engineers are expected to explain auto-configuration and proxies without hand-waving.
+</InTheWild>
+
+<InterviewLens>
+"Why did my @Transactional not work?" A strong answer names the proxy model, then lists the usual causes: self-invocation, a private or final method the proxy cannot intercept, a checked exception (which does not trigger rollback by default), or a bean created outside the container with `new`.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch05" questions={quiz} />
+
+<Flashcards cards={cards} />

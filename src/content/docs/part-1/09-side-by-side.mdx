@@ -1,0 +1,213 @@
+---
+title: Five Languages Side by Side
+chapter: 9
+part: Part I · Five Languages
+kicker: What each stack decides for you, and when to pick it.
+sidebar:
+  order: 9
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Which two runtimes in this book make plain blocking code scale to very many concurrent requests without async/await?',
+    options: ['Node and Python asyncio', 'Go (goroutines) and Java with virtual threads', 'C# and Python', 'Node and Go'],
+    answer: 1,
+    why: 'Goroutines and virtual threads park cheaply on blocking I/O. Node, asyncio and C# reach high concurrency through async/await instead.',
+  },
+  {
+    q: 'In which language is a missing record most naturally reported as a second return value rather than an exception?',
+    options: ['Java', 'C#', 'Go', 'Python'],
+    answer: 2,
+    why: 'Go returns (value, error). The others throw (or return null/Optional) and translate exceptions to HTTP at the edge.',
+  },
+  {
+    q: 'Which pair keeps generic type information at runtime?',
+    options: ['TypeScript and Java', 'C# only', 'Java and Kotlin', 'Python and TypeScript'],
+    answer: 1,
+    why: 'C# generics are reified. TypeScript and Java (and Kotlin, on the JVM) erase them; Go monomorphises or dictionary-passes at compile time; Python hints are not enforced.',
+  },
+  {
+    q: 'A team needs a small, fast-starting service with a tiny container image and few dependencies. Which stack is the most natural fit?',
+    options: ['Spring Boot', 'Django', 'Go', 'NestJS'],
+    answer: 2,
+    why: 'Go compiles to a single static binary with millisecond startup. The others can be tuned for this, but Go gets it by default.',
+  },
+];
+
+export const cards = [
+  { front: 'Event loop runtimes', back: 'Node and Python asyncio: one thread runs your code; never block it.' },
+  { front: 'Thread pool runtime', back: 'ASP.NET Core: requests on pool threads; await frees the thread while waiting on I/O.' },
+  { front: 'Cheap blocking', back: 'Go goroutines and Java virtual threads: write blocking code; the runtime parks it cheaply.' },
+  { front: 'Phase 1 gate', back: 'Build GET /books and GET /books/{id} with a 404 in each stack, from memory, with a test.' },
+];
+
+You have now met all five stacks. This chapter puts them on one table, so the differences stop being trivia and start being decisions. From Part II on, every concept is shown in all five side by side, and this is the map you will read those blocks with.
+
+<Recall
+  items={[
+    { ref: 'Ch. 3', text: 'Node: one event loop, libuv for I/O, worker threads for CPU work.' },
+    { ref: 'Ch. 4–6', text: 'C# and the JVM: thread pools, DI containers, reified (C#) versus erased (Java, Kotlin) generics.' },
+    { ref: 'Ch. 7–8', text: 'Go: goroutines and errors as values. Python: dynamic types, the GIL, sync Django and async FastAPI.' },
+  ]}
+/>
+
+## The matrix
+
+| | TypeScript | C# | Java / Kotlin | Go | Python |
+| --- | --- | --- | --- | --- | --- |
+| Typing | Static, structural, erased | Static, nominal, reified | Static, nominal, erased | Static, structural interfaces | Dynamic; optional hints |
+| Null | `strictNullChecks` | Nullable reference types | `Optional` (Java); in the type (Kotlin) | Zero values, `nil` pointers | `None`, checked by tools |
+| Errors | Exceptions | Exceptions | Checked and unchecked (Java); unchecked (Kotlin) | Returned values | Exceptions |
+| Concurrency | Event loop | Thread pool + `async` | Threads, virtual threads; coroutines (Kotlin) | Goroutines + channels | Processes, threads, asyncio |
+| Runs as | V8 JIT | CLR JIT | JVM JIT | Native binary | Interpreter |
+| DI | Nest container | Built-in container | Spring container | By hand, in `main` | `Depends` (FastAPI); settings (Django) |
+| Typical web stack | Express, NestJS | ASP.NET Core | Spring Boot | `net/http` + router | Django, FastAPI |
+
+## Four concurrency models
+
+The row that shapes your code most is concurrency. Five runtimes, four models:
+
+<Figure n="9.1" caption="Where your code waits: on an event loop, on a pool thread, or on a cheap thread the runtime parks for you">
+  <svg viewBox="0 0 720 230" role="img" aria-label="Concurrency models of the five stacks" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="8" width="168" height="214" rx="2" />
+      <rect x="192" y="8" width="168" height="214" rx="2" />
+      <rect x="376" y="8" width="168" height="214" rx="2" />
+      <rect x="560" y="8" width="152" height="214" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" font-weight="600" text-anchor="middle">
+      <text x="92" y="32">Event loop</text>
+      <text x="276" y="32">Thread pool</text>
+      <text x="460" y="32">Thread per request</text>
+      <text x="636" y="32">Goroutines</text>
+    </g>
+    <g fill="var(--bp-muted)" font-size="11" text-anchor="middle">
+      <text x="92" y="50">Node · Python asyncio</text>
+      <text x="276" y="50">ASP.NET Core</text>
+      <text x="460" y="50">Spring MVC · Django</text>
+      <text x="636" y="50">Go</text>
+    </g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.25">
+      <rect x="32" y="70" width="120" height="22" rx="2" />
+      <rect x="216" y="70" width="36" height="22" rx="2" /><rect x="258" y="70" width="36" height="22" rx="2" /><rect x="300" y="70" width="36" height="22" rx="2" />
+      <rect x="400" y="70" width="22" height="22" rx="2" /><rect x="428" y="70" width="22" height="22" rx="2" /><rect x="456" y="70" width="22" height="22" rx="2" /><rect x="484" y="70" width="22" height="22" rx="2" /><rect x="512" y="70" width="22" height="22" rx="2" />
+      <circle cx="590" cy="81" r="6" /><circle cx="606" cy="81" r="6" /><circle cx="622" cy="81" r="6" /><circle cx="638" cy="81" r="6" /><circle cx="654" cy="81" r="6" /><circle cx="670" cy="81" r="6" /><circle cx="686" cy="81" r="6" />
+    </g>
+    <g fill="var(--bp-ink)" font-size="11.5">
+      <text x="20" y="120">One thread runs</text>
+      <text x="20" y="136">all your code.</text>
+      <text x="20" y="160">Waiting: await</text>
+      <text x="20" y="176">Risk: blocking</text>
+      <text x="20" y="192">the loop stalls all</text>
+      <text x="204" y="120">Many pool threads.</text>
+      <text x="204" y="136">await returns the</text>
+      <text x="204" y="152">thread while waiting.</text>
+      <text x="204" y="176">Risk: .Result</text>
+      <text x="204" y="192">starves the pool</text>
+      <text x="388" y="120">One thread per request.</text>
+      <text x="388" y="136">Blocking is normal.</text>
+      <text x="388" y="152">Virtual threads (Java)</text>
+      <text x="388" y="168">make that cheap.</text>
+      <text x="388" y="192">Risk: thread limits</text>
+      <text x="572" y="120">One goroutine</text>
+      <text x="572" y="136">per request, parked</text>
+      <text x="572" y="152">cheaply on I/O.</text>
+      <text x="572" y="176">Risk: leaks,</text>
+      <text x="572" y="192">shared-map races</text>
+    </g>
+  </svg>
+</Figure>
+
+The practical rule: in the two left columns, *how you wait* matters (`await`, never block). In the two right columns, blocking is fine, and *what you share* matters (locks, maps, connection pools).
+
+## The same failure, five ways
+
+Errors are the second row that shapes your code. Here is "load a book, or answer 404" in each stack, as you will write it from Part II on:
+
+<FiveStacks note="GET /books/:id with a 404">
+<Stack id="nest" lib="NestJS">
+```ts
+@Get(':id')
+async find(@Param('id', ParseIntPipe) id: number) {
+  const book = await this.books.find(id);
+  if (!book) throw new NotFoundException(`Book ${id} not found`);
+  return book;
+}
+```
+</Stack>
+<Stack id="cs" lib="ASP.NET Core">
+```csharp
+app.MapGet("/books/{id:int}", async (int id, BooksService books, CancellationToken ct) =>
+    await books.FindAsync(id, ct) is { } book
+        ? Results.Ok(book)
+        : Results.Problem($"Book {id} not found", statusCode: 404));
+```
+</Stack>
+<Stack id="java" lib="Spring Boot">
+```java
+@GetMapping("/{id}")
+Book find(@PathVariable long id) {
+    return books.findById(id).orElseThrow(() -> new BookNotFound(id)); // advice → 404
+}
+```
+</Stack>
+<Stack id="go" lib="net/http">
+```go
+book, err := store.Find(r.Context(), id)
+if errors.Is(err, ErrNotFound) {
+	http.Error(w, fmt.Sprintf("book %d not found", id), http.StatusNotFound)
+	return
+}
+```
+</Stack>
+<Stack id="fastapi" lib="FastAPI">
+```python
+book = await session.get(Book, book_id)
+if book is None:
+    raise HTTPException(status_code=404, detail=f"Book {book_id} not found")
+return book
+```
+</Stack>
+</FiveStacks>
+
+Four stacks throw and translate at the edge; Go handles the error where it happens. Chapter 12 makes the response body identical in all five, using the Problem Details standard.
+
+## Choosing a stack
+
+There is rarely one right answer, but there are good reasons. These are the ones that hold up in real decisions:
+
+| If you need… | Strong choices | Why |
+| --- | --- | --- |
+| To join an existing enterprise ecosystem | Spring Boot, ASP.NET Core | Libraries, hiring pool and conventions already there |
+| Tiny, fast-starting services and infrastructure tools | Go | Static binary, low memory, simple concurrency |
+| One language across frontend and backend | NestJS, Express | Shared types and people |
+| A product with admin, auth and ORM on day one | Django | Batteries included, mature admin |
+| An API next to data science or ML models | FastAPI | Same language as the models, async, typed |
+| A modern JVM service with less ceremony | Kotlin + Spring Boot | Spring’s ecosystem, Kotlin’s ergonomics |
+
+<InTheWild>
+Most real decisions are made by the team you already have and the systems you must integrate with, not by benchmarks. A senior engineer’s job is to make that explicit: write down what the stack must do well, which risks you accept, and how you would leave if you were wrong. Chapter 48 turns that into an ADR.
+</InTheWild>
+
+## Gate: Phase 1
+
+You finish Part I when you can pass this gate. It is deliberately small, and it must be done **from memory**, with the docs open only for library names.
+
+- [ ] In each stack, create a new project from the command line.
+- [ ] Serve `GET /books` (a hard-coded list of three books) and `GET /books/{id}`.
+- [ ] Return 404 with a JSON body for an unknown id, and 400 for a non-numeric id.
+- [ ] Write one automated test per stack that proves the 404.
+- [ ] Note, in two lines per stack, what surprised you.
+
+The surprises are the point. Keep the notes: they become your personal "From TypeScript" boxes for the rest of the book.
+
+<InterviewLens>
+"Why would you choose Go over Java for a new service, or the opposite?" A strong answer compares on the axes in this chapter: operational footprint and startup (Go), ecosystem and framework depth (Java), the concurrency model each team understands, existing libraries and people, and how the service will be operated. It ends with what you would measure to confirm the choice.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch09" questions={quiz} />
+
+<Flashcards cards={cards} />

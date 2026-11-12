@@ -1,0 +1,171 @@
+---
+title: Kotlin
+chapter: 6
+part: Part I · Five Languages
+kicker: The JVM, with the ergonomics you are used to.
+sidebar:
+  order: 6
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A Java method returns String. In Kotlin, what type does the compiler give it?',
+    options: ['String', 'String?', 'A platform type String!, which Kotlin cannot check for null', 'Any'],
+    answer: 2,
+    why: 'Java has no null annotations by default, so Kotlin marks its types as platform types. Decide at the boundary: assign to String? and handle null, or to String and accept a possible NPE.',
+  },
+  {
+    q: 'Why does a Kotlin Spring project apply the kotlin-spring (all-open) compiler plugin?',
+    options: ['To enable coroutines', 'Kotlin classes are final by default, and Spring proxies need to subclass beans', 'To generate getters and setters', 'To compile faster'],
+    answer: 1,
+    why: 'Spring creates proxies for @Transactional, @Configuration and others by subclassing. The plugin opens classes carrying Spring annotations so that works.',
+  },
+  {
+    q: 'What does structured concurrency guarantee when a coroutine scope is cancelled?',
+    options: ['Nothing; children keep running', 'All child coroutines started in that scope are cancelled too', 'The JVM exits', 'Children are moved to a global scope'],
+    answer: 1,
+    why: 'Coroutines started in a scope are its children. Cancel or fail the parent and the children are cancelled, so no work leaks past the request that started it.',
+  },
+  {
+    q: 'What does the expression user?.email ?: "none" return when user is null?',
+    options: ['null', 'An exception', '"none"', 'An empty string'],
+    answer: 2,
+    why: '?. short-circuits to null, and the Elvis operator ?: supplies the fallback. It reads like user?.email ?? "none" in TypeScript.',
+  },
+];
+
+export const cards = [
+  { front: 'Platform type', back: 'A type from Java code whose nullability Kotlin cannot know, written String! in error messages.' },
+  { front: 'data class', back: 'A class whose equals, hashCode, toString and copy() are generated from its constructor properties.' },
+  { front: 'suspend fun', back: 'A function that can pause without blocking a thread; callable only from a coroutine or another suspend function.' },
+  { front: 'all-open plugin', back: 'Makes Spring-annotated Kotlin classes open, because Kotlin classes are final by default and proxies subclass them.' },
+];
+
+Kotlin runs on the same JVM, uses the same libraries and the same Spring, and reads much closer to TypeScript than Java does. Many teams start new JVM services in Kotlin while keeping their Java code, because the two call each other directly. This chapter is short on purpose: everything about the JVM and Spring from Chapter 5 still applies, so we focus on what Kotlin changes.
+
+<Recall
+  items={[
+    { ref: 'Ch. 5', text: 'Spring builds beans at startup and wraps some of them in proxies for @Transactional and friends.' },
+    { ref: 'Ch. 5', text: 'Java’s records, sealed interfaces and switch patterns model data and its cases.' },
+  ]}
+/>
+
+## Null safety in the type system
+
+Kotlin has TypeScript’s `strictNullChecks`, enforced by the compiler and present at the bytecode level through annotations. `String` cannot hold null; `String?` can.
+
+```kotlin
+val title: String = book.title            // never null
+val subtitle: String? = book.subtitle     // may be null
+
+val length = subtitle?.length ?: 0        // safe call and Elvis operator
+val forced = subtitle!!.length            // throws if null: avoid outside tests
+```
+
+<Pitfall title="Platform types at the Java border">
+Values from Java code have **platform types** (`String!`): Kotlin does not know if they can be null, so it does not check. Annotate the boundary yourself: declare what you receive from a Java library as `String?` unless its documentation or annotations promise otherwise.
+</Pitfall>
+
+## The everyday syntax
+
+```kotlin
+data class Book(val id: Long, val title: String, val author: String, val year: Int? = null)
+
+sealed interface LoanResult
+data class Granted(val loanId: Long) : LoanResult
+data class Refused(val reason: String) : LoanResult
+
+fun describe(result: LoanResult): String = when (result) {
+    is Granted -> "Loan ${result.loanId}"     // smart cast: result is Granted here
+    is Refused -> "Refused: ${result.reason}"
+}
+
+fun String.slugify(): String = lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+
+val updated = book.copy(year = 1966)
+val slug = book.title.slugify()
+```
+
+- `val` is `const`, `var` is `let`. Types are inferred.
+- **Data classes** are records with a `copy()` that takes named arguments.
+- `when` with **smart casts** gives you narrowing exactly like a TypeScript discriminated union.
+- **Extension functions** add methods to types you do not own, without inheritance.
+- **Default and named arguments** remove most overloads and builders.
+
+<FromTS>
+Kotlin will feel like home: inference, lambdas (`books.filter { it.year != null }`, where `it` is the implicit parameter), string templates, null safety and narrowing. Two differences matter. Classes are `final` by default, and typing is nominal, so an object only satisfies an interface it declares.
+</FromTS>
+
+## Coroutines
+
+Kotlin’s answer to `async`/`await` is **coroutines**. A `suspend` function can pause while waiting without blocking its thread; you call it like a normal function, with no `await` keyword.
+
+```kotlin
+suspend fun loanSummary(userId: Long): Summary = coroutineScope {
+    val loans = async { loanClient.forUser(userId) }     // both start now
+    val fines = async { fineClient.forUser(userId) }
+    Summary(loans.await(), fines.await())               // like Promise.all
+}
+```
+
+`coroutineScope` gives you **structured concurrency**: if one child fails or the request is cancelled, every coroutine started in that scope is cancelled with it. Node’s `Promise.all` does not cancel the losers; this does.
+
+Virtual threads (Chapter 5) and coroutines solve the same problem from different sides. Virtual threads keep blocking code and make threads cheap; coroutines make waiting explicit in the type (`suspend`) and add structured cancellation. In a Spring MVC app with virtual threads, plain Kotlin functions are enough; coroutines shine when you fan out to several services at once.
+
+## Kotlin with Spring
+
+The same controller from Chapter 5, in Kotlin:
+
+<FiveStacks title="Java and Kotlin" note="Same controller, same Spring" sync={false}>
+<Stack id="java" lib="Spring Boot">
+```java
+@RestController
+@RequestMapping("/books")
+class BookController {
+    private final BookRepository books;
+
+    BookController(BookRepository books) { this.books = books; }
+
+    @GetMapping("/{id}")
+    Book find(@PathVariable long id) {
+        return books.findById(id).orElseThrow(() -> new BookNotFound(id));
+    }
+}
+```
+</Stack>
+<Stack id="kotlin" lib="Spring Boot">
+```kotlin
+@RestController
+@RequestMapping("/books")
+class BookController(private val books: BookRepository) {
+
+    @GetMapping("/{id}")
+    fun find(@PathVariable id: Long): Book =
+        books.findByIdOrNull(id) ?: throw BookNotFound(id)
+}
+```
+</Stack>
+</FiveStacks>
+
+`findByIdOrNull` is a Kotlin extension from Spring Data, so you get `Book?` instead of `Optional<Book>`. A Kotlin Spring project needs three things set up, and the Spring Initializr does all three when you pick Kotlin:
+
+1. The `kotlin-spring` compiler plugin, which opens classes carrying Spring annotations so proxies can subclass them.
+2. The `kotlin-jpa` plugin if you use JPA, which generates the no-argument constructors Hibernate needs.
+3. `jackson-module-kotlin`, so JSON maps to data classes with default values and nullability.
+
+Spring also accepts `suspend` controller methods, so a handler can call the `loanSummary` function above directly.
+
+<InTheWild>
+Kotlin is the default for Android and increasingly common for new JVM backends, especially in companies that already run Spring. Many teams mix it with Java in one codebase. For editing Kotlin, IntelliJ IDEA is clearly the best tool; that is worth knowing even if you live in VS Code for the other four stacks.
+</InTheWild>
+
+<InterviewLens>
+"Coroutines or virtual threads?" A strong answer: both make waiting cheap. Virtual threads keep existing blocking code and libraries unchanged. Coroutines add explicit suspension points and structured cancellation, which helps for fan-out and timeouts but colours your functions with suspend. In a Spring MVC service, virtual threads first; coroutines where you need concurrent calls with clean cancellation.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch06" questions={quiz} />
+
+<Flashcards cards={cards} />
