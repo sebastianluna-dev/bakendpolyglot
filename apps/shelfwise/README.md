@@ -18,7 +18,10 @@ The library catalog and loans API from **Part II** of *Backend Polyglot* (Chapte
 | `nest` (NestJS 12, pg, class-validator) | ✅ passes the conformance suite |
 | `fastapi` (FastAPI, asyncpg, Pydantic) | ✅ passes the conformance suite |
 | `django` (Django 6, DRF, psycopg 3) | ✅ passes the conformance suite |
-| `go`, `aspnet`, `spring-java`, `spring-kotlin` | Next |
+| `go` (`net/http`, pgx) | ✅ HTTP layer passes the suite on the in-memory store; Postgres run in CI |
+| `aspnet` (.NET 10 Minimal APIs, Npgsql) | Written; verified in CI |
+| `spring-java` (Spring Boot 3.5, JdbcClient) | Written; verified in CI |
+| `spring-kotlin` (Spring Boot 3.5, Kotlin 2.1) | Written; verified in CI |
 
 ## Run a stack and check it
 

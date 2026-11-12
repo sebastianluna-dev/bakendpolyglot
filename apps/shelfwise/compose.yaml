@@ -58,3 +58,44 @@ services:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:3000/health').status == 200 else 1)\""]
       interval: 2s
       retries: 30
+
+  go:
+    profiles: [go]
+    build: ./stacks/go
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "/shelfwise", "-healthcheck"]   # distroless: no shell, no curl
+      interval: 2s
+      retries: 30
+
+  aspnet:
+    profiles: [aspnet]
+    build: ./stacks/aspnet
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "dotnet", "/app/Shelfwise.dll", "--healthcheck"]
+      interval: 2s
+      retries: 30
+
+  spring-java:
+    profiles: [spring-java]
+    build: ./stacks/spring-java
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck: &jvm-health
+      test: ["CMD", "java", "-jar", "/app/shelfwise.jar", "--healthcheck"]
+      interval: 3s
+      retries: 40
+
+  spring-kotlin:
+    profiles: [spring-kotlin]
+    build: ./stacks/spring-kotlin
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on: { postgres: { condition: service_healthy } }
+    healthcheck: *jvm-health

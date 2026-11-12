@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: [express, nest, fastapi, django]
+        stack: [express, nest, fastapi, django, go, aspnet, spring-java, spring-kotlin]
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +27,24 @@ jobs:
           node-version: 22
       - uses: astral-sh/setup-uv@v6
         if: matrix.stack == 'fastapi' || matrix.stack == 'django'
+      - uses: actions/setup-go@v5
+        if: matrix.stack == 'go'
+        with:
+          go-version: "1.24"
+      - uses: actions/setup-dotnet@v4
+        if: matrix.stack == 'aspnet'
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-java@v4
+        if: startsWith(matrix.stack, 'spring')
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: ${{ matrix.stack == 'spring-java' && 'maven' || '' }}
+      - uses: gradle/actions/setup-gradle@v4
+        if: matrix.stack == 'spring-kotlin'
+        with:
+          gradle-version: "8.14"
 
       - name: Lint and unit tests
         run: make -C stacks/${{ matrix.stack }} lint test
