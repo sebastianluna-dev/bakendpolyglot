@@ -1,0 +1,182 @@
+---
+title: Messaging
+chapter: 33
+part: Part V · Distributed and Real-time Systems
+kicker: Queues, logs, and what "delivered" really means.
+sidebar:
+  order: 33
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What is the key difference between a queue (RabbitMQ) and a log (Kafka)?',
+    options: ['Queues are faster', 'A queue removes a message once a consumer acknowledges it; a log keeps messages for a retention period and each consumer group tracks its own position', 'Logs cannot be replicated', 'Queues only support JSON'],
+    answer: 1,
+    why: 'Logs can be re-read and consumed independently by many groups. Queues distribute work and forget it once done.',
+  },
+  {
+    q: 'In Kafka, how do you guarantee that all events for one order are processed in order?',
+    options: ['Use one topic per order', 'Use the order id as the message key, so all its events go to the same partition', 'Use a single consumer for the whole system', 'Kafka orders everything globally'],
+    answer: 1,
+    why: 'Ordering is per partition. A key hashes to one partition, so per-key order is preserved while different keys are processed in parallel.',
+  },
+  {
+    q: 'A consumer commits its offset before processing, then crashes. What happens to that message?',
+    options: ['It is processed again', 'It is lost: at-most-once delivery', 'Kafka retries automatically', 'It goes to a dead-letter queue'],
+    answer: 1,
+    why: 'Committing first gives at-most-once. Processing first, then committing, gives at-least-once, which is the usual choice with idempotent handlers.',
+  },
+];
+
+export const cards = [
+  { front: 'Partition', back: 'An ordered, append-only shard of a Kafka topic. Order is guaranteed within a partition, not across them.' },
+  { front: 'Consumer group', back: 'Consumers sharing the partitions of a topic; each partition is read by one member of the group.' },
+  { front: 'Dead-letter queue', back: 'Where messages go after repeated processing failures, so they stop blocking the rest.' },
+  { front: 'Effectively-once', back: 'At-least-once delivery plus idempotent processing: duplicates arrive, their effects do not repeat.' },
+];
+
+Part V turns Parcel into five services in five languages. Services that call each other synchronously for everything fail together, so most communication in Parcel is asynchronous: a service publishes a fact ("an order was placed") and others react when they can. This chapter covers the two kinds of broker you will meet, the delivery guarantees they offer, and the producer and consumer code in each stack.
+
+<Recall
+  items={[
+    { ref: 'Ch. 24', text: 'At-least-once delivery means handlers must be idempotent.' },
+    { ref: 'Ch. 29', text: 'Domain events are past-tense facts: OrderPlaced, PaymentCaptured.' },
+    { ref: 'Ch. 31', text: 'Each service owns its data; others react to its events.' },
+  ]}
+/>
+
+## Queues and logs
+
+| | Queue (RabbitMQ, SQS) | Log (Kafka, Redpanda, Kinesis) |
+| --- | --- | --- |
+| After consumption | Message removed once acknowledged | Message kept for the retention period |
+| Many independent consumers | Fan-out exchanges, one copy per queue | Each consumer group reads the same log |
+| Re-reading old messages | No | Yes: reset the group’s offset |
+| Ordering | Per queue, weakened by parallel consumers | Per partition, by key |
+| Typical use | Work distribution, commands, jobs | Event streams, integration between services, replay |
+| Routing | Rich: exchanges, bindings, topics | Simple: topic and key |
+
+Use a **queue** when messages are tasks to be done once by whoever is free. Use a **log** when messages are facts that several services want, possibly later, possibly again. Parcel uses Kafka for domain events between services and keeps simple job queues inside services.
+
+## Partitions, keys and consumer groups
+
+<Figure n="33.1" caption="Events with the same key land in the same partition; each partition is read by one consumer in a group">
+  <svg viewBox="0 0 720 200" role="img" aria-label="Kafka topic partitions and consumer groups" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="kf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="var(--bp-ink)" font-weight="600"><text x="8" y="20">Producer (Ordering)</text><text x="230" y="20">Topic: orders</text><text x="560" y="20">Group: inventory</text></g>
+    <rect x="8" y="80" width="150" height="44" rx="2" fill="none" stroke="var(--bp-rule)" stroke-width="1.25" />
+    <text x="83" y="100" text-anchor="middle" fill="var(--bp-ink)">key = order id</text>
+    <text x="83" y="116" text-anchor="middle" fill="var(--bp-muted)" font-size="11">hash → partition</text>
+    <g fill="var(--bp-paper-2)" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="230" y="36" width="260" height="34" rx="2" /><rect x="230" y="84" width="260" height="34" rx="2" /><rect x="230" y="132" width="260" height="34" rx="2" />
+    </g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1"><rect x="240" y="42" width="30" height="22" /><rect x="276" y="42" width="30" height="22" /><rect x="312" y="42" width="30" height="22" /></g>
+    <g fill="var(--bp-ink)" font-size="11"><text x="430" y="58">P0</text><text x="430" y="106">P1</text><text x="430" y="154">P2</text><text x="246" y="58">o-7</text><text x="282" y="58">o-7</text><text x="318" y="58">o-7</text></g>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="560" y="44" width="152" height="40" rx="2" /><rect x="560" y="116" width="152" height="40" rx="2" /></g>
+    <g fill="var(--bp-ink)" text-anchor="middle"><text x="636" y="68">consumer 1 · P0, P1</text><text x="636" y="140">consumer 2 · P2</text></g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M158 96L228 56" marker-end="url(#kf-arrow)" /><path d="M490 53H558" marker-end="url(#kf-arrow)" /><path d="M490 101L558 72" marker-end="url(#kf-arrow)" /><path d="M490 149L558 138" marker-end="url(#kf-arrow)" />
+    </g>
+    <text x="230" y="190" fill="var(--bp-muted)" font-size="11">All events for order o-7 stay in P0, in order. More partitions = more parallel consumers.</text>
+  </svg>
+</Figure>
+
+A topic is split into **partitions**; each is an ordered log. The producer picks a partition by hashing the message **key**, so all events with the same key (the same order) stay in order. A **consumer group** shares partitions among its members: add consumers to scale out, up to one per partition. Each group tracks its own **offset** per partition, so Inventory and Shipping read the same events independently.
+
+## Producing events
+
+<FiveStacks note="Publish OrderPlaced, keyed by order id">
+<Stack id="nest" lib="kafkajs">
+```ts
+await producer.send({
+  topic: 'parcel.orders.v1',
+  messages: [{ key: event.orderId, value: JSON.stringify(event), headers: { type: 'OrderPlaced' } }],
+});
+```
+</Stack>
+<Stack id="cs" lib="Confluent.Kafka">
+```csharp
+await producer.ProduceAsync("parcel.orders.v1", new Message<string, string>
+{
+    Key = evt.OrderId,
+    Value = JsonSerializer.Serialize(evt),
+    Headers = new Headers { { "type", "OrderPlaced"u8.ToArray() } },
+}, ct);
+```
+</Stack>
+<Stack id="kotlin" lib="Spring for Apache Kafka">
+```kotlin
+kafkaTemplate.send(
+    MessageBuilder.withPayload(event)
+        .setHeader(KafkaHeaders.TOPIC, "parcel.orders.v1")
+        .setHeader(KafkaHeaders.KEY, event.orderId)
+        .setHeader("type", "OrderPlaced")
+        .build()
+)
+```
+</Stack>
+<Stack id="go" lib="franz-go">
+```go
+rec := &kgo.Record{
+	Topic:   "parcel.orders.v1",
+	Key:     []byte(evt.OrderID),
+	Value:   payload,
+	Headers: []kgo.RecordHeader{{Key: "type", Value: []byte("OrderPlaced")}},
+}
+if err := client.ProduceSync(ctx, rec).FirstErr(); err != nil {
+	return err
+}
+```
+</Stack>
+<Stack id="fastapi" lib="confluent-kafka">
+```python
+producer.produce(
+    "parcel.orders.v1",
+    key=event.order_id,
+    value=event.model_dump_json(),
+    headers={"type": "OrderPlaced"},
+    on_delivery=log_delivery_errors,
+)
+producer.poll(0)   # serve delivery callbacks
+```
+</Stack>
+</FiveStacks>
+
+Publishing straight from a request handler, as above, has a flaw: the database commit and the publish can disagree if one fails. Chapter 34 fixes that with the transactional outbox; these calls then move into the outbox relay.
+
+## Delivery guarantees
+
+| Guarantee | How it happens | Risk |
+| --- | --- | --- |
+| At-most-once | Commit the offset, then process | Crash after commit loses the message |
+| At-least-once | Process, then commit | Crash before commit reprocesses it |
+| Exactly-once | Transactions within the broker | Only covers broker-to-broker; your database is outside |
+
+Choose **at-least-once** and make consumers idempotent: record processed event ids in the same transaction as the effect (an **inbox** table), or make the effect naturally idempotent ("set status to reserved"). That combination is often called **effectively-once**.
+
+## Failures and dead letters
+
+A message that always fails (a bug, bad data) blocks its partition forever if you retry it in place. Retry a few times with backoff, then move it to a **dead-letter topic** with the error attached, alert, and keep going. Someone fixes the cause and replays the dead letters.
+
+<Pitfall title="Events as remote procedure calls">
+An event named `ReserveStockForOrder` that Ordering publishes and then waits for is a slow, hard-to-debug RPC. Events state facts (`OrderPlaced`) and the publisher does not know or care who reacts. When you need an answer now, use a synchronous call (Chapters 35 and 37); when you need a multi-step process, use a saga (Chapter 34).
+</Pitfall>
+
+## Schemas
+
+Events outlive the code that produced them, and consumers in other languages must parse them. Give every event a versioned schema (JSON Schema, Avro or Protobuf), keep changes additive, put the version in the topic name or a header, and validate in CI. A schema registry enforces compatibility rules at publish time.
+
+<InTheWild>
+Kafka is the default event backbone in large companies; RabbitMQ remains common for task queues; cloud teams often use SQS, SNS, EventBridge, Pub/Sub or Service Bus instead of running brokers. The concepts in this chapter (keys and ordering, consumer groups, at-least-once, dead letters, schemas) transfer directly.
+</InTheWild>
+
+<InterviewLens>
+"How do services in your design communicate?" A strong answer chooses per interaction: synchronous calls when the caller needs an answer now, events on a log for facts other services react to, and queues for work distribution; then covers ordering by key, at-least-once with idempotent consumers, dead letters, and schema evolution.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch33" questions={quiz} />
+
+<Flashcards cards={cards} />

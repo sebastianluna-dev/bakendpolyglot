@@ -1,0 +1,120 @@
+---
+title: A Method for System Design
+chapter: 46
+part: Part VII · System Design
+kicker: Requirements, numbers, a sketch, and the trade-offs that matter.
+sidebar:
+  order: 46
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What does the CAP theorem say about a distributed data store during a network partition?',
+    options: ['It can keep consistency, availability and partition tolerance', 'It must choose between consistency (refuse some requests) and availability (answer with possibly stale data)', 'Partitions never happen in the cloud', 'It must stop completely'],
+    answer: 1,
+    why: 'Partitions happen, so the real choice under a partition is C or A. PACELC adds that even without partitions you trade latency against consistency.',
+  },
+  {
+    q: 'A system stores 100 million new rows per day of 1 KB each. Roughly how much data per year?',
+    options: ['About 3.6 GB', 'About 36 TB', 'About 360 GB', 'About 3.6 PB'],
+    answer: 1,
+    why: '100 million × 1 KB = 100 GB per day; × 365 ≈ 36.5 TB per year, before replicas and indexes.',
+  },
+  {
+    q: 'What is the main risk of sharding by a user id hash compared with by tenant id?',
+    options: ['None', 'Queries across one tenant’s users now hit every shard; the shard key decides which queries stay local', 'Hashing is slow', 'It prevents replication'],
+    answer: 1,
+    why: 'Pick the shard key from the dominant access pattern. Queries that do not include the key fan out to every shard.',
+  },
+];
+
+export const cards = [
+  { front: 'Four steps', back: 'Requirements → estimates → high-level design → deep dives and trade-offs.' },
+  { front: 'CAP / PACELC', back: 'Under a partition, choose consistency or availability; else, choose latency or consistency.' },
+  { front: 'Read replica', back: 'A copy that serves reads; asynchronous replication means reads can be slightly stale.' },
+  { front: 'Sharding', back: 'Splitting data across databases by a key; the key decides which queries stay on one shard.' },
+];
+
+Part VII is about designing systems, the core of the senior backend interview and a large part of the senior job. You already have the parts: every chapter so far is a component or a trade-off you can reason about. This chapter gives you a repeatable method for the conversation and the scaling vocabulary every design uses. Chapter 47 applies both to seven classic problems.
+
+<Recall
+  items={[
+    { ref: 'Ch. 9', text: 'Stack choice follows from requirements, team and operations.' },
+    { ref: 'Ch. 25–26', text: 'Caches, NoSQL by access pattern, and Postgres as the default system of record.' },
+    { ref: 'Ch. 33–37', text: 'Queues and logs, outbox and sagas, gRPC, resilience patterns.' },
+  ]}
+/>
+
+## Four steps
+
+**1. Requirements (5 minutes).** Ask before drawing. Functional: what must users do? Non-functional: how many users, reads versus writes, latency targets, consistency needs ("can a user see a stale balance?"), availability, data retention, regions. Write them down and agree on what is out of scope.
+
+**2. Estimates (5 minutes).** Turn the numbers into requests per second, storage and bandwidth, with round figures. One day has roughly 100,000 seconds (86,400), which makes the arithmetic easy: 10 million requests a day is about 100 per second on average, and you plan for a peak of 3 to 10 times that.
+
+**3. High-level design (15 minutes).** Draw clients, edge (CDN, load balancer, gateway), services, data stores, caches, queues. Walk one request of each important kind through it. Define the main APIs and the data model.
+
+**4. Deep dives (15 minutes).** Pick the two or three hardest parts, or let the interviewer pick, and go deep: the data model at scale, the hot path, consistency, failure modes. State trade-offs explicitly: "I choose X, which costs Y, because requirement Z matters more."
+
+## Numbers worth remembering
+
+| Operation | Rough time |
+| --- | --- |
+| Main memory reference | 100 ns |
+| Read 1 MB sequentially from memory | 10–50 µs |
+| Round trip within a data centre | 0.5 ms |
+| Read 1 MB from SSD | ~1 ms |
+| Simple indexed database query (warm) | 1–5 ms |
+| Round trip across a continent | 30–80 ms |
+| Round trip across an ocean | 100–150 ms |
+
+Orders of magnitude are what matter: memory is a thousand times faster than a network hop, and a network hop is a hundred times faster than crossing an ocean. A single well-tuned PostgreSQL primary handles thousands to tens of thousands of simple transactions per second; Redis handles on the order of a hundred thousand operations per second per node.
+
+## Scaling vocabulary
+
+**Vertical and horizontal.** Scale up (a bigger machine) until it stops being simple or affordable; scale out (more machines) when you must. Stateless services scale out trivially behind a load balancer; state is where the work is.
+
+**Load balancing.** Layer 4 balances connections, layer 7 balances requests and can route by path or header. Algorithms: round robin, least connections, consistent hashing when requests should land on the same node (caches, WebSockets).
+
+**Replication.** A primary takes writes; **read replicas** serve reads. Asynchronous replication means replicas lag, so a user may not see their own write if the next read goes to a replica: route read-your-own-writes to the primary.
+
+**Partitioning (sharding).** Split data across databases by a **shard key**. Queries that include the key hit one shard; queries that do not fan out to all of them. Choose the key from the dominant access pattern (tenant id for B2B systems, user id for social ones), and plan for hot keys (a celebrity, a big tenant).
+
+<Figure n="46.1" caption="Scaling a data tier: replicas for reads, shards for writes and size">
+  <svg viewBox="0 0 720 170" role="img" aria-label="Replication and sharding" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="sd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="var(--bp-ink)" font-weight="600"><text x="8" y="18">Replication</text><text x="380" y="18">Sharding by tenant id</text></g>
+    <rect x="8" y="60" width="110" height="48" rx="2" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="200" y="30" width="110" height="40" rx="2" /><rect x="200" y="100" width="110" height="40" rx="2" /><rect x="380" y="60" width="90" height="48" rx="2" /><rect x="520" y="30" width="90" height="36" rx="2" /><rect x="520" y="76" width="90" height="36" rx="2" /><rect x="520" y="122" width="90" height="36" rx="2" /></g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="63" y="82">primary</text><text x="63" y="98" font-size="11" fill="var(--bp-muted)">writes</text>
+      <text x="255" y="55">replica · reads</text><text x="255" y="125">replica · reads</text>
+      <text x="425" y="82">router</text><text x="425" y="98" font-size="11" fill="var(--bp-muted)">hash(key)</text>
+      <text x="565" y="53">shard A–H</text><text x="565" y="99">shard I–P</text><text x="565" y="145">shard Q–Z</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25"><path d="M118 76L198 52" marker-end="url(#sd-arrow)" /><path d="M118 92L198 118" marker-end="url(#sd-arrow)" /><path d="M470 76L518 50" marker-end="url(#sd-arrow)" /><path d="M470 84H518" marker-end="url(#sd-arrow)" /><path d="M470 92L518 138" marker-end="url(#sd-arrow)" /></g>
+    <text x="8" y="164" fill="var(--bp-muted)" font-size="11">async replication: replicas lag by milliseconds to seconds</text>
+  </svg>
+</Figure>
+
+**CAP and PACELC.** When the network partitions, a replicated store must either refuse some requests to stay consistent (CP) or keep answering with possibly stale data (AP). **PACELC** adds the everyday case: **else**, when there is no partition, you still trade **latency** against **consistency**. Most real systems pick per operation: a balance must be consistent; a like counter can be eventually consistent.
+
+**Consistency models**, from strongest to weakest: linearizable (every read sees the latest write), sequential, causal (cause before effect, such as a reply after its message), read-your-writes, eventual. Name the one each feature needs.
+
+<Pitfall title="Drawing boxes without numbers">
+A design with Kafka, Redis, sharding and microservices for 50 requests per second is not senior; it is expensive. Let the estimates decide: if one PostgreSQL instance with a replica fits the numbers for five years, say so, and explain what you would change at ten times the load.
+</Pitfall>
+
+<InTheWild>
+Real design reviews look like this method in writing: a design doc with requirements and non-goals, back-of-the-envelope numbers, a diagram, the alternatives considered and why they lost, and the risks. Chapter 48 turns that into a template.
+</InTheWild>
+
+<InterviewLens>
+The interview is the method. Interviewers look for requirement questions before solutions, numbers that drive choices, a clean high-level design walked through with real requests, depth on the hard parts, explicit trade-offs, and failure handling. Saying "I don’t know, but here is how I would find out" is better than bluffing.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch46" questions={quiz} />
+
+<Flashcards cards={cards} />

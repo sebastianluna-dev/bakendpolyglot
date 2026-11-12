@@ -1,0 +1,196 @@
+---
+title: Real-time
+chapter: 38
+part: Part V · Distributed and Real-time Systems
+kicker: Pushing data to clients, and keeping a million connections open.
+sidebar:
+  order: 38
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A dashboard only needs the server to push updates; the client never sends messages. What is the simplest fit?',
+    options: ['WebSockets', 'Server-Sent Events over plain HTTP', 'Polling every 100 ms', 'gRPC bidirectional streaming'],
+    answer: 1,
+    why: 'SSE is one-way server push over HTTP with automatic reconnection and event ids. WebSockets are for two-way traffic.',
+  },
+  {
+    q: 'Users connected to different server instances must see each other’s chat messages. What do you add?',
+    options: ['Bigger servers', 'A shared pub/sub backplane, such as Redis, that every instance subscribes to', 'Sticky sessions only', 'A database poll every second'],
+    answer: 1,
+    why: 'Each instance only knows its own connections. Publishing every message to a backplane lets each instance deliver it to its local sockets.',
+  },
+  {
+    q: 'Why do WebSocket servers send periodic pings or heartbeats?',
+    options: ['To measure bandwidth', 'To detect dead connections and keep proxies and load balancers from closing idle ones', 'To authenticate users', 'It is required by TCP'],
+    answer: 1,
+    why: 'Connections can die silently, and intermediaries close idle ones. Heartbeats detect both, so the server frees resources and clients reconnect.',
+  },
+];
+
+export const cards = [
+  { front: 'SSE', back: 'Server-Sent Events: one-way push over HTTP (text/event-stream), with automatic reconnect and Last-Event-ID.' },
+  { front: 'WebSocket', back: 'A full-duplex connection upgraded from HTTP; both sides send messages at any time.' },
+  { front: 'Backplane', back: 'Shared pub/sub (Redis, a broker) that lets every instance deliver messages to its own connected clients.' },
+];
+
+Part V’s second app, **Pulse**, is real-time chat and notifications: messages appear without refreshing, typing indicators update live, and Parcel can push "your order shipped" to the open app. Real-time changes the server’s job from answering short requests to holding long connections, and that changes how you scale. This chapter compares the transport options, shows a room broadcast in each stack, and explains how to run it on many instances.
+
+<Recall
+  items={[
+    { ref: 'Ch. 9', text: 'Event loops, thread pools and goroutines handle many idle connections very differently.' },
+    { ref: 'Ch. 25', text: 'Redis also offers pub/sub for fan-out.' },
+    { ref: 'Ch. 33', text: 'Kafka distributes events between services; it is not a per-user delivery channel.' },
+  ]}
+/>
+
+## Four ways to get fresh data
+
+| Technique | Direction | How | Good for |
+| --- | --- | --- | --- |
+| Polling | Client pulls | Request every N seconds | Rare updates, simplicity |
+| Long polling | Client pulls, server holds | Request waits until data or timeout | Legacy fallback |
+| Server-Sent Events | Server → client | One HTTP response that never ends | Notifications, live dashboards, LLM streaming |
+| WebSockets | Both ways | Upgraded TCP connection | Chat, collaboration, games |
+
+Choose the least powerful option that works. **SSE** is plain HTTP, passes through proxies, reconnects automatically and resumes from `Last-Event-ID`; Pulse uses it for notifications. **WebSockets** are needed when the client sends frequent messages too; Pulse uses them for chat.
+
+## A chat room, five ways
+
+<FiveStacks note="Receive a message in a room and broadcast it to everyone in that room">
+<Stack id="nest" lib="@nestjs/websockets (Socket.IO)">
+```ts
+@WebSocketGateway({ namespace: '/chat' })
+export class ChatGateway {
+  @WebSocketServer() server!: Server;
+
+  @SubscribeMessage('join')
+  join(@MessageBody() roomId: string, @ConnectedSocket() client: Socket) {
+    client.join(roomId);
+  }
+
+  @SubscribeMessage('message')
+  send(@MessageBody() msg: ChatMessage) {
+    this.server.to(msg.roomId).emit('message', msg);   // Redis adapter fans out across instances
+  }
+}
+```
+</Stack>
+<Stack id="cs" lib="SignalR">
+```csharp
+public class ChatHub : Hub
+{
+    public Task Join(string roomId) => Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+
+    public Task Send(string roomId, string text) =>
+        Clients.Group(roomId).SendAsync("message", Context.UserIdentifier, text);
+}
+
+// Program.cs
+builder.Services.AddSignalR().AddStackExchangeRedis(redisConnection);   // backplane
+app.MapHub<ChatHub>("/hubs/chat");
+```
+</Stack>
+<Stack id="kotlin" lib="Spring WebSocket + STOMP">
+```kotlin
+@Controller
+class ChatController(private val messaging: SimpMessagingTemplate) {
+    @MessageMapping("/rooms/{roomId}/send")
+    fun send(@DestinationVariable roomId: String, message: ChatMessage, principal: Principal) {
+        messaging.convertAndSend("/topic/rooms/$roomId", message.copy(from = principal.name))
+    }
+}
+// clients SUBSCRIBE to /topic/rooms/{roomId}; a broker relay (RabbitMQ) spans instances
+```
+</Stack>
+<Stack id="go" lib="coder/websocket">
+```go
+func (h *Hub) ServeRoom(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+	room := r.PathValue("room")
+	msgs := h.Subscribe(room) // local channel, fed from Redis pub/sub
+	defer h.Unsubscribe(room, msgs)
+
+	go h.readLoop(r.Context(), conn, room) // incoming messages are published to Redis
+	for m := range msgs {
+		if err := wsjson.Write(r.Context(), conn, m); err != nil {
+			return
+		}
+	}
+}
+```
+</Stack>
+<Stack id="fastapi" lib="FastAPI + redis.asyncio">
+```python
+@app.websocket("/rooms/{room_id}")
+async def room(ws: WebSocket, room_id: str):
+    await ws.accept()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(f"room:{room_id}")
+
+    async def forward() -> None:
+        async for m in pubsub.listen():
+            if m["type"] == "message":
+                await ws.send_text(m["data"])
+
+    task = asyncio.create_task(forward())
+    try:
+        while True:
+            await redis.publish(f"room:{room_id}", await ws.receive_text())
+    except WebSocketDisconnect:
+        task.cancel()
+        await pubsub.unsubscribe()
+```
+</Stack>
+</FiveStacks>
+
+Three stacks have a framework that manages rooms and the backplane for you (Socket.IO with its Redis adapter, SignalR with a Redis backplane, Spring with a STOMP broker relay). Go and FastAPI make the pub/sub explicit, which is more code and makes the scaling model obvious.
+
+## Scaling connections
+
+<Figure n="38.1" caption="Each instance holds its own sockets; a backplane delivers every message to every instance that has subscribers">
+  <svg viewBox="0 0 720 190" role="img" aria-label="Scaling WebSockets with a Redis backplane" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="ws-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="120" y="20" width="150" height="56" rx="2" /><rect x="450" y="20" width="150" height="56" rx="2" /></g>
+    <rect x="285" y="130" width="150" height="48" rx="2" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="var(--bp-ink)" text-anchor="middle"><text x="195" y="44" font-weight="600">Pulse instance 1</text><text x="195" y="62" font-size="11" fill="var(--bp-muted)">Ana, Ben</text><text x="525" y="44" font-weight="600">Pulse instance 2</text><text x="525" y="62" font-size="11" fill="var(--bp-muted)">Caro</text><text x="360" y="159" font-weight="600">Redis pub/sub</text></g>
+    <g fill="var(--bp-paper-2)" stroke="var(--bp-rule)"><circle cx="40" cy="30" r="12" /><circle cx="40" cy="66" r="12" /><circle cx="680" cy="48" r="12" /></g>
+    <g fill="var(--bp-ink)" font-size="11" text-anchor="middle"><text x="40" y="34">A</text><text x="40" y="70">B</text><text x="680" y="52">C</text></g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M52 30H118" /><path d="M52 66H118" /><path d="M600 48H666" />
+      <path d="M195 76V150H283" marker-end="url(#ws-arrow)" /><path d="M435 154H525V78" marker-end="url(#ws-arrow)" />
+    </g>
+    <g fill="var(--bp-muted)" font-size="11"><text x="205" y="120">Ana sends → publish</text><text x="440" y="120">subscribed → deliver to Caro</text></g>
+  </svg>
+</Figure>
+
+Long-lived connections bring their own operational rules:
+
+- **Connection capacity** is mostly memory and file descriptors. Go, Node and .NET hold hundreds of thousands of idle sockets per instance comfortably; on the JVM, use virtual threads or a reactive stack; in Python, use ASGI.
+- **Sticky sessions** are needed for Socket.IO’s and SignalR’s HTTP fallback transports; pure WebSockets stay on one instance anyway for the life of the connection.
+- **Heartbeats** detect dead connections and stop proxies closing idle ones; align them with the load balancer’s idle timeout.
+- **Deploys** close every connection on the old instances. Clients must reconnect with backoff and jitter and resume (SSE’s `Last-Event-ID`, a "messages since" query for chat), or a deploy becomes a self-inflicted thundering herd.
+- **Authentication** happens at connection time (a token in the first message or a cookie), and long connections must handle token expiry.
+
+<Pitfall title="Treating the socket as the source of truth">
+A message that only exists in a WebSocket frame is lost if the recipient is offline or reconnecting. Persist messages first (Pulse writes to PostgreSQL), then broadcast, and let clients fetch what they missed on reconnect.
+</Pitfall>
+
+<InTheWild>
+Many teams buy rather than build the connection layer (Ably, Pusher, Azure Web PubSub, AWS API Gateway WebSockets) and keep only the business logic. The design questions do not change: persistence, reconnection, fan-out and authorization per room.
+</InTheWild>
+
+<InterviewLens>
+"Design the real-time layer of a chat app." A strong answer chooses WebSockets for chat and SSE for notifications, persists before broadcasting, fans out through a backplane across instances, handles reconnection with resume, heartbeats and auth on connect, and estimates connections per instance from memory per connection.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch38" questions={quiz} />
+
+<Flashcards cards={cards} />

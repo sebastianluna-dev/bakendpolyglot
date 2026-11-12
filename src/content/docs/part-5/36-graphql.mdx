@@ -1,0 +1,201 @@
+---
+title: GraphQL
+chapter: 36
+part: Part V · Distributed and Real-time Systems
+kicker: One endpoint, client-shaped queries, and the N+1 problem in a new costume.
+sidebar:
+  order: 36
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A query asks for 50 orders and each line’s product. Without batching, how many calls reach the Catalog service?',
+    options: ['1', 'One per order line: the N+1 problem again', '50 exactly', 'Zero, GraphQL caches it'],
+    answer: 1,
+    why: 'Each field resolver runs per parent object. A DataLoader collects the keys requested in one tick and makes one batched call.',
+  },
+  {
+    q: 'What protects a public GraphQL API from very expensive queries?',
+    options: ['Nothing is needed', 'Depth and complexity limits, pagination on lists, timeouts, and persisted queries', 'Using POST only', 'Disabling introspection only'],
+    answer: 1,
+    why: 'Clients can nest lists arbitrarily. Limit depth and cost, page every list, and in first-party apps allow only pre-registered (persisted) queries.',
+  },
+  {
+    q: 'Where does authorization belong in a GraphQL server?',
+    options: ['Only at the HTTP endpoint', 'In the business layer the resolvers call, plus field-level rules for sensitive fields', 'In the schema comments', 'In the client'],
+    answer: 1,
+    why: 'One endpoint serves every query, so endpoint-level checks are not enough. Resolvers delegate to services that enforce object and field rules.',
+  },
+];
+
+export const cards = [
+  { front: 'Resolver', back: 'A function that produces the value of one field for one parent object.' },
+  { front: 'DataLoader', back: 'A per-request batching and caching helper: collects keys, makes one call, returns results in order.' },
+  { front: 'Persisted query', back: 'A query registered ahead of time and called by id, so clients cannot send arbitrary queries.' },
+];
+
+Parcel’s web and mobile apps need different slices of the same data: the mobile order list shows three fields, the web order page shows thirty, joined from Ordering, Catalog and Payments. With REST, that means many endpoints or many round trips. **GraphQL** lets each client ask for exactly the shape it needs in one request, and Parcel’s NestJS gateway serves it. This chapter covers the model, the batching every GraphQL server needs, and the protections a public endpoint requires.
+
+<Recall
+  items={[
+    { ref: 'Ch. 15', text: 'N+1 queries: one for the list, one per item. The fix is batching.' },
+    { ref: 'Ch. 21', text: 'Object-level authorization on every access, not just at the endpoint.' },
+    { ref: 'Ch. 35', text: 'Inside Parcel, services talk gRPC; the edge speaks REST and GraphQL.' },
+  ]}
+/>
+
+## Schema and queries
+
+The server publishes a typed **schema**; clients send **queries** that select fields from it.
+
+```graphql
+type Query {
+  order(id: ID!): Order
+  myOrders(first: Int = 20, after: String): OrderConnection!
+}
+
+type Order {
+  id: ID!
+  status: OrderStatus!
+  total: Money!
+  lines: [OrderLine!]!
+  payment: Payment          # resolved from the Payments service
+}
+
+type OrderLine {
+  sku: String!
+  quantity: Int!
+  product: Product!         # resolved from the Catalog service
+}
+```
+
+```graphql
+query OrderPage($id: ID!) {
+  order(id: $id) {
+    status
+    total { amount currency }
+    lines { quantity product { name imageUrl } }
+  }
+}
+```
+
+Every field has a **resolver**. The gateway resolves `order` by calling Ordering, `lines.product` by calling Catalog, and `payment` by calling Payments, then assembles exactly the shape the client asked for.
+
+## Batching with DataLoader
+
+Field resolvers run once per parent object. An order page with 30 lines calls the `product` resolver 30 times, which means 30 calls to Catalog: the N+1 problem from Chapter 15, now across the network. Every GraphQL stack solves it the same way: a **DataLoader** collects the keys requested during one tick of execution and makes one batched call.
+
+<FiveStacks note="Resolve OrderLine.product with one batched call to Catalog">
+<Stack id="nest" lib="@nestjs/graphql + dataloader">
+```ts
+@Resolver(() => OrderLine)
+export class OrderLineResolver {
+  @ResolveField(() => Product)
+  product(@Parent() line: OrderLine, @Context('loaders') loaders: Loaders) {
+    return loaders.productBySku.load(line.sku);
+  }
+}
+
+// created per request in the GraphQL context:
+const productBySku = new DataLoader<string, Product>(async (skus) => {
+  const products = await catalog.getMany([...skus]);
+  return skus.map((s) => products.find((p) => p.sku === s) ?? new Error(`Unknown SKU ${s}`));
+});
+```
+</Stack>
+<Stack id="cs" lib="Hot Chocolate">
+```csharp
+[ExtendObjectType<OrderLine>]
+public static class OrderLineExtensions
+{
+    public static Task<Product> GetProductAsync([Parent] OrderLine line, IProductBySkuDataLoader loader, CancellationToken ct)
+        => loader.LoadAsync(line.Sku, ct);
+}
+
+public static class CatalogDataLoaders
+{
+    [DataLoader]   // source-generated IProductBySkuDataLoader
+    public static async Task<IReadOnlyDictionary<string, Product>> GetProductBySkuAsync(
+        IReadOnlyList<string> skus, CatalogClient catalog, CancellationToken ct)
+        => (await catalog.GetManyAsync(skus, ct)).ToDictionary(p => p.Sku);
+}
+```
+</Stack>
+<Stack id="kotlin" lib="Spring for GraphQL">
+```kotlin
+@Controller
+class OrderLineController(private val catalog: CatalogClient) {
+    @BatchMapping   // called once with every OrderLine in the response
+    fun product(lines: List<OrderLine>): Map<OrderLine, Product> {
+        val bySku = catalog.getMany(lines.map { it.sku }.distinct()).associateBy { it.sku }
+        return lines.associateWith { bySku.getValue(it.sku) }
+    }
+}
+```
+</Stack>
+<Stack id="go" lib="gqlgen + dataloadgen">
+```go
+func (r *orderLineResolver) Product(ctx context.Context, line *model.OrderLine) (*model.Product, error) {
+	return loaders.For(ctx).ProductBySku.Load(ctx, line.Sku)
+}
+
+// per request:
+productBySku := dataloadgen.NewLoader(func(ctx context.Context, skus []string) ([]*model.Product, []error) {
+	return catalog.GetMany(ctx, skus) // results in the same order as skus
+}, dataloadgen.WithWait(2*time.Millisecond))
+```
+</Stack>
+<Stack id="fastapi" lib="Strawberry">
+```python
+@strawberry.type
+class OrderLine:
+    sku: str
+    quantity: int
+
+    @strawberry.field
+    async def product(self, info: Info) -> Product:
+        return await info.context["product_by_sku"].load(self.sku)
+
+# per request:
+async def load_products(skus: list[str]) -> list[Product]:
+    by_sku = {p.sku: p for p in await catalog.get_many(skus)}
+    return [by_sku[s] for s in skus]
+
+context = {"product_by_sku": DataLoader(load_fn=load_products)}
+```
+</Stack>
+</FiveStacks>
+
+Create loaders **per request**, never globally: their cache would otherwise leak one user’s data into another user’s response.
+
+## Protecting a GraphQL endpoint
+
+A public GraphQL endpoint accepts arbitrary queries, so it needs defences REST endpoints get for free:
+
+- **Depth and complexity limits** reject queries that nest lists deeply or would fetch too much.
+- **Pagination on every list** (`first`, `after`), with a maximum page size.
+- **Persisted queries** for first-party apps: the build registers each query, and the server accepts only known query ids. This blocks abuse and improves caching.
+- **Timeouts** per request, and disable introspection in production if your API is not public.
+
+<Pitfall title="Authorization only at the endpoint">
+All GraphQL traffic hits one URL, so "the endpoint requires a token" says nothing about which orders a user may read. Resolvers must call services that apply the object-level rules from Chapter 21, and sensitive fields need their own checks. Never put authorization logic in the schema or in the client.
+</Pitfall>
+
+## When to use it
+
+GraphQL fits **client-facing aggregation**: many clients with different needs, data from several services, fast-moving frontends. It is a poor fit for service-to-service calls (use gRPC), file uploads and downloads, and simple public APIs where HTTP caching matters (use REST). Parcel’s rule: GraphQL at the gateway for apps, REST for partners, gRPC inside.
+
+<InTheWild>
+Large organisations often federate GraphQL: each team owns a subgraph and a router composes them into one schema (Apollo Federation, GraphQL Mesh, Hot Chocolate Fusion). The same batching, limits and authorization rules apply, just distributed across teams.
+</InTheWild>
+
+<InterviewLens>
+"GraphQL or REST for this product?" A strong answer weighs client diversity and data aggregation (GraphQL) against caching, simplicity and partner expectations (REST), and if GraphQL is chosen, names DataLoader batching, per-request loaders, query cost limits, pagination, persisted queries and resolver-level authorization.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch36" questions={quiz} />
+
+<Flashcards cards={cards} />

@@ -1,0 +1,114 @@
+---
+title: Cloud Building Blocks
+chapter: 45
+part: Part VI · Operations
+kicker: The dozen managed services that most backends are made of.
+sidebar:
+  order: 45
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'How should a service running in the cloud get access to a database secret and a storage bucket?',
+    options: ['Access keys in environment variables committed to the repo', 'A workload identity (IAM role) with least-privilege permissions, granted to the service', 'The root account credentials', 'A shared key used by every service'],
+    answer: 1,
+    why: 'Workload identities give each service short-lived credentials with only the permissions it needs, with no long-lived keys to leak.',
+  },
+  {
+    q: 'Why manage cloud resources with infrastructure as code (Terraform, Pulumi, CDK)?',
+    options: ['It is cheaper per resource', 'Changes are reviewed, versioned, repeatable across environments, and drift is detectable', 'Consoles are deprecated', 'It is required by AWS'],
+    answer: 1,
+    why: 'Click-ops cannot be reviewed or reproduced. Code makes infrastructure changes as safe as application changes.',
+  },
+  {
+    q: 'When is a serverless function (Lambda, Azure Functions, Cloud Run functions) a good fit?',
+    options: ['Long-lived WebSocket servers', 'Spiky, event-driven or low-volume workloads where paying per invocation and scaling to zero helps', 'Latency-critical services with large warm caches', 'Anything that needs a database'],
+    answer: 1,
+    why: 'Serverless shines for bursty and event-driven work. Steady high-volume or connection-heavy services are usually cheaper and simpler as containers.',
+  },
+];
+
+export const cards = [
+  { front: 'Workload identity', back: 'An IAM identity attached to a service (role, managed identity, service account) instead of stored keys.' },
+  { front: 'Infrastructure as code', back: 'Cloud resources declared in versioned code (Terraform, Pulumi, CDK, Bicep) and applied by a pipeline.' },
+  { front: 'Least privilege', back: 'Grant each identity only the actions and resources it needs, nothing more.' },
+];
+
+Every company you join will run on a cloud provider, and most backends are assembled from the same dozen managed services, whatever the provider calls them. This chapter maps those building blocks across AWS, Azure and Google Cloud, and covers the three habits that matter most: identity, infrastructure as code, and cost awareness. AWS names come first because it is the most common, but the concepts transfer directly.
+
+<Recall
+  items={[
+    { ref: 'Ch. 16', text: 'Secrets live in a manager, injected at run time, rotated routinely.' },
+    { ref: 'Ch. 41', text: 'Kubernetes runs containers; managed offerings run the cluster for you.' },
+    { ref: 'Ch. 42', text: 'CI should authenticate to the cloud with OIDC federation, not stored keys.' },
+  ]}
+/>
+
+## The building blocks
+
+| Need | AWS | Azure | Google Cloud |
+| --- | --- | --- | --- |
+| Containers, managed cluster | EKS | AKS | GKE |
+| Containers, simpler | ECS on Fargate, App Runner | Container Apps | Cloud Run |
+| Functions | Lambda | Functions | Cloud Run functions |
+| Managed PostgreSQL | RDS, Aurora | Azure Database for PostgreSQL | Cloud SQL, AlloyDB |
+| Key-value / document | DynamoDB | Cosmos DB | Firestore, Bigtable |
+| Cache | ElastiCache | Azure Cache for Redis | Memorystore |
+| Queues and pub/sub | SQS, SNS, EventBridge | Service Bus, Event Grid | Pub/Sub |
+| Streaming (Kafka) | MSK | Event Hubs (Kafka API) | Managed Kafka |
+| Object storage | S3 | Blob Storage | Cloud Storage |
+| Secrets | Secrets Manager | Key Vault | Secret Manager |
+| Identity for workloads | IAM roles | Managed identities | Service accounts |
+| Observability | CloudWatch, X-Ray | Azure Monitor | Cloud Monitoring, Trace |
+
+Every SDK in this book has a first-class client for each provider. Prefer the open standards where they exist (PostgreSQL, Redis, Kafka, OTLP, S3-compatible APIs), and keep provider-specific code behind ports (Chapter 28), so a provider change is an adapter change.
+
+## Identity first
+
+The most important cloud skill for a backend engineer is identity. Each service gets its own **workload identity** (an IAM role for a pod or task, a managed identity, a service account) with **least-privilege** permissions: Ordering may read its own secrets and publish to its own topics, nothing else. No long-lived access keys in configuration; the SDKs pick up short-lived credentials from the environment automatically. CI deploys through OIDC federation, not stored keys.
+
+<Pitfall title="Wildcard permissions">
+`"Action": "*"` on `"Resource": "*"` is how one compromised service becomes a compromised company. Start from no permissions, add what the service needs, and use the provider’s access analysis tools to remove what it never used.
+</Pitfall>
+
+## Infrastructure as code
+
+Declare resources in code, review them in pull requests and apply them from a pipeline. Terraform (and its fork OpenTofu) is the most common cross-cloud choice; Pulumi and AWS CDK let you write infrastructure in TypeScript, C#, Java, Go or Python, which suits a polyglot team.
+
+```hcl
+resource "aws_sqs_queue" "payment_events" {
+  name                       = "parcel-payment-events"
+  visibility_timeout_seconds = 60
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.payment_events_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+```
+
+Keep one state per environment, plan on every pull request, apply on merge, and detect drift on a schedule.
+
+## Choosing compute
+
+- **Managed containers** (Fargate, Cloud Run, Container Apps) are the default for most services: no cluster to operate, autoscaling built in.
+- **Kubernetes** (EKS, AKS, GKE) pays off when you run many services and want one platform with consistent deployment, networking and observability.
+- **Functions** fit spiky, event-driven, low-volume work: webhook receivers, scheduled jobs, file processing. Watch cold starts (worst for JVM and .NET without native compilation) and connection limits to databases.
+
+## Cost is a design property
+
+Cloud bills are an architecture review in disguise. The usual surprises are data transfer between zones and regions, idle over-provisioned databases, NAT gateway traffic, unbounded log ingestion and high-cardinality metrics. Tag every resource with its owner and service, look at cost per service monthly, and treat a cost regression like a performance regression.
+
+<InTheWild>
+Platform teams increasingly hide the raw cloud behind an internal developer platform: a template creates the repository, pipeline, identity, database and dashboards for a new service in minutes. Knowing what those templates create underneath is what lets you debug them, and what makes you useful when designing them.
+</InTheWild>
+
+<InterviewLens>
+"How would you deploy this design on AWS?" A strong answer maps each component to a managed service with a reason, chooses compute per workload, sets up per-service IAM roles with least privilege and secrets in Secrets Manager, uses infrastructure as code with environments, adds observability and backups, and names the main cost drivers.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch45" questions={quiz} />
+
+<Flashcards cards={cards} />

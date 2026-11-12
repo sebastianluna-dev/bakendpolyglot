@@ -11,6 +11,7 @@ export const collections = {
         chapter: z.number().optional(),
         part: z.string().optional(),
         kicker: z.string().optional(), // one-line subtitle under the chapter title
+        appendix: z.string().optional(), // 'B', 'C', … for appendix pages
       }),
     }),
   }),

@@ -1,0 +1,152 @@
+---
+title: Kubernetes Essentials
+chapter: 41
+part: Part VI · Operations
+kicker: The ten objects a backend engineer actually touches.
+sidebar:
+  order: 41
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What is the difference between a readiness and a liveness probe?',
+    options: ['None', 'Readiness decides whether the pod receives traffic; liveness decides whether the container should be restarted', 'Liveness runs only at startup', 'Readiness restarts the pod'],
+    answer: 1,
+    why: 'A pod that is not ready is removed from the Service endpoints but kept running. A failing liveness probe restarts the container.',
+  },
+  {
+    q: 'A container exceeds its memory limit. What happens?',
+    options: ['It is throttled', 'It is OOM-killed and restarted', 'Kubernetes adds memory', 'Nothing'],
+    answer: 1,
+    why: 'CPU over the limit is throttled; memory over the limit kills the container. Size limits from measured usage plus headroom.',
+  },
+  {
+    q: 'What does a Service provide?',
+    options: ['A container image', 'A stable name and virtual IP that load-balances to the ready pods matching its selector', 'Persistent storage', 'TLS certificates'],
+    answer: 1,
+    why: 'Pods come and go with changing IPs. A Service gives clients one stable address and routes to whatever pods are ready.',
+  },
+];
+
+export const cards = [
+  { front: 'Deployment', back: 'Declares the desired pods (image, replicas, probes) and rolls out changes gradually.' },
+  { front: 'Readiness probe', back: 'Is the pod able to serve traffic now? Failing removes it from the Service, without a restart.' },
+  { front: 'Requests vs limits', back: 'Requests reserve resources for scheduling; limits cap usage (CPU throttled, memory OOM-killed).' },
+  { front: 'HPA', back: 'Horizontal Pod Autoscaler: changes replica count based on CPU, memory or custom metrics.' },
+];
+
+Kubernetes is a large system, but the part a backend engineer works with every week is small: describe how your service runs, how it is reached, how healthy looks, and how much it may use. This chapter covers those objects with Parcel’s Ordering service as the example, and the behaviours that cause most production surprises.
+
+<Recall
+  items={[
+    { ref: 'Ch. 40', text: 'Images are small, non-root, and shut down gracefully on SIGTERM.' },
+    { ref: 'Ch. 16', text: 'Configuration from the environment; secrets from a secret store.' },
+    { ref: 'Ch. 37', text: 'Liveness must never depend on downstream services.' },
+  ]}
+/>
+
+## The objects that matter
+
+<Figure n="41.1" caption="Traffic enters through an Ingress, reaches a Service, and lands on ready pods managed by a Deployment">
+  <svg viewBox="0 0 720 170" role="img" aria-label="Kubernetes ingress, service, deployment and pods" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="k8-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="8" y="60" width="120" height="48" rx="2" /><rect x="170" y="60" width="120" height="48" rx="2" /><rect x="340" y="16" width="372" height="140" rx="8" stroke-dasharray="4 3" /></g>
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.5"><rect x="360" y="50" width="100" height="44" rx="2" /><rect x="476" y="50" width="100" height="44" rx="2" /></g>
+    <rect x="592" y="50" width="100" height="44" rx="2" fill="var(--bp-paper-2)" stroke="var(--bp-rule)" stroke-dasharray="3 3" />
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="68" y="88" font-weight="600">Ingress</text><text x="230" y="88" font-weight="600">Service</text>
+      <text x="410" y="76">pod · ready</text><text x="526" y="76">pod · ready</text><text x="642" y="70" fill="var(--bp-muted)">pod</text><text x="642" y="84" fill="var(--bp-muted)" font-size="11">not ready</text>
+      <text x="526" y="40" font-weight="600">Deployment: ordering · replicas 3</text>
+      <text x="526" y="128" font-size="11" fill="var(--bp-muted)">ConfigMap + Secret → env · HPA adjusts replicas</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25"><path d="M128 84H168" marker-end="url(#k8-arrow)" /><path d="M290 80L358 72" marker-end="url(#k8-arrow)" /><path d="M290 88C380 120 440 120 474 92" marker-end="url(#k8-arrow)" /></g>
+  </svg>
+</Figure>
+
+| Object | Purpose |
+| --- | --- |
+| Pod | One or more containers scheduled together; the unit that runs |
+| Deployment | Desired pods (image, replicas, probes, resources) and rolling updates |
+| Service | Stable DNS name and load balancing to ready pods |
+| Ingress / Gateway | HTTP routing from outside the cluster, TLS |
+| ConfigMap / Secret | Configuration and secrets, exposed as env vars or files |
+| HorizontalPodAutoscaler | Changes replica count with load |
+| PodDisruptionBudget | Keeps a minimum number of pods up during node maintenance |
+| Job / CronJob | Run-to-completion and scheduled work (migrations, the hold reaper) |
+
+## A Deployment, annotated
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ordering
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: ordering } }
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }     # never drop below 3 during a deploy
+  template:
+    metadata: { labels: { app: ordering } }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: ordering
+          image: ghcr.io/parcel/ordering:1.14.2           # immutable tag, never :latest
+          ports: [{ containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: ordering-config }
+            - secretRef: { name: ordering-secrets }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits:   { memory: 768Mi }                   # no CPU limit: avoid throttling
+          startupProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            failureThreshold: 30
+            periodSeconds: 2                              # up to 60 s for a slow JVM start
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            periodSeconds: 10
+          lifecycle:
+            preStop: { sleep: { seconds: 5 } }            # let the Service stop routing first
+```
+
+## Probes, done right
+
+Three probes, three questions:
+
+- **Startup**: has the app finished starting? Until it passes, the other probes are not run. Essential for JVM and .NET apps that warm up slowly.
+- **Readiness**: can it take traffic **now**? It may check that the database pool is usable. Failing it removes the pod from the Service without restarting it.
+- **Liveness**: is the process stuck beyond recovery? It should check only the process itself. Failing it restarts the container.
+
+Every stack has health-check support that separates the two endpoints: ASP.NET Core health checks with tags, Spring Boot Actuator’s liveness and readiness groups, `@nestjs/terminus`, a pair of handlers in Go, and a small router in FastAPI or Django.
+
+<Pitfall title="Liveness that checks the database">
+If liveness fails when the database is slow, Kubernetes restarts every pod at once, which turns a database hiccup into a full outage and a thundering herd of reconnections when they come back. Dependencies belong in readiness, at most.
+</Pitfall>
+
+## Resources
+
+**Requests** are what the scheduler reserves; **limits** are the ceiling. Exceed the memory limit and the container is OOM-killed; exceed a CPU limit and it is throttled, which shows up as mysterious latency. A common, defensible policy: set memory request and limit from measured usage plus headroom, set a CPU request, and leave CPU unlimited unless the cluster requires it. Tell the runtime what it has (Chapter 40): the JVM, .NET, Node and Go all read the limits, but heap and GC settings should match them.
+
+## Rollouts and the readiness gap
+
+During a rolling update, a new pod becomes ready and an old pod receives `SIGTERM`. For a few seconds, some traffic may still be routed to the old pod while it shuts down. The `preStop` sleep keeps it serving while endpoints update, and graceful shutdown (Chapter 40) drains what remains. Database migrations run as a separate Job before the rollout, and must be backward compatible with the old version still running (Chapter 15).
+
+<InTheWild>
+Most backend engineers do not write raw manifests for long: Helm charts, Kustomize overlays or an internal platform generate them from a few values. The concepts above are what you configure through those tools, and what you read when a pod is crash-looping at 3 a.m. (`kubectl describe pod`, `kubectl logs --previous`, events).
+</InTheWild>
+
+<InterviewLens>
+"Your pods restart in a loop after a deploy. How do you investigate?" A strong answer: check events and the previous container’s logs, look for OOM kills against memory limits, startup taking longer than the probes allow, liveness depending on a failing dependency, missing configuration or secrets, and a migration the new version expected; then fix the cause and roll back if needed.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch41" questions={quiz} />
+
+<Flashcards cards={cards} />

@@ -1,0 +1,162 @@
+---
+title: Observability
+chapter: 43
+part: Part VI · Operations
+kicker: Logs, metrics and traces that answer questions you did not plan for.
+sidebar:
+  order: 43
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Which three signals does the RED method track for a request-driven service?',
+    options: ['Requests, Errors, Duration', 'RAM, Events, Disk', 'Reads, Executions, Deadlocks', 'Retries, Exceptions, Deploys'],
+    answer: 0,
+    why: 'Rate of requests, rate of errors and the distribution of latency describe a service from its users’ point of view.',
+  },
+  {
+    q: 'How does a trace follow a request from the gateway (Nest) into Ordering (Kotlin) and Inventory (Go)?',
+    options: ['Each service logs the same text', 'The W3C traceparent header carries the trace id and parent span id across every hop, and each service’s OpenTelemetry SDK continues the trace', 'The load balancer records it', 'Kafka assigns a trace id'],
+    answer: 1,
+    why: 'Context propagation through standard headers (and message headers for Kafka) is what makes one trace span many services and languages.',
+  },
+  {
+    q: 'Why alert on SLO burn rate instead of on CPU usage?',
+    options: ['CPU is not measurable in containers', 'Users feel errors and latency, not CPU; burn-rate alerts fire when the error budget is being consumed too fast', 'Burn rate is cheaper to compute', 'Kubernetes forbids CPU alerts'],
+    answer: 1,
+    why: 'Alert on symptoms that matter to users. High CPU with happy users is not an incident; a fast-burning error budget is.',
+  },
+];
+
+export const cards = [
+  { front: 'Three pillars', back: 'Logs (events with detail), metrics (cheap aggregated numbers), traces (one request across services).' },
+  { front: 'OpenTelemetry', back: 'The vendor-neutral standard and SDKs for traces, metrics and logs, with automatic instrumentation in every stack.' },
+  { front: 'SLO and error budget', back: 'A target such as 99.9% of requests succeed in 30 days; the remaining 0.1% is the budget you can spend.' },
+  { front: 'p99 latency', back: 'The latency 99% of requests beat. Averages hide the slow requests users remember.' },
+];
+
+When the Phase 4 gate asked you to find one order in Jaeger, you used the result of this chapter. Monitoring tells you that something is wrong; **observability** lets you ask why, including questions nobody anticipated, by looking at what the system emits. In a polyglot system, that only works if all five stacks emit the same signals in the same format. This chapter sets that standard: structured logs, RED metrics and distributed traces, all through **OpenTelemetry**.
+
+<Recall
+  items={[
+    { ref: 'Ch. 11', text: 'A request id attached to every log line correlates one request.' },
+    { ref: 'Ch. 37', text: 'Resilience patterns need metrics to show when they trigger.' },
+    { ref: 'Ch. 39', text: 'One order crosses five services, Kafka and an outbox relay.' },
+  ]}
+/>
+
+## Three signals
+
+| Signal | What it is | Cost | Best for |
+| --- | --- | --- | --- |
+| Logs | Timestamped events with detail | High at volume | What exactly happened to this request |
+| Metrics | Aggregated numbers over time | Low | Is it healthy, is it getting worse, alerting |
+| Traces | A tree of timed spans for one request across services | Medium (sampled) | Where the time went, which hop failed |
+
+The power is in connecting them: a latency spike on a metric dashboard links to example traces, a slow span links to the logs written during it, because every log line carries the **trace id**.
+
+## Structured logs
+
+Log JSON, not prose, with consistent field names across stacks: `timestamp`, `level`, `message`, `service`, `trace_id`, `span_id`, plus domain fields such as `order_id`. Each stack has a standard structured logger (pino, `Microsoft.Extensions.Logging` with a JSON formatter, Logback with a JSON encoder, `log/slog`, `structlog`), and OpenTelemetry’s instrumentation can inject trace ids into them.
+
+Log at boundaries and decisions (request received and answered, external call failed, saga step compensated), not on every line of code, and never log secrets or full personal data (Chapter 16).
+
+## Metrics
+
+For every service, start with **RED**: request **R**ate, **E**rror rate, **D**uration as a histogram (so you can read p50, p95, p99). For resources such as pools, queues and brokers, use **USE**: **U**tilisation, **S**aturation, **E**rrors. Add a few business metrics that matter: orders placed per minute, saga compensations, consumer lag on each Kafka topic.
+
+Report latency percentiles, never averages: a p50 of 40 ms with a p99 of 4 s means one request in a hundred is terrible, and a page that makes twenty calls hits that tail most of the time.
+
+## Distributed traces
+
+A **trace** is the full journey of one request; each step is a **span** with a start, a duration, attributes and a parent. Services pass the trace context to each other in the W3C `traceparent` header (and in Kafka message headers), so the gateway’s span, Ordering’s gRPC call and Inventory’s SQL query land in one tree, whatever language produced them.
+
+<FiveStacks note="OpenTelemetry: automatic traces and metrics, exported over OTLP">
+<Stack id="nest" lib="@opentelemetry/sdk-node">
+```ts
+// tracing.ts, loaded before the app (node --import ./dist/tracing.js dist/main.js)
+const sdk = new NodeSDK({
+  serviceName: 'parcel-gateway',
+  traceExporter: new OTLPTraceExporter(),
+  metricReader: new PeriodicExportingMetricReader({ exporter: new OTLPMetricExporter() }),
+  instrumentations: [getNodeAutoInstrumentations()],   // http, express, graphql, grpc, pg, kafkajs …
+});
+sdk.start();
+```
+</Stack>
+<Stack id="cs" lib="OpenTelemetry .NET">
+```csharp
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("parcel-payments"))
+    .WithTracing(t => t
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddNpgsql()
+        .AddOtlpExporter())
+    .WithMetrics(m => m
+        .AddAspNetCoreInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddOtlpExporter());
+```
+</Stack>
+<Stack id="kotlin" lib="OpenTelemetry Java agent">
+```bash
+# no code changes: the agent instruments Spring MVC, JDBC, gRPC, Kafka clients and more
+JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar" \
+OTEL_SERVICE_NAME=parcel-ordering \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+java -jar app.jar
+```
+</Stack>
+<Stack id="go" lib="otel-go">
+```go
+exp, err := otlptracegrpc.New(ctx)
+if err != nil {
+	return err
+}
+tp := sdktrace.NewTracerProvider(
+	sdktrace.WithBatcher(exp),
+	sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName("parcel-inventory"))),
+)
+otel.SetTracerProvider(tp)
+otel.SetTextMapPropagator(propagation.TraceContext{})
+
+srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))   // spans for every RPC
+```
+</Stack>
+<Stack id="fastapi" lib="opentelemetry-instrument">
+```bash
+# zero-code instrumentation for FastAPI, httpx, SQLAlchemy, asyncpg …
+OTEL_SERVICE_NAME=parcel-catalog \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 \
+opentelemetry-instrument uvicorn catalog.main:app --host 0.0.0.0 --port 8000
+```
+</Stack>
+</FiveStacks>
+
+Java and Python can be instrumented with no code changes; .NET, Node and Go need a few lines at startup. All five export **OTLP** to an **OpenTelemetry Collector**, which forwards to whatever backend you use (Jaeger, Tempo, Prometheus, Grafana, Datadog, Honeycomb, a cloud vendor). Switching vendors means changing the collector, not five codebases.
+
+Add **manual spans** for important internal steps ("price order", "append to ledger") and set attributes such as `order.id` on the current span, so traces speak the domain’s language.
+
+<Pitfall title="Cardinality explosions">
+Metric labels with unbounded values (user id, order id, full URL with ids) create a separate time series per value and can take down a metrics backend. Use route templates (`/orders/{id}`), not raw paths, as labels; put ids in traces and logs instead.
+</Pitfall>
+
+## SLOs and alerting
+
+An **SLO** (service level objective) states what "good" means for users, for example: 99.9% of checkout requests succeed within 1 second over 30 days. The remaining 0.1% is the **error budget**. Alert when the budget **burns** too fast (a fast burn pages someone; a slow burn opens a ticket), not on CPU or memory, which are causes, not symptoms. Error budgets also settle the eternal argument between shipping features and fixing reliability: when the budget is spent, reliability work comes first.
+
+<InTheWild>
+OpenTelemetry has become the default way to instrument services across languages, and most observability vendors ingest OTLP directly. In practice teams run a collector per cluster, sample traces (keeping all errors and slow requests), and build one dashboard per service with RED metrics, dependencies, saturation and SLO burn.
+</InTheWild>
+
+<InterviewLens>
+"Users say checkout is slow sometimes. How do you find out why?" A strong answer: check the latency histogram (p99, not average) and SLO burn for the checkout route, open example slow traces to see which span dominates, follow the trace id into logs of that service, compare with deploys and dependency metrics (pool saturation, consumer lag, GC), form a hypothesis, fix, and confirm on the same graphs.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch43" questions={quiz} />
+
+<Flashcards cards={cards} />

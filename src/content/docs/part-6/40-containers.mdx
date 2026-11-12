@@ -1,0 +1,182 @@
+---
+title: Containers
+chapter: 40
+part: Part VI · Operations
+kicker: Small, reproducible images that start fast and stop politely.
+sidebar:
+  order: 40
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why use a multi-stage Dockerfile?',
+    options: ['To run several processes', 'To build with the full SDK in one stage and copy only the runtime artefacts into a small final image', 'To support several architectures', 'Because Docker requires it'],
+    answer: 1,
+    why: 'Compilers, build caches and dev dependencies stay in the build stage. The final image is smaller, faster to pull and has less to attack.',
+  },
+  {
+    q: 'Why copy the dependency manifest and install dependencies before copying the rest of the source?',
+    options: ['It is required syntax', 'Docker caches layers; dependencies are reinstalled only when the manifest changes, not on every code edit', 'It makes the image smaller', 'It improves security'],
+    answer: 1,
+    why: 'Each instruction is a cached layer. Ordering from least to most frequently changed makes rebuilds take seconds.',
+  },
+  {
+    q: 'Kubernetes sends SIGTERM to your container. What should a web service do?',
+    options: ['Exit immediately', 'Stop accepting new requests, finish in-flight ones within a grace period, close connections, then exit', 'Ignore it', 'Restart itself'],
+    answer: 1,
+    why: 'Graceful shutdown avoids dropping requests during every deploy. After the grace period, the container is killed anyway.',
+  },
+];
+
+export const cards = [
+  { front: 'Multi-stage build', back: 'Build in an SDK image, copy artefacts into a slim runtime image.' },
+  { front: 'Layer cache', back: 'Each Dockerfile instruction is cached; put rarely changing steps (dependencies) before frequently changing ones (source).' },
+  { front: 'Distroless', back: 'Images with only the app and its runtime: no shell, no package manager.' },
+  { front: 'Graceful shutdown', back: 'On SIGTERM: stop accepting work, drain in-flight requests, close resources, exit.' },
+];
+
+Part VI is about running what you built. Every service in this book ships as a **container image**: one artefact that runs the same on your laptop, in CI and in production. This chapter writes a production-grade Dockerfile for each stack and covers the details that separate a demo image from one you would deploy: size, layer caching, users, and shutdown.
+
+<Recall
+  items={[
+    { ref: 'Ch. 2', text: 'Dev Containers and Compose run toolchains and databases locally.' },
+    { ref: 'Ch. 16', text: 'Configuration comes from the environment; images contain no secrets.' },
+    { ref: 'Ch. 9', text: 'Go builds a static binary; the JVM and .NET need a runtime; Python and Node need an interpreter.' },
+  ]}
+/>
+
+## One Dockerfile per stack
+
+Every Dockerfile below follows the same rules: a **build stage** with the full SDK, a **runtime stage** with as little as possible, dependency installation before source copying for cache efficiency, and a **non-root user**.
+
+<FiveStacks note="Multi-stage, cache-friendly, non-root images">
+<Stack id="nest" lib="Node 22">
+```dockerfile
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build && npm prune --omit=dev
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+CMD ["node", "dist/main.js"]
+```
+</Stack>
+<Stack id="cs" lib=".NET 10">
+```dockerfile
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY Payments.csproj ./
+RUN dotnet restore
+COPY . .
+RUN dotnet publish -c Release -o /out --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /out .
+USER $APP_UID
+ENTRYPOINT ["dotnet", "Payments.dll"]
+```
+</Stack>
+<Stack id="kotlin" lib="JDK 21 + Gradle">
+```dockerfile
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /src
+COPY gradlew settings.gradle.kts build.gradle.kts ./
+COPY gradle ./gradle
+RUN ./gradlew dependencies --no-daemon > /dev/null
+COPY src ./src
+RUN ./gradlew bootJar --no-daemon
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /src/build/libs/*.jar app.jar
+RUN useradd --system app
+USER app
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
+```
+</Stack>
+<Stack id="go" lib="Go, distroless">
+```dockerfile
+FROM golang:1.24 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/inventory ./cmd/inventory
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/inventory /inventory
+ENTRYPOINT ["/inventory"]
+```
+</Stack>
+<Stack id="fastapi" lib="Python 3.13 + uv">
+```dockerfile
+FROM python:3.13-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY . .
+RUN uv sync --frozen --no-dev
+
+FROM python:3.13-slim
+WORKDIR /app
+COPY --from=build /app /app
+ENV PATH="/app/.venv/bin:$PATH"
+RUN useradd --system app
+USER app
+CMD ["uvicorn", "catalog.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+</Stack>
+</FiveStacks>
+
+The resulting sizes differ by an order of magnitude: the Go image is a few megabytes over its binary, while JVM and .NET images carry a runtime of around a hundred megabytes. Size matters less than it seems for long-running services, but it shows up in cold starts, autoscaling speed and vulnerability scans. Teams that need small JVM or .NET images use GraalVM native images, `jlink` custom runtimes, or .NET’s trimmed and Native AOT publishing.
+
+<Pitfall title="Containers and memory limits">
+Runtimes size their heaps from the memory they can see. Modern JVMs, .NET and Node respect container limits, but defaults may still be wrong for you: the JVM uses a quarter of the limit for the heap by default, hence `-XX:MaxRAMPercentage=75` above; Node’s old-space limit may need `--max-old-space-size`; Go needs `GOMEMLIMIT` set slightly below the container limit to avoid being OOM-killed.
+</Pitfall>
+
+## Rules for production images
+
+- **Pin base image versions** (and ideally digests), and rebuild regularly to pick up security patches.
+- **Run as non-root**, with a read-only filesystem where possible.
+- **One process per container**, logging to stdout and stderr as structured JSON (Chapter 43).
+- **A `.dockerignore`** that excludes `.git`, `node_modules`, build output and `.env` files.
+- **No secrets in layers**: a secret copied and deleted in a later layer is still in the image history. Use build secrets for private registries.
+- **Scan images** in CI (Trivy, Grype, your registry’s scanner) and generate an SBOM.
+
+## Stopping politely
+
+When Kubernetes (or Compose, or any orchestrator) stops a container, it sends `SIGTERM`, waits for a grace period (30 seconds by default in Kubernetes), then sends `SIGKILL`. A service that exits immediately drops in-flight requests on every deploy. Each stack handles it slightly differently:
+
+| Stack | Graceful shutdown |
+| --- | --- |
+| NestJS / Express | `app.enableShutdownHooks()`; close the HTTP server, then pools |
+| ASP.NET Core | Built in; `HostOptions.ShutdownTimeout` controls the drain |
+| Spring Boot | `server.shutdown=graceful` and `spring.lifecycle.timeout-per-shutdown-phase` |
+| Go | `signal.NotifyContext` plus `http.Server.Shutdown(ctx)` |
+| FastAPI / Uvicorn | Built in; lifespan handlers close pools |
+
+Make sure the process actually receives the signal: use the exec form of `CMD`/`ENTRYPOINT` (JSON array), not a shell wrapper that swallows signals.
+
+<InTheWild>
+Many organisations provide golden base images and Dockerfile templates per language, maintained by a platform team, so application teams only copy their artefacts. If yours does, use them; if it does not, the five Dockerfiles above are a reasonable start for one.
+</InTheWild>
+
+<InterviewLens>
+"What makes a good production container image?" A strong answer: multi-stage builds, pinned and regularly rebuilt slim bases, cache-friendly layer order, non-root user, no secrets in layers, correct memory settings for the runtime, exec-form entrypoint with graceful SIGTERM handling, health endpoints, logs to stdout, and vulnerability scanning with an SBOM.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch40" questions={quiz} />
+
+<Flashcards cards={cards} />

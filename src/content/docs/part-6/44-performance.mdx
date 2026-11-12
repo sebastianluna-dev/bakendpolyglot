@@ -1,0 +1,127 @@
+---
+title: Performance
+chapter: 44
+part: Part VI · Operations
+kicker: Measure, find the one bottleneck, fix it, measure again.
+sidebar:
+  order: 44
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'A service handles 200 requests per second with an average of 50 ms per request. By Little’s law, how many requests are in flight on average?',
+    options: ['4', '10', '50', '250'],
+    answer: 1,
+    why: 'L = λ × W = 200 per second × 0.05 s = 10. Useful for sizing pools, threads and concurrency limits.',
+  },
+  {
+    q: 'What is the first step when an endpoint is "slow"?',
+    options: ['Add a cache', 'Rewrite it in Go', 'Measure under realistic load and profile to find where time is actually spent', 'Add more replicas'],
+    answer: 2,
+    why: 'Most guesses are wrong. Traces, profiles and query plans show the real bottleneck, which is usually I/O or a query, not the language.',
+  },
+  {
+    q: 'Why should load tests report p95 and p99 latency rather than the mean?',
+    options: ['Means are hard to compute', 'Tail latency is what many users experience, and fan-out multiplies the chance of hitting it', 'Percentiles are always lower', 'k6 only supports percentiles'],
+    answer: 1,
+    why: 'A page that makes ten backend calls sees the p90 of each call about two times in three. Tails dominate perceived performance.',
+  },
+];
+
+export const cards = [
+  { front: 'Little’s law', back: 'In-flight requests = arrival rate × time in system (L = λW).' },
+  { front: 'Flame graph', back: 'A profile visualisation: width is time spent; the widest towers are where to look first.' },
+  { front: 'Coordinated omission', back: 'A load-testing error where the tool waits for slow responses and so under-reports latency. Use open (arrival-rate) models.' },
+];
+
+Performance work has one rule that beats every trick: **measure first**. Engineers guess wrong about bottlenecks most of the time, and in backends the bottleneck is usually a query, a missing index, a chatty call pattern or a saturated pool, rarely the language. This chapter gives you the method, the profiler for each runtime, a load-testing setup, and the runtime-specific settings worth knowing.
+
+<Recall
+  items={[
+    { ref: 'Ch. 14–15', text: 'EXPLAIN ANALYZE, indexes, N+1 queries and pool sizing.' },
+    { ref: 'Ch. 25', text: 'Caching at the right layer, and stampede protection.' },
+    { ref: 'Ch. 43', text: 'Latency histograms and traces show where time goes across services.' },
+  ]}
+/>
+
+## The method
+
+1. **Define the goal** as a number: "checkout p99 under 800 ms at 300 requests per second".
+2. **Reproduce** with a load test that resembles production traffic.
+3. **Find the bottleneck** with traces (which hop?), then a profiler or query plan (which code or query?).
+4. **Change one thing**, and measure again with the same test.
+5. **Stop** when the goal is met. Every optimisation after that is cost without benefit.
+
+## Load testing with k6
+
+k6 scripts are JavaScript, run from the command line or CI, and work against any stack. Use an **arrival-rate** model, which keeps sending requests at the target rate even when the service slows down; a fixed number of looping users waits for slow responses and hides them (coordinated omission).
+
+```js
+import http from 'k6/http';
+import { check } from 'k6';
+
+export const options = {
+  scenarios: {
+    checkout: { executor: 'constant-arrival-rate', rate: 300, timeUnit: '1s', duration: '5m',
+                preAllocatedVUs: 200, maxVUs: 1000 },
+  },
+  thresholds: { 'http_req_duration{name:checkout}': ['p(99)<800'], http_req_failed: ['rate<0.001'] },
+};
+
+export default function () {
+  const res = http.post(`${__ENV.BASE_URL}/orders`, JSON.stringify(randomOrder()), {
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+    tags: { name: 'checkout' },
+  });
+  check(res, { created: (r) => r.status === 201 });
+}
+```
+
+Thresholds make the test pass or fail, so it can gate a release in CI.
+
+## Profilers per runtime
+
+| Runtime | CPU and allocation profiling | Live counters |
+| --- | --- | --- |
+| Node | `node --cpu-prof`, Clinic.js, Chrome DevTools | `--inspect`, event loop delay metrics |
+| .NET | `dotnet-trace`, Visual Studio or Rider profilers | `dotnet-counters` |
+| JVM | Java Flight Recorder, async-profiler | JDK Mission Control, JMX metrics |
+| Go | `pprof` (CPU, heap, goroutines, blocking) | `net/http/pprof`, runtime metrics |
+| Python | `py-spy` (sampling, no code changes), `cProfile` | `py-spy top` |
+
+All of them can produce **flame graphs**: stacks of functions where width is time spent. Read them from the widest frames down; the fix is usually in the first wide frame that is your code.
+
+## Where time usually goes
+
+- **Database**: missing indexes, N+1 queries, too much data per row or per page, lock waits. Check plans and `pg_stat_statements` first.
+- **Network fan-out**: sequential calls that could be parallel, chatty APIs, no batching, no timeouts.
+- **Pools**: requests waiting for a database connection or HTTP client connection. Little’s law tells you how many you need: at 200 requests per second spending 30 ms each in the database, about 6 connections are busy on average, so a pool of 10 has headroom and a pool of 4 queues.
+- **Serialisation**: large JSON documents, reflection-heavy serialisers, repeated encoding.
+- **Garbage collection**: allocation-heavy hot paths causing frequent collections and pauses.
+
+## Runtime notes
+
+- **Node**: watch event-loop delay; move CPU work to worker threads (Chapter 3); use streaming for large payloads.
+- **.NET**: Server GC is the default for ASP.NET Core; avoid sync over async; consider `ArrayPool`, `Span<T>` and source-generated JSON in hot paths.
+- **JVM**: G1 for throughput, ZGC for low pauses; size the heap with `MaxRAMPercentage`; virtual threads for blocking I/O; give the JIT warm-up time before measuring.
+- **Go**: `GOMEMLIMIT` near the container limit; reduce allocations in hot paths (reuse buffers, `sync.Pool`); profile goroutine and blocking contention.
+- **Python**: async drivers for I/O-bound services; several worker processes per container or more replicas for CPU; move hot loops to native libraries.
+
+<Pitfall title="Benchmarks that lie">
+A micro-benchmark that loops one function a million times on a warm laptop says little about a service under concurrent load with a real database. Use proper harnesses (BenchmarkDotNet, JMH, Go’s `testing.B`, `pytest-benchmark`, `mitata` or `tinybench`) for code-level questions, and load tests against realistic environments for system questions.
+</Pitfall>
+
+<InTheWild>
+Language choice rarely decides backend performance; architecture and data access do. The exceptions are real (CPU-heavy work, very high connection counts, tight memory budgets, cold starts), and that is when the comparison from Chapter 9 earns its keep.
+</InTheWild>
+
+<InterviewLens>
+"This API’s p99 doubled after a release. What do you do?" A strong answer: confirm with metrics and compare versions, look at traces for the slow requests to find the hop, check database plans and pool saturation, profile the service under the same load if the time is in code, consider rollback if the SLO is burning, fix one cause, and verify with a load test that has a threshold.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch44" questions={quiz} />
+
+<Flashcards cards={cards} />

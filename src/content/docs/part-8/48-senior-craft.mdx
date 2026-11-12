@@ -1,0 +1,135 @@
+---
+title: Senior Craft
+chapter: 48
+part: Part VIII · Senior Craft
+kicker: Interviews, decisions, reviews, estimates, and raising the team.
+sidebar:
+  order: 48
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What belongs in an Architecture Decision Record?',
+    options: ['The full design document', 'The context, the decision, the alternatives considered and the consequences, in a page or two', 'Meeting minutes', 'Only the final diagram'],
+    answer: 1,
+    why: 'ADRs capture why a decision was made, so future engineers understand the trade-off instead of re-arguing it or undoing it blindly.',
+  },
+  {
+    q: 'What makes a code review comment useful?',
+    options: ['Many comments on style', 'Specific, explained, and labelled by importance (blocking versus suggestion), focused on correctness and design first', 'Rewriting the code yourself', 'Approving quickly without reading'],
+    answer: 1,
+    why: 'Automate style with formatters and linters. Spend human attention on behaviour, design and risk, and say which comments block.',
+  },
+  {
+    q: 'How do you estimate a large, uncertain piece of work?',
+    options: ['Give one exact date', 'Break it down, estimate ranges, call out the unknowns, and reduce uncertainty with spikes before committing', 'Double the first guess', 'Refuse to estimate'],
+    answer: 1,
+    why: 'Ranges and explicit unknowns are honest; spikes turn unknowns into knowns. Re-estimate as you learn.',
+  },
+];
+
+export const cards = [
+  { front: 'ADR', back: 'Architecture Decision Record: context, decision, alternatives, consequences. Short, dated, never edited, only superseded.' },
+  { front: 'RFC / design doc', back: 'A proposal for a significant change, circulated for review before building: goals, non-goals, design, alternatives, risks.' },
+  { front: 'Expand and contract', back: 'Migrate in backward-compatible steps: add the new thing, move users to it, then remove the old thing.' },
+];
+
+The other chapters gave you the knowledge of a senior backend engineer in five stacks. This last chapter is about the work that surrounds the code: getting the job, making decisions others can follow, reviewing, estimating, changing large systems safely, and helping the people around you get better. You told me at the start that you already lead teams; read this as a backend-specific checklist rather than an introduction.
+
+<Recall
+  items={[
+    { ref: 'Ch. 9', text: 'Stack choices made explicit: what it must do well, what risk you accept, how you would leave.' },
+    { ref: 'Ch. 46', text: 'Design reviews follow requirements, numbers, design, trade-offs.' },
+  ]}
+/>
+
+## Interviewing for backend roles
+
+Senior backend loops usually contain four kinds of round:
+
+| Round | What they test | How to prepare with this book |
+| --- | --- | --- |
+| Coding | Fluent, correct code in one language, tests, clarity | Pick one primary stack; redo the Phase 1 gate and Shelfwise features from memory, timed |
+| System design | Requirements, estimates, trade-offs, failure modes | Chapters 46–47 aloud, 40 minutes each, with a changed requirement |
+| Backend deep dive | Depth in data, concurrency, APIs, operations | The Interview Lens boxes; explain each without notes |
+| Behavioural / leadership | Ownership, conflict, influence, mentoring | Stories with situation, action, result and what you learned |
+
+For coding rounds, choose the language you are fastest in and say why the problem suits it; switch only if the role requires it. For take-home exercises, treat them like Shelfwise: a README with decisions and trade-offs, tests, a Dockerfile, and nothing clever that you cannot explain.
+
+## Decisions others can follow
+
+Significant changes start as an **RFC** or design doc: goals, non-goals, the proposed design, alternatives and why they lost, risks, rollout and how you will know it worked. Circulate it before building; most expensive mistakes are cheap to fix on paper.
+
+Each decision that is hard to reverse gets an **ADR**, a short record kept in the repository next to the code:
+
+```markdown
+# ADR 0007: Use the transactional outbox for domain events
+
+Date: 2026-11-12 · Status: Accepted · Supersedes: —
+
+## Context
+Ordering publishes OrderPlaced after committing an order. A crash between commit and publish
+loses events; we saw three such incidents in staging during chaos tests.
+
+## Decision
+Write events to an outbox table in the same transaction; a relay publishes them with at-least-once
+delivery. Consumers deduplicate with an inbox table.
+
+## Alternatives considered
+- Publish after commit with retries: still loses events on crash.
+- Debezium CDC from day one: better latency, more infrastructure; revisit at higher volume.
+
+## Consequences
++ No lost events; replay is possible. − A relay to operate; events arrive seconds later; consumers must be idempotent.
+```
+
+ADRs are never edited after acceptance, only superseded by a newer one, so the history of reasoning stays intact.
+
+## Code review
+
+Reviews are the cheapest place to catch design problems and the main way knowledge spreads in a team. Practical rules:
+
+- **Automate style.** Formatters and linters in CI for all five stacks (Prettier and ESLint, `dotnet format`, ktlint or Spotless, `gofmt` and `go vet`, Ruff). Humans review behaviour.
+- **Review for risk first**: correctness, security (Chapter 22’s checklist), data migrations, concurrency, error handling, observability, then design, then naming.
+- **Label comments**: blocking, suggestion, question, nit. Explain the why, or link to the ADR.
+- **Keep changes small.** A 200-line PR gets a real review; a 2,000-line one gets a rubber stamp.
+- **Review in other languages.** In a polyglot team, reviewing outside your main stack is how you keep the breadth this book gave you.
+
+## Estimation
+
+Break work into pieces small enough to reason about, estimate each as a range (best, likely, worst), and list the unknowns separately. Turn big unknowns into **spikes**: time-boxed experiments that answer one question ("can Inventory’s gRPC client handle 5,000 rps?"). Re-estimate as you learn, and communicate changes early. Estimates are forecasts, not promises; trust comes from being transparent about uncertainty, not from hitting a number by luck.
+
+## Technical debt and migrations
+
+Debt is a tool when taken deliberately and paid back on purpose. Keep a visible list with the cost each item imposes (incidents, slower delivery, onboarding time), and fund the expensive ones explicitly, ideally attached to feature work in the same area.
+
+Large changes, such as a new database, a framework upgrade or splitting a service, follow the same pattern as safe schema migrations: **expand and contract**. Add the new path alongside the old, move traffic or data gradually behind flags or a strangler-fig router (Chapter 31), verify with metrics and reconciliation, and only then remove the old path. Every step is reversible and delivers something.
+
+<Pitfall title="The big rewrite">
+Rewriting a working system from scratch looks faster than it is: the old system keeps changing, its undocumented behaviour turns out to matter, and nothing ships for months. Incremental replacement is slower on paper and almost always faster in practice.
+</Pitfall>
+
+## Raising the team
+
+A senior engineer’s output includes other people’s growth. Pair on hard problems instead of taking them away; turn your review comments into short internal docs; run a reading group on one chapter of this book a week; write the golden-path template for a new service in your organisation’s stacks; and make the invisible work (on-call quality, CI speed, documentation) visible, because it compounds.
+
+## Gate: Phase 5, and the end of the book
+
+- [ ] Deploy Parcel to a Kubernetes cluster (kind or k3d is fine) with your CI pipeline, OpenTelemetry and an SLO dashboard.
+- [ ] Run a load test with thresholds against checkout, and fix the first bottleneck you find with evidence.
+- [ ] Do two mock system design interviews from Chapter 47 with someone who will interrupt you.
+- [ ] Write three ADRs for decisions you made while building the companion apps.
+- [ ] Review one pull request in each of the five languages, in an open-source project or a colleague’s code.
+
+If you have passed every gate, you have built and run the same ideas in five ecosystems, from a `GET /health` to a five-language order pipeline with traces across all of it. That breadth, combined with depth in whichever stack your next job uses, is what senior backend means.
+
+<InterviewLens>
+"Tell me about a significant technical decision you made and how it turned out." A strong answer gives the context and constraints, the options considered, how the decision was made and recorded, how it was rolled out safely, what actually happened (including what went wrong), and what you would do differently. Bring the ADR.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch48" questions={quiz} />
+
+<Flashcards cards={cards} />

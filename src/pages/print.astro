@@ -11,16 +11,23 @@ const pagedUrl = '/vendor/paged.polyfill.js'; // copied from node_modules by the
 type Q = { q: string; options: string[]; answer: number; why: string };
 type Mod = {
   default: any;
-  frontmatter: { title: string; chapter?: number; part?: string; kicker?: string };
+  frontmatter: { title: string; chapter?: number; part?: string; kicker?: string; appendix?: string };
   quiz?: Q[];
 };
-const mods = Object.values(import.meta.glob<Mod>('../content/docs/**/*.mdx', { eager: true }))
+const all = Object.values(import.meta.glob<Mod>('../content/docs/**/*.mdx', { eager: true }));
+const mods = all
   .filter((m) => typeof m.frontmatter.chapter === 'number')
   .sort((a, b) => a.frontmatter.chapter! - b.frontmatter.chapter!);
+// Appendices B, C, … are regular pages with `appendix: 'B'`; A (quiz answers) is generated below.
+const appendices = all
+  .filter((m) => typeof m.frontmatter.appendix === 'string')
+  .sort((a, b) => a.frontmatter.appendix!.localeCompare(b.frontmatter.appendix!));
 
 const KEYS = 'ABCDEF';
-const words = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen','Twenty'];
-const chapterWord = (n: number) => n <= 20 ? words[n] : String(n);
+const ones = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty'];
+const chapterWord = (n: number) =>
+  n < 20 ? ones[n] : tens[Math.floor(n / 10)] + (n % 10 ? '-' + ones[n % 10] : '');
 let lastPart = '';
 ---
 <!doctype html>
@@ -66,6 +73,9 @@ let lastPart = '';
         <li><a href={`#ch-${m.frontmatter.chapter}`}><span class="bp-toc__n">{m.frontmatter.chapter}</span><span class="bp-toc__t">{m.frontmatter.title}</span></a></li>
       ))}
       <li><a href="#appendix-a"><span class="bp-toc__n">A</span><span class="bp-toc__t">Quiz Answers</span></a></li>
+      {appendices.map((m) => (
+        <li><a href={`#appendix-${m.frontmatter.appendix!.toLowerCase()}`}><span class="bp-toc__n">{m.frontmatter.appendix}</span><span class="bp-toc__t">{m.frontmatter.title}</span></a></li>
+      ))}
     </ol>
   </section>
 
@@ -103,5 +113,22 @@ let lastPart = '';
       </div>
     ))}
   </section>
+
+  {appendices.map((m) => {
+    const Content = m.default;
+    return (
+      <article class="bp-chapter bp-appendix-page" id={`appendix-${m.frontmatter.appendix!.toLowerCase()}`}>
+        <header class="bp-opener">
+          <div class="bp-opener__num">Appendix {m.frontmatter.appendix}</div>
+          <h1 class="bp-opener__title">{m.frontmatter.title}</h1>
+          <div class="bp-ornament"><span></span><i></i><span></span></div>
+          {m.frontmatter.kicker && <p class="bp-opener__kicker">{m.frontmatter.kicker}</p>}
+        </header>
+        <div class="bp-body">
+          <Content />
+        </div>
+      </article>
+    );
+  })}
 </body>
 </html>

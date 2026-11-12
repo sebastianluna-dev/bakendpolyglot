@@ -1,0 +1,30 @@
+---
+title: Companion Repositories
+appendix: D
+kicker: Where the full, runnable code lives.
+sidebar:
+  order: 4
+---
+
+The chapters show minimal snippets; each companion app has its own repository with every stack, a shared contract, migrations, a conformance or contract test suite, Docker Compose and CI. All repositories follow the same layout: `contract/`, `db/`, `stacks/<stack>/`, `compose.yaml` and `.github/workflows/`.
+
+| Repository | Built in | Stacks | Status |
+| --- | --- | --- | --- |
+| `bakendpolyglot` | The book itself: web and print editions | Astro Starlight, Paged.js | Available |
+| `shelfwise` | Chapter 18 | Express, NestJS, ASP.NET Core, Spring (Java), Spring (Kotlin), Go, Django, FastAPI | Planned |
+| `seatlock` | Chapter 27 | NestJS, ASP.NET Core, Spring (Java), Go, Django | Planned |
+| `parcel` | Chapter 39 | NestJS gateway, FastAPI, Spring (Kotlin), Go, ASP.NET Core | Planned |
+| `pulse` | Chapter 39 | NestJS, ASP.NET Core (SignalR), Spring, Go, FastAPI | Planned |
+
+Repositories marked *Planned* are described in full by their chapters; this table is updated as each one is published, and the web edition always has the current links.
+
+## Running any of them
+
+```bash
+git clone <repository>
+cd <repository>
+docker compose --profile <stack> up --build     # e.g. go, nest, aspnet, spring-java
+make -C stacks/<stack> test                      # the stack's own unit and integration tests
+```
+
+Each stack folder has a README that starts at the entry point and follows one request through the layers, plus a short "From TypeScript" section with the surprises specific to that stack.

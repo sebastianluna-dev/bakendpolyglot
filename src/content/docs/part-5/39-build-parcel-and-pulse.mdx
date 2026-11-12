@@ -1,0 +1,139 @@
+---
+title: "Build: Parcel and Pulse"
+chapter: 39
+part: Part V · Distributed and Real-time Systems
+kicker: Five services, five languages, one order.
+sidebar:
+  order: 39
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'In Parcel, why does Inventory consume OrderPlaced through an inbox table?',
+    options: ['To make Kafka faster', 'Because Kafka delivers at least once; the inbox records processed event ids so a duplicate does not reserve stock twice', 'To store the order', 'Because gRPC requires it'],
+    answer: 1,
+    why: 'The event id is inserted in the same transaction as the reservation. A redelivered event hits the primary key and is skipped.',
+  },
+  {
+    q: 'Which call in Parcel’s checkout is synchronous, and why?',
+    options: ['Payment capture, because it is fast', 'Ordering → Inventory ReserveStock over gRPC, because the order cannot be accepted without knowing stock is available', 'Catalog → Ordering, to push prices', 'None; everything is asynchronous'],
+    answer: 1,
+    why: 'The customer needs an immediate answer about availability. Payment and confirmation continue asynchronously through events.',
+  },
+];
+
+export const cards = [
+  { front: 'Parcel’s split', back: 'Gateway (Nest, GraphQL), Catalog (FastAPI), Ordering (Spring Kotlin), Payments (ASP.NET, event-sourced ledger), Inventory (Go, gRPC).' },
+  { front: 'Inbox table', back: 'Processed event ids stored with the consumer’s effect; duplicates are detected by primary key.' },
+];
+
+This is where Part IV’s architecture and Part V’s distributed-systems tools meet. **Parcel** is an order pipeline split into five services, each in a different language, talking through GraphQL, REST, gRPC and Kafka. **Pulse** is a real-time chat and notification service that Parcel uses to tell customers about their orders. The code lives in the `parcel` and `pulse` repositories; this chapter is the map.
+
+<Recall
+  items={[
+    { ref: 'Ch. 29', text: 'Parcel’s contexts: Catalog, Ordering, Payments, Inventory, Shipping.' },
+    { ref: 'Ch. 34', text: 'Outbox to publish, inbox to consume, sagas with compensations.' },
+    { ref: 'Ch. 35–37', text: 'gRPC with deadlines, GraphQL with DataLoaders, timeouts, retries and breakers.' },
+  ]}
+/>
+
+## Parcel’s architecture
+
+<Figure n="39.1" caption="The gateway aggregates for clients; services own their data and talk through gRPC and events">
+  <svg viewBox="0 0 720 260" role="img" aria-label="Parcel service architecture" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="pc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <rect x="270" y="10" width="180" height="44" rx="2" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="8" y="100" width="150" height="50" rx="2" /><rect x="190" y="100" width="150" height="50" rx="2" /><rect x="380" y="100" width="150" height="50" rx="2" /><rect x="562" y="100" width="150" height="50" rx="2" />
+      <rect x="8" y="206" width="704" height="40" rx="2" />
+    </g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="360" y="30" font-weight="600">Gateway · NestJS</text><text x="360" y="46" font-size="11" fill="var(--bp-muted)">GraphQL for apps</text>
+      <text x="83" y="122" font-weight="600">Catalog</text><text x="83" y="138" font-size="11" fill="var(--bp-muted)">FastAPI · REST</text>
+      <text x="265" y="122" font-weight="600">Ordering</text><text x="265" y="138" font-size="11" fill="var(--bp-muted)">Spring Kotlin · saga</text>
+      <text x="455" y="122" font-weight="600">Inventory</text><text x="455" y="138" font-size="11" fill="var(--bp-muted)">Go · gRPC</text>
+      <text x="637" y="122" font-weight="600">Payments</text><text x="637" y="138" font-size="11" fill="var(--bp-muted)">ASP.NET · ledger</text>
+      <text x="360" y="231" font-weight="600">Kafka · parcel.orders.v1 · parcel.payments.v1 · parcel.inventory.v1</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M300 54L100 98" marker-end="url(#pc-arrow)" /><path d="M340 54L280 98" marker-end="url(#pc-arrow)" /><path d="M420 54L620 98" marker-end="url(#pc-arrow)" />
+      <path d="M340 125H378" marker-end="url(#pc-arrow)" />
+      <path d="M265 150V204" stroke-dasharray="4 3" /><path d="M455 150V204" stroke-dasharray="4 3" /><path d="M637 150V204" stroke-dasharray="4 3" />
+    </g>
+    <text x="344" y="116" fill="var(--bp-muted)" font-size="11">gRPC</text>
+    <text x="478" y="186" fill="var(--bp-muted)" font-size="11">events via outbox and inbox (dashed)</text>
+  </svg>
+</Figure>
+
+| Service | Stack | Owns | Speaks |
+| --- | --- | --- | --- |
+| Gateway | NestJS | Nothing (aggregates) | GraphQL to apps; REST and gRPC inward |
+| Catalog | FastAPI | Products, prices | REST |
+| Ordering | Spring Boot, Kotlin | Orders, the checkout saga | REST, gRPC client, Kafka |
+| Inventory | Go | Stock, reservations | gRPC server, Kafka |
+| Payments | ASP.NET Core | Event-sourced payments ledger | Kafka, provider webhooks |
+
+Each service has its own PostgreSQL database (a schema per service in local Compose, separate databases in Kubernetes) and its own CI pipeline. Contracts live in a shared `contracts/` folder: `.proto` files, event schemas, OpenAPI documents, and Pact files published to a broker.
+
+## One order, end to end
+
+1. The app sends a `placeOrder` mutation to the **gateway**, with an idempotency key.
+2. The gateway calls **Ordering**, which loads prices from **Catalog** (REST, cached) and calls **Inventory** `ReserveStock` over gRPC with an 800 ms deadline.
+3. Ordering saves the order as `pending` and `OrderPlaced` to its outbox in one transaction, then answers the gateway.
+4. The outbox relay publishes `OrderPlaced`. **Payments** charges the customer through the (simulated) provider and records the result in its ledger, publishing `PaymentCaptured` or `PaymentFailed`.
+5. Ordering confirms the order, or compensates: it asks Inventory to release the reservation and cancels the order.
+6. Ordering publishes `OrderConfirmed`; **Pulse** pushes a notification to the customer’s open app over SSE.
+
+Every consumer uses an inbox. Here is Inventory’s, in Go:
+
+```go
+func (h *Handler) OnOrderPlaced(ctx context.Context, evt OrderPlaced) error {
+	return pgx.BeginFunc(ctx, h.db, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO inbox (event_id) VALUES ($1) ON CONFLICT DO NOTHING`, evt.EventID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil // already processed: a duplicate delivery
+		}
+		return h.reservations.ConfirmForOrder(ctx, tx, evt.OrderID)
+	})
+}
+```
+
+## Pulse
+
+Pulse is a smaller service implemented in five stacks (Nest, ASP.NET with SignalR, Spring, Go, FastAPI), any of which can sit behind Parcel. It persists chat messages in PostgreSQL before broadcasting them, fans out through Redis pub/sub, serves notifications over SSE with `Last-Event-ID` resume, and authenticates connections with the same Keycloak tokens as SeatLock.
+
+## Running it
+
+```bash
+docker compose up --build              # Kafka, Postgres, Redis, Keycloak, five services, Pulse
+open http://localhost:4000/graphql     # the gateway
+open http://localhost:16686            # Jaeger: traces across all services (Chapter 43)
+```
+
+## Gate: Phase 4
+
+The roadmap’s gate: **one order traced across five services in five languages.**
+
+- [ ] Place an order and find its trace in Jaeger: gateway, Ordering, Catalog, Inventory, the outbox relay, Payments and back.
+- [ ] Stop Inventory and place an order: the gateway answers quickly with a clear error (deadline, breaker), nothing hangs.
+- [ ] Make the payment provider fail: watch the saga release stock and cancel the order.
+- [ ] Replay the `parcel.orders.v1` topic from the beginning for Inventory’s consumer group: no stock changes, because the inbox absorbs every duplicate.
+- [ ] Connect 1,000 Pulse clients with the included k6 script, deploy a new Pulse version, and confirm every client reconnects and misses no notification.
+
+<InTheWild>
+Real polyglot systems look like this, often less tidy: a handful of languages chosen by different teams over the years, held together by contracts, a broker and shared platform tooling for deployment and observability. The skills that matter are the ones you just used: reading each language well enough to follow a request through it, and knowing which guarantees hold at each boundary.
+</InTheWild>
+
+<InterviewLens>
+"Walk me through an order in your system and what happens when each step fails." A strong answer narrates the happy path with the protocol of each hop, then for every step names the failure (timeout, duplicate, crash between write and publish, payment failure) and the mechanism that handles it (deadline and breaker, inbox, outbox, compensation), and closes with how you would observe it (traces, saga dashboards, alerts on stuck orders).
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch39" questions={quiz} />
+
+<Flashcards cards={cards} />

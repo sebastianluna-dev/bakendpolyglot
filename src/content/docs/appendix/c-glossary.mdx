@@ -1,0 +1,73 @@
+---
+title: Glossary
+appendix: C
+kicker: The vocabulary of the book, with the chapter that explains each term.
+sidebar:
+  order: 3
+---
+
+| Term | Meaning | Ch. |
+| --- | --- | --- |
+| ACID | Atomicity, consistency, isolation, durability: the guarantees of a database transaction | 23 |
+| ADR | Architecture Decision Record: a short, dated record of a decision and why | 48 |
+| Aggregate | A cluster of domain objects changed as one unit through a root that enforces invariants | 29 |
+| ASGI / WSGI | Python’s async and sync server interfaces | 8 |
+| At-least-once | A delivery guarantee where duplicates are possible and handlers must be idempotent | 33 |
+| Backpressure | A slow consumer signalling a fast producer to slow down | 3 |
+| Bounded context | A boundary within which one model and vocabulary are consistent | 29 |
+| Bulkhead | Isolating resources per dependency so one failure cannot exhaust everything | 37 |
+| CAP / PACELC | Trade-offs between consistency, availability and latency in distributed stores | 46 |
+| Circuit breaker | Stops calling a failing dependency for a while, failing fast instead | 37 |
+| Composition root | The one place (usually `main`) where all dependencies are wired together | 28 |
+| Consumer group | Consumers sharing a topic’s partitions so each message is processed once per group | 33 |
+| Contract test | A test that checks a provider still satisfies what its consumers rely on | 32 |
+| CORS | Browser mechanism that controls which origins may read a response | 22 |
+| CQRS | Separating the write model from read models | 30 |
+| CSRF | An attack that abuses credentials a browser sends automatically | 22 |
+| Cursor pagination | Paging by the last item’s sort key instead of an offset | 12 |
+| DataLoader | A per-request batching helper that removes N+1 calls in GraphQL | 36 |
+| Deadline | The absolute time by which a call must complete, propagated across services | 35 |
+| Dead-letter queue | Where messages go after repeated processing failures | 33 |
+| DI container | A component that creates objects and injects their dependencies | 3–5 |
+| DTO | Data Transfer Object: the shape of data at a boundary | 13 |
+| Error budget | The share of failures an SLO allows over a period | 43 |
+| ETag | A version tag for a representation, used in conditional requests | 10 |
+| Event loop | Scheduler that runs one callback at a time on a single thread | 3 |
+| Event sourcing | Storing every change as an event; state is derived by replaying | 30 |
+| Eventual consistency | Replicas or read models converge after a delay | 34 |
+| Exactly-once / effectively-once | At-least-once delivery plus idempotent processing | 33 |
+| GIL | CPython’s Global Interpreter Lock: one thread runs bytecode at a time | 8 |
+| Goroutine | A lightweight concurrent function managed by the Go runtime | 7 |
+| gRPC | RPC framework over HTTP/2 with Protocol Buffers contracts | 35 |
+| Hexagonal architecture | Ports owned by the core, adapters at the edges | 28 |
+| Idempotency key | A client-chosen key that makes a retried request produce one effect | 24 |
+| IDOR / BOLA | Accessing another user’s object by changing its id | 21 |
+| Inbox | A table of processed message ids used to deduplicate | 34 |
+| Isolation level | How much concurrent transactions see of each other | 23 |
+| JWT | A signed token with claims: header, payload, signature | 19 |
+| Liveness / readiness | Probes for "restart me" and "send me traffic" | 41 |
+| Little’s law | In-flight requests = arrival rate × time in system | 44 |
+| Middleware | Code that wraps the request pipeline before and after the handler | 11 |
+| Migration | A versioned, ordered schema change | 15 |
+| Modular monolith | One deployable with enforced internal module boundaries | 31 |
+| N+1 queries | One query for a list plus one per item for related data | 15 |
+| OAuth2 / OIDC | Delegated authorization, and the identity layer on top of it | 20 |
+| OpenAPI | A machine-readable description of an HTTP API | 12 |
+| OpenTelemetry | The vendor-neutral standard for traces, metrics and logs | 43 |
+| Optimistic locking | Detecting conflicting writes with a version check | 23 |
+| Outbox | Writing events to a table in the business transaction, published later | 34 |
+| Partition (Kafka) | An ordered shard of a topic; order is per partition | 33 |
+| PKCE | Protects the OAuth2 authorization code exchange without a client secret | 20 |
+| Problem Details | RFC 9457 error format, `application/problem+json` | 12 |
+| Projection | Code that builds a read model from events | 30 |
+| RBAC / ABAC | Role-based and attribute-based access control | 21 |
+| Saga | A sequence of local transactions with compensating actions | 34 |
+| Shard key | The key that decides which database partition holds a row | 46 |
+| SKIP LOCKED | Lets concurrent workers take different locked rows without waiting | 23–24 |
+| SLO | Service level objective: a reliability target users care about | 43 |
+| SSE | Server-Sent Events: one-way server push over HTTP | 38 |
+| SSRF | Making a server request internal resources on an attacker’s behalf | 22 |
+| Strangler fig | Replacing a system piece by piece behind a router | 31 |
+| Testcontainers | Libraries that start real dependencies in Docker for tests | 17 |
+| Value object | An immutable object defined by its values, such as `Money` | 29 |
+| Virtual thread | A cheap JVM thread that unmounts from its OS thread while blocked | 5 |

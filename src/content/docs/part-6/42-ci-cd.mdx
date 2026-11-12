@@ -1,0 +1,130 @@
+---
+title: CI/CD Pipelines
+chapter: 42
+part: Part VI · Operations
+kicker: Build once, test everything, promote the same artefact.
+sidebar:
+  order: 42
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why build the container image once and promote it through environments?',
+    options: ['It is cheaper', 'So what runs in production is exactly what was tested in staging, byte for byte', 'Registries require it', 'To skip tests in production'],
+    answer: 1,
+    why: 'Rebuilding per environment can pick up different dependencies or base images. Promoting one digest removes that whole class of surprises.',
+  },
+  {
+    q: 'What distinguishes a canary release from blue-green?',
+    options: ['Nothing', 'A canary shifts a small percentage of traffic to the new version and grows it while watching metrics; blue-green switches all traffic between two full environments', 'Canary needs two databases', 'Blue-green is only for frontends'],
+    answer: 1,
+    why: 'Canaries limit the blast radius gradually. Blue-green gives an instant switch and instant rollback, at the cost of double capacity.',
+  },
+  {
+    q: 'In trunk-based development, how is unfinished work merged safely?',
+    options: ['It is not merged until finished', 'Behind feature flags, in small increments, with CI green on every commit', 'In long-lived feature branches', 'By skipping tests'],
+    answer: 1,
+    why: 'Short-lived branches and flags keep main releasable at all times; integration problems surface daily instead of at the end.',
+  },
+];
+
+export const cards = [
+  { front: 'Build once, deploy many', back: 'One immutable artefact (image digest) promoted through every environment.' },
+  { front: 'Canary release', back: 'Route a small share of traffic to the new version, watch error and latency metrics, then increase or roll back.' },
+  { front: 'Deployment frequency and lead time', back: 'Two of the DORA metrics: how often you ship, and how long a change takes from commit to production.' },
+];
+
+A team’s speed is mostly decided by its pipeline. If merging is scary, deploys are weekly and rollbacks take an hour, every other improvement is capped. This chapter lays out the pipeline every companion repository uses, the matrix that tests eight implementations at once, and the release strategies that make deploying boring.
+
+<Recall
+  items={[
+    { ref: 'Ch. 17', text: 'Unit, integration with Testcontainers, and a few end-to-end tests.' },
+    { ref: 'Ch. 32', text: 'Contract and architecture tests run in each service’s CI.' },
+    { ref: 'Ch. 40', text: 'Images are scanned and come with an SBOM.' },
+  ]}
+/>
+
+## The pipeline
+
+<Figure n="42.1" caption="Every commit flows through the same gates; only the same image moves forward">
+  <svg viewBox="0 0 720 110" role="img" aria-label="CI/CD pipeline stages" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="ci-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25">
+      <rect x="4" y="24" width="92" height="52" rx="2" /><rect x="108" y="24" width="92" height="52" rx="2" /><rect x="212" y="24" width="92" height="52" rx="2" /><rect x="316" y="24" width="92" height="52" rx="2" /><rect x="524" y="24" width="92" height="52" rx="2" /><rect x="628" y="24" width="88" height="52" rx="2" />
+    </g>
+    <rect x="420" y="24" width="92" height="52" rx="2" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="50" y="46" font-weight="600">Lint</text><text x="50" y="62" font-size="11" fill="var(--bp-muted)">format, types</text>
+      <text x="154" y="46" font-weight="600">Test</text><text x="154" y="62" font-size="11" fill="var(--bp-muted)">unit + integ.</text>
+      <text x="258" y="46" font-weight="600">Contracts</text><text x="258" y="62" font-size="11" fill="var(--bp-muted)">Pact, schemas</text>
+      <text x="362" y="46" font-weight="600">Build image</text><text x="362" y="62" font-size="11" fill="var(--bp-muted)">scan, SBOM, sign</text>
+      <text x="466" y="46" font-weight="600">Staging</text><text x="466" y="62" font-size="11" fill="var(--bp-muted)">migrate, smoke</text>
+      <text x="570" y="46" font-weight="600">Canary</text><text x="570" y="62" font-size="11" fill="var(--bp-muted)">5% → 50%</text>
+      <text x="672" y="46" font-weight="600">Production</text><text x="672" y="62" font-size="11" fill="var(--bp-muted)">100%</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25"><path d="M96 50H106" marker-end="url(#ci-arrow)" /><path d="M200 50H210" marker-end="url(#ci-arrow)" /><path d="M304 50H314" marker-end="url(#ci-arrow)" /><path d="M408 50H418" marker-end="url(#ci-arrow)" /><path d="M512 50H522" marker-end="url(#ci-arrow)" /><path d="M616 50H626" marker-end="url(#ci-arrow)" /></g>
+    <text x="360" y="100" text-anchor="middle" fill="var(--bp-muted)" font-size="11">Steps 1–4 on every pull request; 5–7 on merge to main, with the same image digest</text>
+  </svg>
+</Figure>
+
+Fast feedback first: linting and unit tests fail in a minute or two; integration and contract tests follow; the image is built once, scanned, given an SBOM and signed; then the **same digest** moves through staging and production.
+
+## A matrix for eight implementations
+
+Shelfwise’s CI runs the same jobs for every stack with a matrix, so adding a stack means adding a line:
+
+```yaml title=".github/workflows/ci.yml (excerpt)"
+jobs:
+  stack:
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [express, nest, aspnet, spring-java, spring-kotlin, go, django, fastapi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit and integration tests
+        run: make -C stacks/${{ matrix.stack }} test          # each stack's Makefile knows its toolchain
+      - name: Build image
+        run: docker build -t shelfwise-${{ matrix.stack }} stacks/${{ matrix.stack }}
+      - name: Conformance suite
+        run: |
+          docker compose --profile ${{ matrix.stack }} up -d --wait
+          npm --prefix conformance ci && BASE_URL=http://localhost:3000 npm --prefix conformance test
+```
+
+Each stack’s `Makefile` hides its toolchain behind the same targets (`test`, `build`, `lint`), a small convention that lets one pipeline drive five ecosystems. Cache dependencies per stack (`actions/setup-*` caches, Gradle and NuGet caches, Go module cache, uv cache) or the matrix becomes slow.
+
+## Release strategies
+
+| Strategy | How | Rollback | Cost |
+| --- | --- | --- | --- |
+| Rolling | Replace pods gradually | Roll forward or redeploy previous | Low |
+| Blue-green | Two full environments, switch the router | Instant: switch back | Double capacity during release |
+| Canary | Small share of traffic to the new version, increased while metrics stay healthy | Shift traffic back | Needs traffic splitting and good metrics |
+| Feature flags | Deploy dark, enable per user or percentage | Turn the flag off | Flag management and cleanup |
+
+**Deploy** (code reaches production) and **release** (users see the change) do not have to be the same moment. Feature flags separate them, which makes deploys small and frequent and releases a business decision.
+
+<Pitfall title="Migrations that break the running version">
+The pipeline runs migrations before the new pods start, while old pods still serve traffic. A migration that renames or drops a column breaks them. Use expand and contract: add the new column, deploy code that writes both, backfill, switch reads, and only then remove the old column in a later release.
+</Pitfall>
+
+## Supply chain
+
+Your pipeline is also an attack surface. Pin third-party actions to commit SHAs, give CI credentials the least privilege and short lifetimes (OIDC federation to your cloud instead of stored keys), require reviews on the pipeline files, and verify image signatures at deploy time so only images your pipeline built can run.
+
+<InTheWild>
+The DORA research measures delivery performance with four metrics: deployment frequency, lead time for changes, change failure rate and time to restore service. High performers deploy small changes many times a day and restore quickly. The practices in this chapter (trunk-based development, fast tests, one artefact, progressive delivery) are the ones that research associates with those results.
+</InTheWild>
+
+<InterviewLens>
+"Describe your ideal deployment pipeline." A strong answer: trunk-based development with small PRs, fast lint and unit stages, integration and contract tests, one image built, scanned, signed and promoted by digest, backward-compatible migrations as a separate step, canary or blue-green with automated rollback on SLO breaches, feature flags to decouple release, and DORA metrics to track it.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch42" questions={quiz} />
+
+<Flashcards cards={cards} />

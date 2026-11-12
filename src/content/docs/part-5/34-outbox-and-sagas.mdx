@@ -1,0 +1,185 @@
+---
+title: Outbox, Sagas and Eventual Consistency
+chapter: 34
+part: Part V · Distributed and Real-time Systems
+kicker: No distributed transactions, and no lost events either.
+sidebar:
+  order: 34
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'What problem does the transactional outbox solve?',
+    options: ['Slow queries', 'The dual write: committing to the database and publishing to the broker cannot be atomic, so one can succeed while the other fails', 'Message ordering', 'Schema evolution'],
+    answer: 1,
+    why: 'Writing the event to an outbox table in the same transaction as the state change makes them atomic. A relay publishes from the table afterwards.',
+  },
+  {
+    q: 'In a saga, what replaces the rollback of a distributed transaction?',
+    options: ['Two-phase commit', 'Compensating actions that semantically undo earlier steps, such as releasing a stock reservation', 'Retrying forever', 'Deleting the order'],
+    answer: 1,
+    why: 'Each step commits locally. If a later step fails, earlier steps are undone by compensations, which are business operations in their own right.',
+  },
+  {
+    q: 'What distinguishes an orchestrated saga from a choreographed one?',
+    options: ['Orchestrated sagas use HTTP only', 'A central orchestrator tells each participant what to do; in choreography each service reacts to the others’ events', 'Choreography needs a database', 'There is no difference'],
+    answer: 1,
+    why: 'Choreography is simple for short flows; orchestration makes long flows visible and easier to change, at the cost of a coordinating component.',
+  },
+];
+
+export const cards = [
+  { front: 'Dual write', back: 'Writing to two systems (database and broker) without a shared transaction; one can fail silently.' },
+  { front: 'Transactional outbox', back: 'Insert events into an outbox table in the business transaction; a relay publishes them afterwards.' },
+  { front: 'Saga', back: 'A sequence of local transactions with compensating actions, replacing a distributed transaction.' },
+  { front: 'Compensation', back: 'A business action that undoes an earlier step: refund a payment, release a reservation.' },
+];
+
+Placing an order in Parcel touches three services: Ordering records it, Inventory reserves stock, Payments charges the customer. In a single database this would be one transaction. Across services there is no shared transaction, and two-phase commit across a broker and five databases is neither available nor wise. This chapter covers the two patterns that make multi-service workflows reliable anyway: the **outbox** for publishing events without losing them, and the **saga** for multi-step processes that can fail halfway.
+
+<Recall
+  items={[
+    { ref: 'Ch. 33', text: 'Kafka delivers at least once; consumers must be idempotent.' },
+    { ref: 'Ch. 29', text: 'Aggregates record domain events; one transaction changes one aggregate.' },
+    { ref: 'Ch. 24', text: 'Postgres SKIP LOCKED makes a table a safe queue for several workers.' },
+  ]}
+/>
+
+## The dual-write problem
+
+A handler saves the order and then publishes `OrderPlaced`. If the process crashes between the two, the order exists and nobody hears about it. Publishing first is worse: an event for an order that was never committed. Retrying does not help, because you do not know which half succeeded.
+
+## The transactional outbox
+
+Write the event into an **outbox** table in the **same database transaction** as the state change. Either both commit or neither does. A separate **relay** reads unpublished rows and publishes them to the broker, marking them sent.
+
+<Figure n="34.1" caption="The event is committed with the order; the relay publishes it at least once">
+  <svg viewBox="0 0 720 170" role="img" aria-label="Transactional outbox pattern" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="ob-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <rect x="8" y="50" width="140" height="56" rx="2" fill="none" stroke="var(--bp-rule)" stroke-width="1.25" />
+    <rect x="200" y="20" width="230" height="120" rx="8" fill="none" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="1.25"><rect x="216" y="48" width="96" height="40" rx="2" /><rect x="320" y="48" width="96" height="40" rx="2" /></g>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="470" y="50" width="100" height="56" rx="2" /><rect x="612" y="50" width="100" height="56" rx="2" /></g>
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="78" y="74" font-weight="600">PlaceOrder</text><text x="78" y="92" font-size="11" fill="var(--bp-muted)">handler</text>
+      <text x="315" y="38" font-weight="600">one transaction</text>
+      <text x="264" y="72">orders</text><text x="368" y="72">outbox</text>
+      <text x="315" y="120" font-size="11" fill="var(--bp-muted)">commit both or neither</text>
+      <text x="520" y="74" font-weight="600">Relay</text><text x="520" y="92" font-size="11" fill="var(--bp-muted)">poll or CDC</text>
+      <text x="662" y="74" font-weight="600">Kafka</text><text x="662" y="92" font-size="11" fill="var(--bp-muted)">OrderPlaced</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25"><path d="M148 78H198" marker-end="url(#ob-arrow)" /><path d="M430 78H468" marker-end="url(#ob-arrow)" /><path d="M570 78H610" marker-end="url(#ob-arrow)" /></g>
+    <text x="8" y="162" fill="var(--bp-muted)" font-size="11">The relay may publish twice after a crash, so consumers deduplicate by event id (an inbox table).</text>
+  </svg>
+</Figure>
+
+```sql
+CREATE TABLE outbox (
+  id            uuid PRIMARY KEY,
+  aggregate_id  text        NOT NULL,       -- becomes the Kafka key
+  type          text        NOT NULL,       -- OrderPlaced
+  payload       jsonb       NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  published_at  timestamptz
+);
+```
+
+<FiveStacks note="Save the aggregate and its events in one transaction">
+<Stack id="nest" lib="Prisma">
+```ts
+await prisma.$transaction(async (tx) => {
+  await tx.order.create({ data: toRow(order) });
+  await tx.outbox.createMany({
+    data: order.events.map((e) => ({ id: e.id, aggregateId: order.id, type: e.type, payload: e })),
+  });
+});
+```
+</Stack>
+<Stack id="cs" lib="EF Core">
+```csharp
+db.Orders.Add(order);
+db.Outbox.AddRange(order.Events.Select(e => OutboxMessage.From(order.Id, e)));
+await db.SaveChangesAsync(ct);   // one transaction for both
+```
+</Stack>
+<Stack id="kotlin" lib="Spring Data JPA">
+```kotlin
+@Transactional
+fun place(order: Order) {
+    orders.save(order)
+    outbox.saveAll(order.events.map { OutboxMessage.from(order.id, it) })
+}
+```
+</Stack>
+<Stack id="go" lib="pgx">
+```go
+err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+	if err := insertOrder(ctx, tx, order); err != nil {
+		return err
+	}
+	for _, e := range order.Events() {
+		if _, err := tx.Exec(ctx, `INSERT INTO outbox (id, aggregate_id, type, payload) VALUES ($1, $2, $3, $4)`,
+			e.ID(), order.ID, e.Type(), e); err != nil {
+			return err
+		}
+	}
+	return nil
+})
+```
+</Stack>
+<Stack id="django" lib="Django ORM">
+```python
+with transaction.atomic():
+    order_row = OrderRow.objects.create(**to_row(order))
+    OutboxMessage.objects.bulk_create(
+        OutboxMessage(id=e.id, aggregate_id=order.id, type=e.type, payload=e.to_dict())
+        for e in order.events
+    )
+```
+</Stack>
+</FiveStacks>
+
+The relay can **poll** the table with `FOR UPDATE SKIP LOCKED` (simple, a few seconds of latency) or use **change data capture**: Debezium reads PostgreSQL’s write-ahead log and publishes outbox rows to Kafka, with no polling. Either way, delivery is at-least-once, so consumers keep an **inbox**: a table of processed event ids written in the same transaction as their own effect.
+
+## Sagas
+
+A **saga** replaces one distributed transaction with a sequence of local transactions. Each step commits in its own service; if a later step fails, earlier steps are undone by **compensating actions**. Parcel’s checkout:
+
+| Step | Service | Action | Compensation |
+| --- | --- | --- | --- |
+| 1 | Ordering | Create order as `pending` | Mark order `cancelled` |
+| 2 | Inventory | Reserve stock | Release the reservation |
+| 3 | Payments | Charge the customer | Refund |
+| 4 | Ordering | Mark order `confirmed` | — |
+
+If the charge fails at step 3, Inventory releases the reservation and Ordering cancels the order. Note that compensations are business operations, not database rollbacks: a refund is visible to the customer and may itself fail and need retrying.
+
+### Choreography or orchestration
+
+- **Choreography**: each service reacts to the previous one’s events. Ordering publishes `OrderPlaced`; Inventory reserves and publishes `StockReserved`; Payments charges and publishes `PaymentCaptured`; Ordering confirms. No central component, easy for short flows, hard to see as a whole once there are many steps.
+- **Orchestration**: an **orchestrator** (a state machine in Ordering, or a workflow engine such as Temporal) sends commands to each service and decides the next step or compensation. The flow lives in one place and is easy to change and monitor.
+
+Parcel uses choreography for the happy path and an orchestrator in Ordering for timeouts and compensations, a common hybrid.
+
+<Pitfall title="Forgetting the in-between states">
+Between steps, the system is visibly inconsistent: an order is `pending` while stock is reserved but payment has not happened. Model these states explicitly, show them honestly in the UI ("processing payment"), add timeouts that trigger compensations, and make every step and compensation idempotent, because each message can arrive twice.
+</Pitfall>
+
+## Living with eventual consistency
+
+Eventual consistency is not a bug to hide but a property to design for. Show pending states, read your own writes where the user expects it, set timeouts and alerts on how long a saga may stay in progress, and build a reconciliation job that finds stuck instances. Business people understand this well: banks, shops and couriers have always worked this way.
+
+<InTheWild>
+Debezium plus an outbox table is a widely used way to publish events from relational services, and workflow engines such as Temporal have made orchestrated sagas much easier to build and observe. Whatever the tooling, the review questions are the same: what happens if this step fails, if this message arrives twice, and if it never arrives.
+</InTheWild>
+
+<InterviewLens>
+"How do you keep data consistent across services without distributed transactions?" A strong answer: local transactions per service, a transactional outbox to publish events reliably, idempotent consumers with an inbox, sagas with explicit compensations (choreographed or orchestrated), visible intermediate states with timeouts, and reconciliation as a safety net.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch34" questions={quiz} />
+
+<Flashcards cards={cards} />

@@ -1,0 +1,187 @@
+---
+title: gRPC and Protocol Buffers
+chapter: 35
+part: Part V · Distributed and Real-time Systems
+kicker: Typed contracts and fast calls between services, in any language.
+sidebar:
+  order: 35
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'How must you evolve a Protobuf message to stay compatible with existing clients?',
+    options: ['Renumber fields alphabetically', 'Add new fields with new numbers; never reuse or change the number or type of an existing field', 'Rename fields freely, numbers do not matter', 'Delete unused fields and reuse their numbers'],
+    answer: 1,
+    why: 'The wire format identifies fields by number. Reusing a number makes old and new code disagree on what bytes mean. Mark removed numbers as reserved.',
+  },
+  {
+    q: 'What is a gRPC deadline?',
+    options: ['The server’s shutdown time', 'An absolute time by which the caller needs the answer; it propagates to downstream calls and cancels work after it passes', 'A rate limit', 'A retry policy'],
+    answer: 1,
+    why: 'Deadlines travel with the call. Every hop knows how much time is left and can give up early instead of finishing work nobody will read.',
+  },
+  {
+    q: 'When is REST usually a better choice than gRPC?',
+    options: ['Internal calls between services', 'Public APIs consumed by browsers and third parties', 'High-throughput streaming', 'Polyglot backends'],
+    answer: 1,
+    why: 'Browsers cannot speak native gRPC without a proxy, and third parties expect HTTP and JSON. gRPC shines between your own services.',
+  },
+];
+
+export const cards = [
+  { front: 'Protocol Buffers', back: 'A schema language and compact binary format; code is generated for every language from .proto files.' },
+  { front: 'Field number', back: 'The identity of a Protobuf field on the wire. Never change or reuse one; reserve removed numbers.' },
+  { front: 'Deadline', back: 'The absolute time a call must finish by, propagated across services and enforced by cancellation.' },
+  { front: 'Status codes (gRPC)', back: 'NOT_FOUND, INVALID_ARGUMENT, FAILED_PRECONDITION, UNAVAILABLE, DEADLINE_EXCEEDED … instead of HTTP statuses.' },
+];
+
+Some calls cannot be asynchronous: when Ordering places an order, it needs to know **now** whether Inventory can reserve the stock. For synchronous calls between your own services, **gRPC** is the common choice in polyglot systems: one schema in Protocol Buffers, generated clients and servers in every language, HTTP/2 transport, and deadlines built in. In Parcel, Inventory (Go) serves gRPC and four services in four other languages call it.
+
+<Recall
+  items={[
+    { ref: 'Ch. 10', text: 'HTTP/2 multiplexes many streams over one connection.' },
+    { ref: 'Ch. 12', text: 'Contract-first: write the schema, review it, generate code.' },
+    { ref: 'Ch. 33', text: 'Use synchronous calls when the caller needs an answer now.' },
+  ]}
+/>
+
+## The contract
+
+```protobuf
+syntax = "proto3";
+package parcel.inventory.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service InventoryService {
+  rpc ReserveStock(ReserveStockRequest) returns (ReserveStockResponse);
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
+  rpc WatchStock(WatchStockRequest) returns (stream StockLevel);   // server streaming
+}
+
+message ReserveStockRequest {
+  string order_id = 1;
+  repeated Line lines = 2;
+  string idempotency_key = 3;
+}
+
+message Line {
+  string sku = 1;
+  int32 quantity = 2;
+}
+
+message ReserveStockResponse {
+  string reservation_id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+```
+
+Every field has a **number**, which is what travels on the wire. Evolution rules follow from that: add fields with new numbers, never change a field’s number or type, and mark removed numbers `reserved`. Tools such as `buf` lint the schema and fail CI on breaking changes. The `.proto` files live in one shared repository (or the provider’s), and each service generates code from them in its build.
+
+## One server, four clients
+
+<FiveStacks note="Inventory (Go) serves ReserveStock; the others call it with a 500 ms deadline">
+<Stack id="go" lib="grpc-go server">
+```go
+func (s *server) ReserveStock(ctx context.Context, req *inventoryv1.ReserveStockRequest) (*inventoryv1.ReserveStockResponse, error) {
+	if len(req.GetLines()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one line is required")
+	}
+	res, err := s.svc.Reserve(ctx, req.GetOrderId(), toLines(req.GetLines()), req.GetIdempotencyKey())
+	switch {
+	case errors.Is(err, ErrInsufficientStock):
+		return nil, status.Error(codes.FailedPrecondition, "insufficient stock")
+	case err != nil:
+		return nil, status.Error(codes.Internal, "reservation failed")
+	}
+	return &inventoryv1.ReserveStockResponse{ReservationId: res.ID, ExpiresAt: timestamppb.New(res.ExpiresAt)}, nil
+}
+```
+</Stack>
+<Stack id="nest" lib="@grpc/grpc-js client">
+```ts
+const deadline = new Date(Date.now() + 500);
+inventory.reserveStock({ orderId, lines, idempotencyKey }, { deadline }, (err, res) => {
+  if (err?.code === status.FAILED_PRECONDITION) return reject(new OutOfStock(orderId));
+  if (err) return reject(err);
+  resolve(res);
+});
+```
+</Stack>
+<Stack id="cs" lib="Grpc.Net.Client">
+```csharp
+try
+{
+    var res = await inventory.ReserveStockAsync(request,
+        deadline: DateTime.UtcNow.AddMilliseconds(500), cancellationToken: ct);
+}
+catch (RpcException e) when (e.StatusCode == StatusCode.FailedPrecondition)
+{
+    throw new OutOfStock(request.OrderId);
+}
+```
+</Stack>
+<Stack id="kotlin" lib="grpc-kotlin">
+```kotlin
+val response = try {
+    inventory.withDeadlineAfter(500, TimeUnit.MILLISECONDS).reserveStock(request)   // suspend call
+} catch (e: StatusException) {
+    if (e.status.code == Status.Code.FAILED_PRECONDITION) throw OutOfStock(request.orderId)
+    throw e
+}
+```
+</Stack>
+<Stack id="fastapi" lib="grpcio (asyncio)">
+```python
+try:
+    res = await inventory.ReserveStock(request, timeout=0.5)
+except grpc.aio.AioRpcError as e:
+    if e.code() == grpc.StatusCode.FAILED_PRECONDITION:
+        raise OutOfStock(request.order_id) from e
+    raise
+```
+</Stack>
+</FiveStacks>
+
+The four clients look different, but they were all generated from the same `.proto`, so a field renamed on the server is a compile error in every client after regeneration, not a runtime surprise.
+
+## Status codes and deadlines
+
+gRPC has its own status codes. Map domain errors deliberately: `INVALID_ARGUMENT` for bad input, `NOT_FOUND`, `FAILED_PRECONDITION` for business rules (out of stock), `ALREADY_EXISTS`, `UNAVAILABLE` for transient failures worth retrying, `DEADLINE_EXCEEDED` when time runs out. Only `UNAVAILABLE` (and sometimes `DEADLINE_EXCEEDED`) should be retried, and only for idempotent calls, which is why `ReserveStock` carries an idempotency key.
+
+A **deadline** is an absolute point in time, propagated to every downstream call. If the gateway gives Ordering 2 seconds and Ordering has used 1.6 before calling Inventory, Inventory knows it has 0.4 seconds and can refuse work it cannot finish. Set a deadline on **every** call; a call without one can hang forever.
+
+## Streaming
+
+gRPC supports server streaming (`WatchStock` pushes stock changes), client streaming (upload many items, get one answer) and bidirectional streaming over one HTTP/2 connection. Use them for long-lived feeds between services; for browsers, prefer WebSockets or SSE (Chapter 38).
+
+<Pitfall title="gRPC behind load balancers">
+gRPC keeps long-lived HTTP/2 connections, so a classic layer-4 load balancer sends all of one client’s calls to the same backend, and new replicas sit idle. Use a layer-7 balancer that understands HTTP/2 (Envoy, a service mesh, cloud L7 balancers) or client-side load balancing.
+</Pitfall>
+
+## REST or gRPC?
+
+| | REST + JSON | gRPC + Protobuf |
+| --- | --- | --- |
+| Audience | Public, browsers, partners | Your own services |
+| Contract | OpenAPI (optional) | `.proto` (required) |
+| Payload | Text, human-readable | Binary, compact |
+| Streaming | SSE, WebSockets | Built in, all directions |
+| Tooling | curl, browsers, everything | `grpcurl`, generated clients |
+
+Parcel exposes REST and GraphQL at the edge and uses gRPC inside, which is the most common split.
+
+<InTheWild>
+gRPC is widespread between services in polyglot organisations precisely because one schema produces idiomatic clients in Go, Java, Kotlin, C#, Python and TypeScript. Connect-RPC and gRPC-Web make the same contracts reachable from browsers when needed.
+</InTheWild>
+
+<InterviewLens>
+"How do your services talk synchronously, and what happens when one is slow?" A strong answer: gRPC with versioned Protobuf contracts and generated clients, deadlines on every call propagated across hops, explicit status-code mapping, retries only for transient errors on idempotent calls, L7 load balancing, and circuit breakers (Chapter 37) to stop cascading failures.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch35" questions={quiz} />
+
+<Flashcards cards={cards} />

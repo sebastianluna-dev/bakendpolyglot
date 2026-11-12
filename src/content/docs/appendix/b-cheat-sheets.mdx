@@ -1,0 +1,105 @@
+---
+title: Cheat Sheets
+appendix: B
+kicker: Everyday TypeScript, translated into the other four languages.
+sidebar:
+  order: 2
+---
+
+Each table maps an everyday TypeScript idiom to its equivalent. They are reminders, not tutorials: the chapter in Part I explains each language properly.
+
+## C# (Chapter 4)
+
+| TypeScript | C# |
+| --- | --- |
+| `const x = 1` / `let y = 2` | `var x = 1;` (readonly fields: `readonly`) |
+| `type Book = { id: number; title: string }` | `record Book(int Id, string Title);` |
+| `interface Clock { now(): Date }` | `interface IClock { DateTimeOffset Now(); }` |
+| `function add(a: number, b: number) { return a + b }` | `int Add(int a, int b) => a + b;` |
+| `(a, b) => a + b` | `(a, b) => a + b` |
+| `string \| null`, `a?.b ?? c` | `string?`, `a?.B ?? c` |
+| `arr.filter(f).map(g)` | `list.Where(f).Select(g).ToList()` |
+| `Record<string, number>` / `Map` | `Dictionary<string, int>` |
+| `async f(): Promise<T>` / `await` | `async Task<T> F()` / `await` |
+| `Promise.all([a, b])` | `await Task.WhenAll(a, b)` |
+| `throw new Error()` / `try/catch` | `throw new InvalidOperationException()` / `try/catch/finally` |
+| `` `Hi ${name}` `` | `$"Hi {name}"` |
+| `import { X } from './x'` | `using Namespace;` |
+| `npm install x` | `dotnet add package X` |
+| `test('…', () => {})` | `[Fact] public void Name() { }` (xUnit) |
+
+## Java (Chapter 5)
+
+| TypeScript | Java |
+| --- | --- |
+| `const x = 1` | `final var x = 1;` |
+| `type Book = { … }` | `record Book(long id, String title) {}` |
+| union of variants | `sealed interface` + `record`s + `switch` |
+| `function add(a: number, b: number)` | `int add(int a, int b) { return a + b; }` |
+| `(a, b) => a + b` | `(a, b) -> a + b` |
+| `T \| undefined` | `Optional<T>` (return values) |
+| `arr.filter(f).map(g)` | `list.stream().filter(f).map(g).toList()` |
+| `[1, 2]`, `{ a: 1 }` | `List.of(1, 2)`, `Map.of("a", 1)` |
+| `async` / `await` | Blocking code on virtual threads; `CompletableFuture` when needed |
+| `throw` / `try/catch` | `throw` / `try/catch/finally`; checked exceptions need `throws` |
+| `` `Hi ${name}` `` | `"Hi %s".formatted(name)` |
+| `import` | `import com.example.X;` |
+| `npm install` | Add to `pom.xml` or `build.gradle.kts` |
+| `test()` | `@Test void name() {}` (JUnit 5) |
+
+## Kotlin (Chapter 6)
+
+| TypeScript | Kotlin |
+| --- | --- |
+| `const` / `let` | `val` / `var` |
+| `type Book = { … }` | `data class Book(val id: Long, val title: String)` |
+| discriminated union | `sealed interface` + `when` with smart casts |
+| `function add(a: number, b: number) { return a + b }` | `fun add(a: Int, b: Int) = a + b` |
+| `(a, b) => a + b` | `{ a, b -> a + b }` |
+| `a?.b ?? c` | `a?.b ?: c` |
+| `arr.filter(f).map(g)` | `list.filter(f).map(g)` |
+| `[1, 2]`, `{ a: 1 }` | `listOf(1, 2)`, `mapOf("a" to 1)` |
+| `async` / `await` | `suspend fun` / direct call |
+| `Promise.all` | `coroutineScope { async {…}; async {…} }` then `await()` |
+| `` `Hi ${name}` `` | `"Hi $name"` |
+| `test()` | `@Test fun name() {}` (JUnit 5 or Kotest) |
+
+## Go (Chapter 7)
+
+| TypeScript | Go |
+| --- | --- |
+| `const x = 1` / `let y = 2` | `const x = 1` / `y := 2` |
+| `type Book = { … }` | `type Book struct { ID int64; Title string }` |
+| `interface Clock { now(): Date }` | `type Clock interface { Now() time.Time }` (implicit) |
+| `function add(a: number, b: number): number` | `func add(a, b int) int { return a + b }` |
+| `(a, b) => a + b` | `func(a, b int) int { return a + b }` |
+| `T \| null` | `*T` (pointer) or a zero value plus `ok` |
+| `arr.filter(f).map(g)` | a `for` loop (or small generic helpers) |
+| `T[]`, `Record<string, T>` | `[]T` (slice), `map[string]T` |
+| `async` / `await` | `go f()`, channels, `sync.WaitGroup` |
+| `Promise.all` | `errgroup.Group` |
+| `throw` / `try/catch` | `return fmt.Errorf("…: %w", err)` / `if err != nil` |
+| `` `Hi ${name}` `` | `fmt.Sprintf("Hi %s", name)` |
+| `export` | Capitalised names are exported |
+| `npm install x` | `go get example.com/x` |
+| `test()` | `func TestName(t *testing.T)` |
+
+## Python (Chapter 8)
+
+| TypeScript | Python |
+| --- | --- |
+| `const x = 1` | `x: Final = 1` (by convention: `X = 1`) |
+| `type Book = { … }` | `@dataclass(frozen=True) class Book: id: int; title: str` |
+| `interface` (structural) | `class Clock(Protocol): def now(self) -> datetime: ...` |
+| `function add(a: number, b: number): number` | `def add(a: int, b: int) -> int: return a + b` |
+| `(a, b) => a + b` | `lambda a, b: a + b` |
+| `T \| null`, `a ?? b` | `T \| None`, `a if a is not None else b` |
+| `arr.filter(f).map(g)` | `[g(x) for x in xs if f(x)]` |
+| `T[]`, `Record<string, T>` | `list[T]`, `dict[str, T]` |
+| `async` / `await` | `async def` / `await` |
+| `Promise.all` | `await asyncio.gather(a(), b())` |
+| `throw` / `try/catch/finally` | `raise` / `try/except/finally` |
+| `` `Hi ${name}` `` | `f"Hi {name}"` |
+| `import { X } from './x'` | `from package.x import X` |
+| `npm install x` | `uv add x` |
+| `test()` | `def test_name(): assert …` (pytest) |

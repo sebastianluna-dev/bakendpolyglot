@@ -1,0 +1,141 @@
+---
+title: Design Case Studies
+chapter: 47
+part: Part VII · System Design
+kicker: Seven classic problems, solved with the parts you already know.
+sidebar:
+  order: 47
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'In a news feed, why use a hybrid of fan-out on write and fan-out on read?',
+    options: ['It is simpler', 'Pushing posts into followers’ feeds is fast to read but explodes for accounts with millions of followers; those are merged at read time instead', 'Databases require it', 'To reduce storage only'],
+    answer: 1,
+    why: 'Most users have few followers, so precomputed feeds are cheap. Celebrities would trigger millions of writes per post, so their posts are pulled at read time.',
+  },
+  {
+    q: 'How does a distributed rate limiter usually keep counts consistent across API instances?',
+    options: ['Each instance counts locally', 'Atomic counters or token buckets in a shared store such as Redis, often with a Lua script per check', 'A relational transaction per request', 'The client reports its own count'],
+    answer: 1,
+    why: 'A shared, fast store with atomic operations gives one limit across all instances; local limiters only limit per instance.',
+  },
+  {
+    q: 'In a payment system, what is the core data structure that keeps money correct?',
+    options: ['A balance column updated in place', 'A double-entry, append-only ledger where every movement is a debit and a credit that sum to zero', 'A cache of balances', 'A log file'],
+    answer: 1,
+    why: 'An immutable double-entry ledger makes every balance derivable and auditable; balances are projections of it.',
+  },
+];
+
+export const cards = [
+  { front: 'Base62 short codes', back: '7 characters of [0-9a-zA-Z] give about 3.5 trillion codes.' },
+  { front: 'Fan-out on write', back: 'On post, insert into each follower’s feed: fast reads, expensive writes for big accounts.' },
+  { front: 'Double-entry ledger', back: 'Every transfer is recorded as entries that sum to zero; balances are derived, never edited.' },
+];
+
+Each case follows the method from Chapter 46 in compressed form: what matters in the requirements, the numbers, the design, and the decisions an interviewer will probe. They reuse Parts II to VI on purpose; a good design is mostly known parts combined with judgment.
+
+<Recall
+  items={[
+    { ref: 'Ch. 46', text: 'Requirements, estimates, high-level design, deep dives.' },
+    { ref: 'Ch. 23–24', text: 'Conditional updates, idempotency keys, webhooks, at-least-once jobs.' },
+    { ref: 'Ch. 38', text: 'WebSockets, SSE, and a pub/sub backplane for fan-out.' },
+  ]}
+/>
+
+## 1. URL shortener
+
+**Requirements.** Create a short link for a long URL; redirect fast; optional expiry and analytics. Reads dominate: about 100 redirects per creation.
+
+**Numbers.** 100 million new links a month is roughly 40 writes per second and 4,000 redirects per second on average, with peaks several times higher. Five years of links at 500 bytes each is about 3 TB.
+
+**Design.** A stateless API behind a load balancer; a key-value or relational store mapping code to URL; a cache (Redis or the CDN) in front of redirects, since popular links are read millions of times; analytics events sent to a queue, never written on the redirect path.
+
+**Decisions.** Codes: seven base62 characters give about 3.5 trillion values. Generate them from a counter with ranges handed out to each instance (no collisions, but predictable, so shuffle them) or randomly with a unique constraint and retry on collision. Use `302` if you need analytics on every click, `301` if you want browsers to cache. Block malicious URLs at creation.
+
+## 2. Distributed rate limiter
+
+**Requirements.** Limit each API key to N requests per window across all instances; add little latency; fail open or closed by policy.
+
+**Design.** A token bucket or sliding window per key in Redis, updated atomically with a Lua script (read, refill, decrement, return in one round trip). Enforce it at the API gateway so services stay simple. Return `429` with `Retry-After` and rate-limit headers.
+
+**Decisions.** If Redis is down, fail open for most APIs (availability) but closed for login and payments (security). Keep a small local limiter as a first line to absorb abusive bursts without touching Redis. Shard keys across a Redis cluster; hot keys from one huge customer may need their own limits.
+
+## 3. Chat
+
+**Requirements.** One-to-one and group chat, delivery and read receipts, history, presence, online and offline users.
+
+**Numbers.** 10 million daily users, 40 messages each, is 400 million messages a day, about 5,000 per second on average; concurrent connections in the low millions.
+
+**Design.** Pulse’s architecture, scaled: connection servers holding WebSockets, routing through a pub/sub layer keyed by user or conversation; messages persisted **before** delivery in a store partitioned by conversation id (a wide-column store suits this write-heavy, time-ordered pattern); push notifications for offline users through a queue.
+
+**Decisions.** Ordering per conversation with a sequence number assigned by the conversation’s partition. Delivery is at-least-once with client-side deduplication by message id. Presence is approximate (heartbeats with expiry), broadcast only to contacts who are online.
+
+## 4. News feed
+
+**Requirements.** Users follow others and see a ranked feed of recent posts; posting is rare, reading is constant.
+
+<Figure n="47.1" caption="Push posts to most followers’ feeds at write time; pull celebrities’ posts at read time and merge">
+  <svg viewBox="0 0 720 170" role="img" aria-label="Hybrid fan-out for a news feed" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="nf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="8" y="20" width="130" height="44" rx="2" /><rect x="8" y="106" width="130" height="44" rx="2" /><rect x="220" y="20" width="160" height="44" rx="2" /><rect x="560" y="60" width="152" height="50" rx="2" /></g>
+    <rect x="400" y="60" width="120" height="50" rx="2" fill="var(--bp-accent-soft)" stroke="var(--bp-accent)" stroke-width="2" />
+    <g fill="var(--bp-ink)" text-anchor="middle">
+      <text x="73" y="40">Ana posts</text><text x="73" y="56" font-size="11" fill="var(--bp-muted)">300 followers</text>
+      <text x="73" y="126">Star posts</text><text x="73" y="142" font-size="11" fill="var(--bp-muted)">20 M followers</text>
+      <text x="300" y="40">fan-out workers</text><text x="300" y="56" font-size="11" fill="var(--bp-muted)">write to 300 feeds</text>
+      <text x="460" y="82">merge at read</text><text x="460" y="98" font-size="11" fill="var(--bp-muted)">+ rank</text>
+      <text x="636" y="82">Ben’s feed</text><text x="636" y="98" font-size="11" fill="var(--bp-muted)">cached list of ids</text>
+    </g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25"><path d="M138 42H218" marker-end="url(#nf-arrow)" /><path d="M380 42C440 42 460 50 460 58" marker-end="url(#nf-arrow)" /><path d="M138 128C300 128 420 120 440 112" marker-end="url(#nf-arrow)" stroke-dasharray="4 3" /><path d="M520 85H558" marker-end="url(#nf-arrow)" /></g>
+    <text x="230" y="150" fill="var(--bp-muted)" font-size="11">dashed: not pushed; read from the star’s own timeline</text>
+  </svg>
+</Figure>
+
+**Design.** Posts in a store keyed by author; each user’s feed precomputed as a capped list of post ids in Redis. On post, a queue triggers workers that push the id into each follower’s feed (**fan-out on write**). Accounts with huge followings are skipped, and their recent posts are merged at read time (**fan-out on read**). Ranking runs on the merged candidates.
+
+**Decisions.** Feeds hold ids, not content, so edits and deletions apply everywhere; content is fetched in batch and cached. Inactive users’ feeds are not maintained and are rebuilt on their next visit.
+
+## 5. Ticketing
+
+**Requirements.** Sell seats for high-demand events without overselling; survive traffic spikes at on-sale time.
+
+**Design.** SeatLock (Chapter 27): atomic holds with expiry by conditional update, checkout with idempotency keys, payment confirmation by webhook, a reaper job. For spikes, add a **virtual waiting room** that admits users at a rate the hold service can handle, and serve event pages from the CDN.
+
+**Decisions.** Seat availability is never cached for decisions. Partition hot events onto dedicated database capacity. Measure success with invariants (no seat in two paid orders), not just with HTTP status codes.
+
+## 6. Payments
+
+**Requirements.** Charge customers through external providers, never lose or duplicate money, reconcile with the provider and the bank.
+
+**Design.** A **double-entry ledger**, append-only: every movement is a set of entries that sum to zero, and balances are derived (Parcel’s Payments service event-sources exactly this). Idempotency keys end to end: from the client to your API, and from your API to the provider. Webhooks verified and deduplicated; a state machine per payment (`created → authorised → captured → refunded`). Daily **reconciliation** jobs compare your ledger with provider and bank reports and raise discrepancies.
+
+**Decisions.** Strong consistency and serialisable transactions inside the ledger; asynchronous everything else. Every external call can time out with an unknown outcome, so query the provider by idempotency key before retrying.
+
+## 7. Notifications
+
+**Requirements.** Send email, SMS and push notifications triggered by many services, respecting user preferences, quiet hours and rate limits per channel.
+
+**Design.** Services publish notification requests to a queue; a notification service checks preferences, renders templates, deduplicates by key, and sends through per-channel workers with their own provider integrations, retries and dead-letter queues. Delivery status comes back by webhooks and is stored for support.
+
+**Decisions.** Separate queues per channel and priority, so a bulk marketing send never delays a password-reset code. Idempotency per notification key, because users notice duplicates immediately.
+
+<Pitfall title="Reciting a design from memory">
+Interviewers change one requirement on purpose ("now it must work across three regions", "now reads must be consistent") to see if you reason or recite. Tie every component back to a requirement or a number, and the change becomes a conversation, not a trap.
+</Pitfall>
+
+<InTheWild>
+Real systems at these companies are far messier than any case study, with history, constraints and partial migrations. What carries over is the habit: start from requirements and numbers, choose the simplest design that meets them, and know which part will break first as load grows.
+</InTheWild>
+
+<InterviewLens>
+Practise each case aloud in 40 minutes with the four steps, then change one requirement and adapt. Record yourself once; most candidates discover they skip estimates and never state trade-offs explicitly.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch47" questions={quiz} />
+
+<Flashcards cards={cards} />

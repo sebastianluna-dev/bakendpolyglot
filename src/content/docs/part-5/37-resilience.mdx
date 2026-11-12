@@ -1,0 +1,175 @@
+---
+title: Resilience
+chapter: 37
+part: Part V · Distributed and Real-time Systems
+kicker: Everything fails. Fail fast, fail small, recover on your own.
+sidebar:
+  order: 37
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+export const quiz = [
+  {
+    q: 'Why add jitter to exponential backoff?',
+    options: ['To make retries faster', 'So many clients that failed together do not retry at the same instants and overload the recovering service', 'Jitter is required by HTTP', 'To reduce logging'],
+    answer: 1,
+    why: 'Synchronised retries arrive in waves. Randomising the delay spreads them out, letting the dependency recover.',
+  },
+  {
+    q: 'What does an open circuit breaker do?',
+    options: ['Retries every call', 'Fails calls immediately without contacting the dependency, until a cool-down passes and a trial call succeeds', 'Queues calls for later', 'Restarts the dependency'],
+    answer: 1,
+    why: 'Open means "stop hammering a failing service". After the cool-down it goes half-open and lets a few calls test recovery.',
+  },
+  {
+    q: 'Which calls are safe to retry automatically?',
+    options: ['All of them', 'Idempotent calls that failed with transient errors (timeouts, 503, UNAVAILABLE)', 'Only POST requests', 'Calls that returned 400'],
+    answer: 1,
+    why: 'Retrying a non-idempotent call can duplicate effects; retrying a 400 just repeats the same error. Retry transient failures of idempotent operations.',
+  },
+];
+
+export const cards = [
+  { front: 'Timeout', back: 'The maximum time to wait for a call. Every remote call needs one, shorter than the caller’s own.' },
+  { front: 'Circuit breaker', back: 'Closed → open after repeated failures (fail fast) → half-open trial → closed again on success.' },
+  { front: 'Bulkhead', back: 'Separate resource pools per dependency, so one slow dependency cannot exhaust everything.' },
+  { front: 'Retry budget', back: 'A cap on retries as a share of traffic, so retries cannot multiply load during an outage.' },
+];
+
+In a system of five services, something is always slightly broken: a pod restarting, a network blip, a dependency with a slow database. Resilience patterns keep those small failures small. Without them, one slow service makes its callers slow, their threads and connections fill up, and the whole system falls over, a **cascading failure**. This chapter covers the five patterns that stop the cascade and how each stack applies them.
+
+<Recall
+  items={[
+    { ref: 'Ch. 11', text: 'Inner timeouts must be shorter than outer ones.' },
+    { ref: 'Ch. 24', text: 'Idempotency keys make retried operations safe.' },
+    { ref: 'Ch. 35', text: 'gRPC deadlines propagate the remaining time across hops.' },
+  ]}
+/>
+
+## Five patterns
+
+**Timeouts.** Every remote call gets a timeout, shorter than the caller’s own deadline. A call without a timeout can hold a thread or connection forever, and that is how most cascades begin.
+
+**Retries with backoff and jitter.** Retry only transient failures (timeouts, 503, `UNAVAILABLE`) of **idempotent** operations, a small number of times, with exponentially growing, randomised delays: 100 ms, 200 ms, 400 ms, each ± 50 %. Cap retries with a **budget** (for example, at most 10 % extra traffic), or a retry storm will finish off a struggling service.
+
+**Circuit breakers.** Track failures per dependency. After too many, **open** the circuit: fail immediately without calling, giving the dependency room to recover and giving your callers a fast error instead of a slow one. After a cool-down, go **half-open** and let a few trial calls through.
+
+<Figure n="37.1" caption="A circuit breaker turns slow failures into fast ones while the dependency recovers">
+  <svg viewBox="0 0 720 150" role="img" aria-label="Circuit breaker states" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="cb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--bp-muted)" /></marker></defs>
+    <g fill="none" stroke="var(--bp-rule)" stroke-width="1.25"><rect x="20" y="40" width="150" height="56" rx="28" /><rect x="550" y="40" width="150" height="56" rx="28" /></g>
+    <rect x="285" y="40" width="150" height="56" rx="28" fill="var(--bp-warn-soft)" stroke="var(--bp-warn)" stroke-width="2" />
+    <g fill="var(--bp-ink)" text-anchor="middle" font-weight="600"><text x="95" y="66">Closed</text><text x="360" y="66">Open</text><text x="625" y="66">Half-open</text></g>
+    <g fill="var(--bp-muted)" text-anchor="middle" font-size="11"><text x="95" y="82">calls go through</text><text x="360" y="82">fail fast</text><text x="625" y="82">a few trial calls</text></g>
+    <g fill="none" stroke="var(--bp-muted)" stroke-width="1.25">
+      <path d="M170 56H283" marker-end="url(#cb-arrow)" /><path d="M435 56H548" marker-end="url(#cb-arrow)" />
+      <path d="M625 96V126H95V98" marker-end="url(#cb-arrow)" /><path d="M550 82H437" marker-end="url(#cb-arrow)" />
+    </g>
+    <g fill="var(--bp-ink)" font-size="11" text-anchor="middle">
+      <text x="226" y="48">5 failures in a row</text><text x="492" y="48">after 10 s</text><text x="492" y="98">trial fails</text><text x="360" y="142">trial calls succeed</text>
+    </g>
+  </svg>
+</Figure>
+
+**Bulkheads.** Give each dependency its own limited pool of connections or concurrent calls. If Catalog hangs, only the Catalog pool fills up; calls to Payments still have capacity.
+
+**Fallbacks and degradation.** Decide in advance what to show when a dependency is down: product names from a cache, recommendations hidden, "payment status pending". A degraded page beats an error page.
+
+## The patterns, five ways
+
+<FiveStacks note="Timeout, retry with backoff, and a circuit breaker around a Catalog call">
+<Stack id="nest" lib="cockatiel">
+```ts
+const catalogPolicy = wrap(
+  retry(handleWhen(isTransient), { maxAttempts: 3, backoff: new ExponentialBackoff() }),
+  circuitBreaker(handleAll, { halfOpenAfter: 10_000, breaker: new ConsecutiveBreaker(5) }),
+  timeout(800, TimeoutStrategy.Aggressive),
+);
+
+const product = await catalogPolicy.execute(({ signal }) => catalog.getProduct(sku, { signal }));
+```
+</Stack>
+<Stack id="cs" lib="Microsoft.Extensions.Http.Resilience">
+```csharp
+builder.Services.AddHttpClient<CatalogClient>(c => c.BaseAddress = new Uri(catalogUrl))
+    .AddStandardResilienceHandler(o =>
+    {
+        o.AttemptTimeout.Timeout = TimeSpan.FromMilliseconds(800);
+        o.Retry.MaxRetryAttempts = 2;          // exponential backoff with jitter by default
+        o.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(10);
+    });
+```
+</Stack>
+<Stack id="kotlin" lib="Resilience4j">
+```kotlin
+@CircuitBreaker(name = "catalog", fallbackMethod = "cachedProduct")
+@Retry(name = "catalog")
+@TimeLimiter(name = "catalog")
+suspend fun product(sku: String): Product = catalogClient.product(sku)
+
+suspend fun cachedProduct(sku: String, e: Throwable): Product = productCache.get(sku) ?: throw e
+// thresholds, wait durations and backoff live in application.yml under resilience4j.*
+```
+</Stack>
+<Stack id="go" lib="gobreaker + context">
+```go
+cb := gobreaker.NewCircuitBreaker[*Product](gobreaker.Settings{
+	Name:        "catalog",
+	Timeout:     10 * time.Second, // open → half-open
+	ReadyToTrip: func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= 5 },
+})
+
+for attempt := 0; attempt < 3; attempt++ {
+	p, err := cb.Execute(func() (*Product, error) {
+		ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+		defer cancel()
+		return catalog.Product(ctx, sku)
+	})
+	if err == nil || !isTransient(err) {
+		return p, err
+	}
+	time.Sleep(backoffWithJitter(attempt)) // 100ms, 200ms, 400ms ± 50%
+}
+```
+</Stack>
+<Stack id="fastapi" lib="tenacity + httpx">
+```python
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential_jitter(initial=0.1, max=2),
+    retry=retry_if_exception_type((httpx.TransportError, TransientStatus)),
+)
+async def get_product(sku: str) -> Product:
+    resp = await client.get(f"/products/{sku}", timeout=httpx.Timeout(0.8))
+    if resp.status_code in (502, 503, 504):
+        raise TransientStatus(resp.status_code)
+    resp.raise_for_status()
+    return Product.model_validate(resp.json())
+# a breaker library (pybreaker, aiobreaker) or the service mesh adds the circuit breaker
+```
+</Stack>
+</FiveStacks>
+
+.NET and the JVM have the most complete libraries; in Go and Python teams combine small libraries or push breakers and retries into a **service mesh** (Istio, Linkerd), which applies them uniformly to every service regardless of language. That uniformity is attractive in a polyglot system like Parcel.
+
+<Pitfall title="Retries at every layer">
+If the gateway retries 3 times, Ordering retries 3 times and its HTTP client retries 3 times, one failing call to Inventory becomes 27. Retry at one layer, usually the one closest to the failing dependency, and make the others fail fast.
+</Pitfall>
+
+## Load shedding and health checks
+
+When a service is overloaded, serving every request slowly helps nobody. **Shed load**: reject excess requests early with `503` and `Retry-After`, using concurrency limits, so the requests you accept finish quickly. Separate **liveness** (the process is not stuck, so do not restart it) from **readiness** (it can take traffic now), and never make liveness depend on downstream services, or a database blip restarts your entire fleet (Chapter 41).
+
+<InTheWild>
+Teams learn resilience from incidents. The usual postmortem findings are a missing timeout, retries without backoff, a health check that depended on the database, and a shared connection pool. Chaos experiments, deliberately killing pods or adding latency in staging, find them before customers do.
+</InTheWild>
+
+<InterviewLens>
+"Service A calls B, and B becomes slow. What happens, and how do you protect A?" A strong answer describes the cascade (threads and connections pile up in A), then applies timeouts shorter than A’s own deadline, limited retries with backoff and jitter on idempotent calls, a circuit breaker, a bulkhead for B, a fallback, and load shedding, with metrics to see each one trigger.
+</InterviewLens>
+
+## Review
+
+<Quiz id="ch37" questions={quiz} />
+
+<Flashcards cards={cards} />
