@@ -217,3 +217,315 @@ Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `1 ≤
 **Complexity.** O(h + r) time, where `r` is the number of keys in the range (O(n) in the worst case); O(h) space for the call stack.
 
 **Common mistake.** Skipping a node with `key <= lo` instead of `key < lo`, which drops `lo` itself: for Example 1's tree with `lo = 10` and `hi = 20` it returns 35 instead of 45.
+
+## 111 · Level-by-Level Traversal
+
+**Trees · Medium**
+
+Given the root of a binary tree, return its values level by level: one list per level, from the root down, and each list from left to right. The empty tree returns an empty list. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [8, 4, 12, 2, null, 10, 14]
+  output: [[8], [4, 12], [2, 10, 14]]
+
+Example 2
+  input:  root = [5, 6, null, 7, 8]
+  output: [[5], [6], [7, 8]]   (7 and 8 are both children of 6)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** A simple solution computes the depth first and then, for each level `d`, walks the whole tree to collect the nodes at depth `d`: O(n·h), because the top of the tree is walked again for every level. A breadth-first walk visits each node once. Keep the current level as a list of nodes, starting with the root; its values become one row of the answer, and its children, taken left to right, become the next level. Stop when a level is empty. This is the same walk as a queue-based BFS, with the level boundary made explicit by swapping lists instead of counting queue entries.
+
+<Solutions n="111" />
+
+**Complexity.** O(n) time, O(n) space for the answer, plus O(w) for the two level lists, where `w` is the widest level.
+
+**Common mistake.** With a single queue, using its live length as the loop bound while children are being added to it: the level never ends, and Example 1 comes back as one row, `[[8, 4, 12, 2, 10, 14]]`.
+
+## 112 · What You See From the Right
+
+**Trees · Medium**
+
+Imagine standing to the right of a binary tree and looking at it: on each level you see only the rightmost node. Given the root, return the values you see, from the root level down. A node hidden on one level can show through on a deeper level if nothing stands to its right there. The empty tree returns an empty list. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [10, 4, 15, 2, 6, null, 20, null, null, 5]
+  output: [10, 15, 20, 5]   (5 sits under 4's subtree, but nothing is to its right)
+
+Example 2
+  input:  root = [1, 2]
+  output: [1, 2]            (a left child is visible when it is alone on its level)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The simple solution is problem 111's traversal, keeping the last value of each level: already O(n), but it holds a whole level in memory. A depth-first walk does it with only the call stack. Visit the right child before the left one, and carry the depth: the first node reached at each depth is the rightmost one on that level. Since the answer list has one entry per depth already seen, a node is new on its level exactly when `depth` equals the length of the list.
+
+<Solutions n="112" />
+
+**Complexity.** O(n) time, O(h) space for the call stack (plus the answer).
+
+**Common mistake.** Following right children only, from the root down: that misses nodes that show through from a left subtree, so Example 1 returns `[10, 15, 20]` and Example 2 returns `[1]`.
+
+## 113 · Validate a Binary Search Tree
+
+**Trees · Medium**
+
+Given the root of a binary tree, return `true` if it is a binary search tree: for every node, every key in its left subtree is strictly smaller than the node's key, and every key in its right subtree is strictly larger. Equal keys anywhere make it invalid. The empty tree is valid. Keys can be any 32-bit integer, including the smallest and largest. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [8, 4, 12, 2, 6, 10, 14]
+  output: true
+
+Example 2
+  input:  root = [8, 4, 12, 2, 9, 10, 14]
+  output: false        (9 is larger than its parent 4, but it sits left of 8)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-2³¹ ≤ key ≤ 2³¹ - 1`.
+
+**Approach.** Checking each node against its two children is not enough, because the rule is about whole subtrees. A correct simple solution walks the tree in order and checks that the keys come out strictly increasing, which costs a list of all `n` keys. Passing bounds down avoids the list: each node must lie strictly between a lower and an upper bound, its left child inherits the upper bound from it and its right child the lower bound. Here the bounds are the ancestor nodes themselves, or null for "no bound yet", rather than numbers: a numeric sentinel such as `Integer.MIN_VALUE` collides with a real key of -2³¹, while a node reference cannot. 64-bit bounds or ±infinity also work.
+
+<Solutions n="113" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Starting the bounds at the 32-bit minimum and maximum and comparing strictly: the valid tree `[-2147483648, null, 2147483647]` is then rejected, because the root is not strictly greater than the starting lower bound.
+
+## 114 · The k-th Smallest Key in a BST
+
+**Trees · Medium**
+
+Given the root of a binary search tree and an integer `k`, return the `k`-th smallest key, counting from 1. In a binary search tree the keys are distinct, every key in a node's left subtree is smaller than the node's key, and every key in its right subtree is larger. `k` is always between 1 and the number of nodes. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [20, 10, 30, 5, 15, 25, 40], k = 3
+  output: 15           (5, 10, 15, ...)
+
+Example 2
+  input:  root = [6, 3, 8, 1, 4, null, 9, null, 2], k = 2
+  output: 2            (2 is the right child of 1)
+```
+
+Constraints: `1 ≤ k ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁹ ≤ key ≤ 10⁹`.
+
+**Approach.** The simple solution collects every key with an in-order walk, which produces them sorted, and returns the one at index `k - 1`: O(n) time and space even when `k` is 1. The walk can stop as soon as it has produced `k` keys. Write it iteratively with an explicit stack: push the path down the left edge, pop a node (the smallest key not yet counted), count it, then continue from its right child. When the count reaches `k`, the popped key is the answer, and nothing to its right has been touched.
+
+<Solutions n="114" />
+
+**Complexity.** O(h + k) time, O(h) space for the stack.
+
+**Common mistake.** Counting with a recursive in-order walk that receives `k` as a plain parameter: the decrements made inside the left subtree are lost when the call returns, so Example 1 returns 40 instead of 15.
+
+## 115 · Lowest Common Manager
+
+**Trees · Medium**
+
+A company's org chart is a binary tree: each person is a node with a distinct id, and has at most two direct reports. A person's team is that person plus everyone below them. Given two ids `a` and `b`, both in the chart, return the id of their lowest common manager: the person furthest from the root whose team includes both. If `a` is above `b`, the answer is `a`; if `a` and `b` are equal, it is that id. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [1, 2, 3, 4, 5, 6, 7, null, null, 8, 9], a = 8, b = 4
+  output: 2            (8 is under 5, which reports to 2, like 4)
+
+Example 2
+  input:  root = [1, 2, 3, 4, 5, 6, 7, null, null, 8, 9], a = 5, b = 9
+  output: 5            (9 is in 5's team, and 5 is in its own)
+```
+
+Constraints: `1 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, ids are distinct with `1 ≤ id ≤ 10⁵`, and `a` and `b` are both in the tree.
+
+**Approach.** The simple solution records the path from the root to `a` and the path to `b`, then walks both from the start and returns the last id they share: O(n) time, plus two path lists. One recursive walk needs no lists. It returns a node when that node is `a` or `b`, without looking further down, since the other id is either below it (and the node is the answer) or elsewhere. Otherwise it asks both children; if both report a find, `a` and `b` are on different sides and the current node is the lowest common manager, and if only one side reports, that report is passed up. The guarantee that both ids are present is what makes the early return safe.
+
+<Solutions n="115" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Reusing the binary search tree shortcut (go left when both ids are smaller than the node, right when both are larger): an org chart is not ordered, so for Example 1 it walks 1 → 3 → 7 and returns 7 instead of 2.
+
+## 116 · Rebuild a Tree From Two Traversals
+
+**Trees · Medium**
+
+Given the preorder (node, left subtree, right subtree) and inorder (left subtree, node, right subtree) traversals of the same binary tree, whose values are distinct, rebuild the tree and return its root. Two empty arrays give the empty tree. The checks read the result back in level order, with null for a missing child and without trailing nulls.
+
+```text
+Example 1
+  input:  preorder = [8, 4, 2, 6, 12, 14], inorder = [2, 4, 6, 8, 12, 14]
+  output: [8, 4, 12, 2, 6, null, 14]
+
+Example 2
+  input:  preorder = [1, 2, 3], inorder = [3, 2, 1]
+  output: [1, 2, null, 3]   (every node has only a left child)
+```
+
+Constraints: `0 ≤ preorder.length = inorder.length ≤ 10⁴`, values are distinct with `-10⁴ ≤ val ≤ 10⁴`, both arrays come from the same tree, and the depth is at most 500.
+
+**Approach.** The first preorder value is the root; finding it in the inorder array splits that array into the left subtree (everything before it) and the right subtree (everything after), and the size of the left part says where the right subtree starts in the preorder. Recursing with a linear search for each root, or with sliced copies of the arrays, costs O(n²) on a tree that is a single chain. Two changes make it O(n): a hash map from value to inorder position, built once, and index ranges instead of copies. Each call gets `pre`, where its subtree starts in the preorder, and `lo..hi`, its range in the inorder; the right subtree starts at `pre + 1 + (mid - lo)`, after the root and the `mid - lo` nodes of the left subtree.
+
+<Solutions n="116" />
+
+**Complexity.** O(n) time, O(n) space for the map, plus O(h) for the call stack.
+
+**Common mistake.** Starting the right subtree at `pre + 1 + mid` instead of `pre + 1 + (mid - lo)`: `mid` is a position in the whole inorder array, so the formula is right only while `lo` is 0, and in Example 1 the call for 12's right subtree reads index 9 of a 6-element `preorder`.
+
+## 117 · Nodes No Smaller Than Their Ancestors
+
+**Trees · Medium**
+
+Call a node good if its value is at least as large as every value on the path from the root down to it, the node itself excluded. The root is always good. Given the root of a binary tree, return the number of good nodes; the empty tree has none. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [5, 3, 8, 6, 2, 5, 9]
+  output: 4            (5, 8, 6 and 9; the 5 under 8 is not good)
+
+Example 2
+  input:  root = [2, 2, 2]
+  output: 3            (equal to an ancestor still counts)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The simple solution walks back up from every node and compares it with each ancestor, which needs parent links or a stored path and costs O(n·h). All a node needs to know about its ancestors is their largest value, and that is cheap to carry down. Walk from the root with a `highest` parameter, starting at the root's own value: a node is good when its value is at least `highest`, and its children receive the larger of the two. Sum the counts from both subtrees.
+
+<Solutions n="117" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Comparing a node only with its parent: in `[5, 3, null, 4]` the 4 is larger than its parent 3 but smaller than the root, so the answer is 1, not 2.
+
+## 118 · Flatten a Tree Into a List
+
+**Trees · Medium**
+
+Given the root of a binary tree, flatten it in place into a chain that follows preorder (node, left subtree, right subtree): every left child becomes null, and each node's right child becomes the next node in preorder. Reuse the existing nodes and return nothing. The empty tree stays empty. Trees are given in level order, with null for a missing child, and the checks read the flattened tree back the same way, without trailing nulls.
+
+```text
+Example 1
+  input:  root = [10, 5, 20, 3, 7, null, 25]
+  output: [10, null, 5, null, 3, null, 7, null, 20, null, 25]
+
+Example 2
+  input:  root = [1, 2, null, 3]
+  output: [1, null, 2, null, 3]   (a left chain turns into a right chain)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The simple solution records the nodes in preorder in a list and then relinks them, which needs O(n) extra space. The relinking can happen as you go, with no list and no recursion. At each node that has a left subtree, find the tail of that subtree (the last node in its preorder, reached by following right children from the left child), hang the node's current right subtree off the tail, move the left subtree to the right, and set the left child to null. Then step to the right child and repeat. The order of the three pointer moves matters: the old right subtree must be attached to the tail before `right` is overwritten.
+
+<Solutions n="118" />
+
+**Complexity.** O(n) time, since every node is on at most one tail search; O(1) extra space.
+
+**Common mistake.** Assigning `node.right = node.left` before the old right subtree is attached to the tail: nothing points to it any more, so Example 1 comes back without 20 and 25.
+
+## 119 · Count Downward Paths With a Given Sum
+
+**Trees · Medium**
+
+Given the root of a binary tree and a target, count the downward paths whose values add up to the target. A downward path starts at any node and goes down through children to any node at or below it; a single node is a path. Values and the target may be negative, and two paths count separately when they use different nodes, even if their values match. The empty tree has no paths. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [4, 2, -1, 1, 3, null, 5], target = 5
+  output: 2            (2 → 3, and 5 alone)
+
+Example 2
+  input:  root = [1, -1, 1, 1], target = 1
+  output: 4            (each of the three 1s alone, and 1 → -1 → 1)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁹ ≤ val ≤ 10⁹`, `-2 × 10⁹ ≤ target ≤ 2 × 10⁹`.
+
+**Approach.** The simple solution starts a walk at every node and adds values on the way down, counting each time the running sum hits the target: O(n·h). This is problem 018's prefix-sum idea moved onto a tree. Walking from the root, keep the sum of the values from the root to the current node; a downward path ending here sums to the target exactly when some ancestor's root sum equals `current - target`. A hash map counts the root sums along the current path (seeded with 0 once, for paths that start at the root), so each node adds `map[current - target]` in O(1). Remove the node's sum from the map before returning to its parent, because that sum belongs to this branch only. A path of 500 values near 10⁹ sums to about 5 × 10¹¹, so the sums are 64-bit (`long`, `Long`, `int64`).
+
+<Solutions n="119" />
+
+**Complexity.** O(n) time, O(h) space for the map and the call stack.
+
+**Common mistake.** Forgetting to remove a node's sum from the map on the way back up: sums from the left branch are then counted as ancestors of the right one, and Example 2 returns 5 instead of 4.
+
+## 120 · Serialize and Deserialize a Tree
+
+**Trees · Hard**
+
+Write two functions. `serialize(root)` turns a binary tree into a string in this exact format: the nodes in preorder (node, left subtree, right subtree), each node written as its value in decimal (with a leading `-` when negative), each missing child written as `#`, and the tokens separated by single commas, with no spaces and no trailing comma. The empty tree is `"#"`. `deserialize(data)` takes a string in that format and returns the tree it describes, so `deserialize(serialize(root))` rebuilds the same shape and values. Trees are given in level order, with null for a missing child, and the checks read rebuilt trees back the same way.
+
+```text
+Example 1
+  input:  serialize, root = [7, 3, 9, null, 4, 8]
+  output: "7,3,#,4,#,#,9,8,#,#,#"
+
+Example 2
+  input:  deserialize, data = "5,-2,#,#,#"
+  output: [5, -2]      (5, its left child -2 with two missing children, then 5's missing right child)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-1000 ≤ val ≤ 1000`, and `deserialize` only receives strings that `serialize` could produce.
+
+**Approach.** Preorder alone cannot be decoded, because it does not say where a subtree ends; writing an explicit marker for every missing child fixes that. With the markers, a tree of `n` nodes is exactly `2n + 1` tokens, and reading them back is the same recursion as writing them: read a token, return null if it is `#`, otherwise make a node and read its left subtree and then its right one. A shared cursor over the tokens is all the state that recursion needs, since each call consumes exactly the tokens of its own subtree. Level order with markers also works, but it needs a queue on both sides; the preorder version is shorter to write under pressure. Java, Kotlin and Python read the tokens through an iterator, while TypeScript, C# and Go keep an index.
+
+<Solutions n="120" />
+
+**Complexity.** O(n) time for each function, O(n) space for the tokens and the string, plus O(h) for the call stack.
+
+**Common mistake.** Leaving out the null markers: `[1, 2]` and `[1, null, 2]` both serialize to `"1,2"`, and no deserializer can tell which one it was given.
+
+## 121 · Maximum Path Sum
+
+**Trees · Hard**
+
+A path in a binary tree is a sequence of nodes where each consecutive pair is joined by an edge and no node appears twice; it can start and end anywhere, and it may go up through a node and down again on the other side. It has at least one node. Given the root of a non-empty tree whose values may be negative, return the largest sum of the values on any path. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [6, -8, 3, null, 9, -1, 4]
+  output: 14           (9 → -8 → 6 → 3 → 4; crossing the -8 pays off)
+
+Example 2
+  input:  root = [-3, -1, -2]
+  output: -1           (every value is negative, so the best path is one node)
+```
+
+Constraints: `1 ≤ number of nodes ≤ 3 × 10⁴`, the depth is at most 500, `-1000 ≤ val ≤ 1000`.
+
+**Approach.** Every path has one highest node, where it turns: the simple solution tries each node as that top and computes the best downward path from each of its children separately, which repeats the same subtree work and costs O(n·h). One post-order walk computes it once. For each node, `gain(node)` returns the best sum of a path that starts at the node and goes down one side; a child's gain below zero is replaced by 0, because the path can simply leave that branch out. With the two children's gains, the best path that turns at this node is `val + left + right`, which updates the running answer, while the parent can only extend a path through one side, so the function returns `val + max(left, right)`. Start the answer at the root's value, not 0, so an all-negative tree is answered correctly. Java has no local functions, so its running best lives in a one-element array that the helper updates.
+
+<Solutions n="121" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Starting the best sum at 0: a tree whose values are all negative, like Example 2, then returns 0, the sum of an empty path, instead of -1.
+
+## 122 · A Word Dictionary With Wildcards
+
+**Trees · Hard**
+
+Design `WordDictionary`, a set of words with two operations: `addWord(word)` stores a word, and `search(pattern)` returns `true` if some stored word matches the pattern. A pattern matches a word of the same length when every letter is equal, and a `.` in the pattern matches any one letter. Only whole words match: a stored word that merely starts with the pattern does not. Adding a word twice is the same as adding it once, and a new dictionary is empty.
+
+```text
+Example 1
+  calls:   addWord("loan"), addWord("lean"), search("l.an"), search("lo"), search("l...")
+  returns: true, false, true   (from the three searches; "lo" is only a prefix)
+
+Example 2
+  calls:   search("."), addWord("a"), search("."), search("b")
+  returns: false, true, false
+```
+
+Constraints: words have `1` to `25` lowercase letters `a`–`z`; patterns have `1` to `25` characters, each a lowercase letter or `.`, with at most 3 dots; at most `10⁴` calls in total.
+
+**Approach.** The simple solution keeps a list of words and compares the pattern with each one: O(n·L) per search for `n` words of length up to `L`. A trie shares the work between words with a common beginning. Each node has 26 child slots and an `isWord` flag; `addWord` walks down from the root, creating the missing nodes, and marks the last one. `search` walks the same way, one pattern character per level: a letter follows one child, and a `.` tries every child that exists, returning as soon as one branch matches. At the end of the pattern the answer is the node's flag, not merely the fact that the node exists, which is what keeps prefixes from matching.
+
+<Solutions n="122" />
+
+**Complexity.** `addWord` is O(L). `search` is O(L) for a pattern without dots and at most O(26ᵈ × L) with `d` dots, since every dot can branch to all 26 letters. O(total letters added × 26) space for the trie.
+
+**Common mistake.** Returning `true` when the walk reaches the end of the pattern instead of returning that node's `isWord` flag: after `addWord("loan")`, `search("lo")` then answers `true`.
