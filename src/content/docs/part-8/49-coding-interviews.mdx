@@ -207,3 +207,357 @@ Then the edge cases. With `[4, 4, 1]` and 8, at `j = 0` you need 4, which isn't 
 <InterviewLens>
 "How would you test this?" Name the cases before writing any of them: the two examples, no pair, an empty list, a duplicate price that must pair with itself only at another index, and the tie-breaking rule when several pairs work. Then, if there is time, write them the way the language sections show. Testing your own code without being asked is one of the clearest signals you can give.
 </InterviewLens>
+
+## TypeScript
+
+For most readers of this book TypeScript is the home language, so this section is the one to read fastest. The gap is not the language but the editor. Every day it fills in method names, warns you about `undefined` and imports what you need. In an interview, you have to remember those things yourself. The section also covers the parts of the language that people rarely use: TypeScript has no heap and no deque, its numbers are all floating point, and its default sort compares numbers as strings. Those are the places where fluent TypeScript developers lose time.
+
+Everything here runs on Node 22.18 or later with `node file.ts`, the way the files in `apps/interview-bank` do. Chapter 3 covers the runtime; this section covers only what you type in the round.
+
+### Syntax by heart
+
+These are the structures the problem bank uses. Learn the left column well enough to type it without thinking, and know the cost of each operation, because you will say it in step 6.
+
+| Structure | Write it as | Operations to know |
+| --- | --- | --- |
+| List | `const a: number[] = []` | `push`, `pop`, `a[i]`, `a.at(-1)`, `a.length`: O(1). `includes`, `indexOf`, `splice`, `unshift`: O(n). `shift`: O(n) in the worst case |
+| Map | `new Map<string, number>()` | `get`, `set`, `has`, `delete`, `size`: O(1) average. Iterates in insertion order |
+| Set | `new Set<number>()` | `add`, `has`, `delete`, `size`: O(1) average |
+| Stack | an array | `push`, `pop`, `at(-1)` to peek |
+| Queue | an array plus a head index | `push` to enqueue, `a[head++]` to dequeue: O(1) |
+| Deque | an array plus a head index | Pop from the back with `pop`, from the front with `head++`; works while you never add at the front |
+| Heap | none built in | Write the `MinHeap` below: `push` and `pop` in O(log n) |
+| Grid | `Array.from({ length: rows }, () => new Array(cols).fill(0))` | `grid[r][c]` |
+| Pair | a tuple, `[number, string]` | Destructure with `const [count, title] = pair` |
+
+In code, the everyday moves look like this:
+
+```ts
+const copies: number[] = [];
+copies.push(4);
+copies.push(9);
+const last = copies.pop();          // 9
+const top = copies.at(-1);          // 4, without removing it
+
+const loansPerMember = new Map<string, number>();
+loansPerMember.set("ana", (loansPerMember.get("ana") ?? 0) + 1);   // count with a default
+
+const seen = new Set<number>([3, 1, 3]);   // {3, 1}
+seen.add(7);
+
+const key = (r: number, c: number) => `${r},${c}`;   // a grid cell as a Set or Map key
+const visited = new Set<string>([key(0, 1)]);
+```
+
+The last two lines matter more than they look. `Map` and `Set` compare object keys by reference, so `new Set([[0, 1]]).has([0, 1])` is `false`: the two arrays are different objects. Whenever a key has more than one part, turn it into a string.
+
+A queue is the one structure you have to build on the spot. The language does not promise that `shift` is O(1), and an engine may move every remaining element on each call, which turns a breadth-first search into O(n²). Keep a head index instead and let the array grow:
+
+```ts
+function bfsOrder(graph: Map<number, number[]>, start: number): number[] {
+  const order: number[] = [];
+  const seen = new Set<number>([start]);
+  const queue: number[] = [start];
+  let head = 0;
+  while (head < queue.length) {
+    const node = queue[head++];
+    order.push(node);
+    for (const next of graph.get(node) ?? []) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return order;
+}
+```
+
+The array keeps every node it has ever held, so memory is O(n) for the whole search instead of the size of the frontier. In an interview that is a fine trade, and you should say so.
+
+<Pitfall title="One row, shared by the whole grid">
+`new Array(rows).fill(new Array(cols).fill(0))` creates one inner array and puts the same reference in every row, so writing `grid[0][0] = 1` changes the first cell of every row. `fill` copies the value it is given, and for an array that value is a reference. Use `Array.from` with a function, which builds a new row each time.
+</Pitfall>
+
+### Strings and characters
+
+There is no `char` type. `s[i]` is a string of length one, strings are immutable, and `s.length` counts UTF-16 code units, not letters. The bank uses ASCII input unless a problem says otherwise, so you can index freely. Ask about it when the input could be any text.
+
+```ts
+const s = "Shelfwise";
+s[0];                         // "S"
+s.at(-1);                     // "e"
+s.slice(1, 4);                // "hel", end index excluded
+s.charCodeAt(1) - 97;         // 7: the letter's position in the alphabet ("a" is 97)
+String.fromCharCode(97 + 7);  // "h"
+"  two   words ".trim().split(/\s+/);   // ["two", "words"]
+"7".padStart(3, "0");         // "007"
+[..."stressed"].reverse().join("");     // "desserts"
+```
+
+Counting letters with a fixed array of 26 is faster to write than a `Map` and is the standard move for anagram problems:
+
+```ts
+function letterCounts(word: string): number[] {
+  const counts = new Array<number>(26).fill(0);
+  for (const ch of word) counts[ch.charCodeAt(0) - 97]++;
+  return counts;
+}
+```
+
+For character classes, compare strings directly or use a short regular expression: `ch >= "0" && ch <= "9"` for a digit, `ch.charCodeAt(0) - 48` for its value, and `/[a-z]/i.test(ch)` for a letter. To build a long string, push the pieces into an array and `join` them at the end. Repeated `+=` is also fast in V8, but the array version reads the same in every language in this chapter.
+
+### Sorting with a comparator
+
+`sort` without arguments converts every element to a string and compares those, which is right for words and wrong for numbers:
+
+```ts
+[10, 9, 1].sort();                     // [1, 10, 9]
+nums.sort((a, b) => a - b);            // ascending, in place
+const desc = nums.toSorted((a, b) => b - a);   // descending, new array, nums unchanged
+```
+
+A comparator returns a negative number, zero or a positive number. Chain keys with `||`, which works because a tie returns `0` and `0` is falsy:
+
+```ts
+type Loan = { member: string; due: number };
+loans.sort((a, b) => a.due - b.due || (a.member < b.member ? -1 : a.member > b.member ? 1 : 0));
+```
+
+The string comparison is written out because `a - b` does not work on strings. `a.localeCompare(b)` is shorter but depends on locale rules, so for problems that specify an order on plain ASCII, the explicit comparison is the safer choice. `sort` is stable, so elements that compare equal keep their original order. It sorts in place and returns the same array; `toSorted` returns a copy.
+
+<Pitfall title="The default sort on numbers">
+`ages.sort()` passes every test whose numbers have the same number of digits, then fails on `[9, 10]`. Always pass a comparator when sorting numbers, even when the examples happen to work without one.
+</Pitfall>
+
+### Iteration
+
+```ts
+for (let i = 0; i < titles.length; i++) { /* index and value */ }
+for (const t of titles) { /* values */ }
+for (const [i, t] of titles.entries()) { /* index and value, no counter to get wrong */ }
+for (let i = titles.length - 1; i >= 0; i--) { /* backwards */ }
+for (const [title, count] of stock) { /* a Map, in insertion order */ }
+for (const [title, count] of Object.entries(counts)) { /* a plain object */ }
+```
+
+Do not use `for...in` on arrays: it walks the property names, which are strings, so `i + 1` becomes `"01"`. `forEach` cannot `break` or `return` from the outer function, so in an interview use `for...of`, which can.
+
+### Numbers
+
+TypeScript has one `number` type, a 64-bit float. Integers are exact up to `Number.MAX_SAFE_INTEGER` (2⁵³ − 1, about 9 × 10¹⁵), so the overflow bugs of the other five languages do not happen, but precision loss does: `2 ** 53 + 1 === 2 ** 53` is `true`. When a problem multiplies large values, say that you would switch to `bigint` (`2n ** 64n`) or keep the numbers as strings.
+
+Division and remainder need care:
+
+| You want | Write | Note |
+| --- | --- | --- |
+| Integer division toward zero | `Math.trunc(a / b)` | `Math.trunc(-7 / 2)` is `-3`, as in Java, C#, Kotlin and Go |
+| Integer division rounding down | `Math.floor(a / b)` | `-4`, the same as Python's `//` |
+| Remainder | `a % b` | Takes the sign of `a`: `-7 % 3` is `-1` |
+| Always-positive modulo | `((a % m) + m) % m` | `2` for `-7` and `3`, as Python's `%` gives |
+| Halve an index | `mid >> 1` | Bitwise operators truncate to 32 bits; fine for indices, wrong for large values |
+| Sentinels | `Infinity`, `-Infinity` | Start a minimum at `Infinity` |
+
+For parsing, `Number(s)` rejects trailing junk (`Number("12a")` is `NaN`) but accepts the empty string as `0`, while `Number.parseInt(s, 10)` stops at the first non-digit and returns `12`. When a problem defines what a valid number looks like, such as problem 038, parse it yourself character by character.
+
+### Errors
+
+Throw `Error` or a subclass of it. Under `strict`, the variable in `catch` has the type `unknown`, so narrow it before using it:
+
+```ts
+class NotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
+
+const shelf = new Map<number, string>([[1, "Dune, copy 1"]]);
+
+function findCopy(id: number): string {
+  const copy = shelf.get(id);
+  if (copy === undefined) throw new NotFoundError(`copy ${id} not found`);
+  return copy;
+}
+
+function findCopyOrNull(id: number): string | null {
+  try {
+    return findCopy(id);
+  } catch (err) {
+    if (err instanceof NotFoundError) return null;
+    throw err;          // anything else is a real failure: don't swallow it
+  }
+}
+```
+
+In algorithm rounds, ask in step 2 what to return when there is no answer. The bank's convention is an empty value (an empty array, `-1`, `null`) unless the problem says to throw, because that is easier to test and to explain.
+
+### Concurrency basics
+
+Node runs your code on one thread (Chapter 3). `async` functions do not run in parallel with each other; they take turns at every `await`. That makes concurrency questions in TypeScript about coordinating I/O, not about locks. The tools you need from memory are `Promise.all` to wait for several operations, `Promise.allSettled` when some may fail and you still want the rest, and a sleep:
+
+```ts
+import { setTimeout as sleep } from "node:timers/promises";
+
+const [book, member] = await Promise.all([loadBook(id), loadMember(memberId)]);
+await sleep(100);
+```
+
+The pattern most worth knowing is bounded concurrency, a fixed number of workers pulling from a shared list. Problem 199 builds it fully; this is its core:
+
+```ts
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+```
+
+Writing to `results[i]` keeps the output in input order whatever order the calls finish in. There is no lock around `next++` because nothing else can run between reading `next` and incrementing it: the only place a worker gives up the thread is the `await`.
+
+<InterviewLens>
+"Two workers share `next` with no lock. Is that a race?" Not in Node: a function runs until it reaches an `await`, so the check and the increment happen as one step. Say what would break it: putting an `await` between `const i = next` and `next++`. Then say that in Go, Java, Kotlin or C# the same code would be a real data race, which is why those sections use a channel, an atomic counter or a concurrent queue instead.
+</InterviewLens>
+
+### The heap
+
+TypeScript has no priority queue, so any problem that needs "the smallest so far" (the k closest points, merging k lists, Dijkstra's algorithm) starts with you writing one. Learn this version. It is short enough to type in three minutes and has nothing clever in it: an array, a `less` function, a loop that moves an item up after `push`, and a loop that moves an item down after `pop`.
+
+```ts
+class MinHeap<T> {
+  items: T[] = [];
+  less: (a: T, b: T) => boolean;
+
+  constructor(less: (a: T, b: T) => boolean) {
+    this.less = less;
+  }
+
+  get size(): number {
+    return this.items.length;
+  }
+
+  peek(): T | undefined {
+    return this.items[0];
+  }
+
+  push(item: T): void {
+    const a = this.items;
+    a.push(item);
+    let i = a.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (!this.less(a[i], a[parent])) break;
+      [a[i], a[parent]] = [a[parent], a[i]];
+      i = parent;
+    }
+  }
+
+  pop(): T | undefined {
+    const a = this.items;
+    if (a.length === 0) return undefined;
+    const top = a[0];
+    const end = a.pop()!;
+    if (a.length > 0) {
+      a[0] = end;
+      let i = 0;
+      while (true) {
+        const left = 2 * i + 1;
+        const right = left + 1;
+        let smallest = i;
+        if (left < a.length && this.less(a[left], a[smallest])) smallest = left;
+        if (right < a.length && this.less(a[right], a[smallest])) smallest = right;
+        if (smallest === i) break;
+        [a[i], a[smallest]] = [a[smallest], a[i]];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+}
+```
+
+The children of index `i` are at `2i + 1` and `2i + 2`, and its parent is at `(i - 1) >> 1`. That one fact is the whole data structure. The same class gives you every heap the bank needs:
+
+```ts
+const minHeap = new MinHeap<number>((a, b) => a < b);
+const maxHeap = new MinHeap<number>((a, b) => a > b);
+const byDue = new MinHeap<[number, string]>((a, b) => a[0] < b[0]);   // priority first, then the value
+```
+
+Two details are easy to get wrong. In `pop`, check whether the array is empty again after removing the last element, or a heap of size one puts its only item back. In the loops, compare with `less` and not with `<`, or the max-heap silently becomes a min-heap. If time is short, say that you would use this class and ask whether you may treat it as given; some interviewers allow that and want to see the algorithm that uses it.
+
+The class uses plain fields instead of a constructor parameter property (`constructor(private less: …)`). That is deliberate: parameter properties, `enum` and `namespace` are not erasable syntax, and `node file.ts` refuses to run them.
+
+### Standard-library tools that save time
+
+| Tool | What it saves |
+| --- | --- |
+| `Array.from({ length: n }, (_, i) => i)` | A range, or any array built from its index |
+| `[...new Set(a)]` | Removing duplicates while keeping first-seen order |
+| `a.reduce((sum, x) => sum + x, 0)` | A sum or a fold in one line; always pass the start value |
+| `a.at(-1)`, `a.findLast(f)`, `a.findLastIndex(f)` | Reading from the end without index arithmetic |
+| `a.toSorted(f)`, `a.toReversed()`, `a.with(i, x)` | Copies, so you do not change an input you were asked not to change |
+| `Map.groupBy(items, f)` | Grouping into a `Map` of arrays (Node 21 and later) |
+| `setA.intersection(setB)`, `union`, `difference` | Set algebra without loops (Node 22 and later) |
+| `structuredClone(x)` | A deep copy of arrays and plain objects |
+| `Math.max(best, x)` in a loop | The maximum; `Math.max(...a)` throws a `RangeError` on very large arrays |
+
+<FromTS title="When the interviewer reads TypeScript">
+Type the function signature and the data structures (`new Map<string, number>()`), and let inference handle the rest. Under `strict`, `a[i]` has the element type even when `i` is out of range, so the compiler will not catch an off-by-one; your trace in step 5 has to. Use `!` only where you have just checked, as in `heap.pop()!` inside `while (heap.size > 0)`, and say why it is safe.
+</FromTS>
+
+### Mistakes when coming from the other languages
+
+If TypeScript is not your daily language, these are the habits that will catch you. Each one gives a wrong answer instead of an error, which makes it expensive under time pressure.
+
+**From Python.** `a[-1]` is `undefined`; use `a.at(-1)`. There is no `//`: use `Math.floor`, and remember that `%` keeps the sign of the left operand. `if (counts.get(k))` treats a count of `0` as missing; compare with `undefined` or use `has`. There is no `defaultdict`: write `map.set(k, (map.get(k) ?? 0) + 1)`. Tuples and lists compare by reference, so a `Set` of `[r, c]` pairs never finds anything. `x in arr` checks indices, not values; use `includes`.
+
+**From Java, C# and Kotlin.** Objects have no `equals` or `hashCode` to override, so composite keys must be strings. `==` converts types before comparing; always write `===`. Reading past the end of an array returns `undefined` instead of throwing, and the bug shows up later as `NaN`. `new Array(n)` holds empty slots, not zeros, until you `fill` it. `const` stops you reassigning the variable, not changing the array.
+
+**From Go.** A missing `Map` key gives `undefined`, not a zero value, so add `?? 0`. There are no multiple return values: return a tuple and destructure it. Arrays and objects are always shared by reference, like slices and maps, and never copied on assignment as Go arrays and structs are; copy with `[...a]` or `structuredClone`. `for (const x of a)` gives values; use `entries()` when you need the index.
+
+### Writing and running a quick test
+
+Every file in the bank ends with its own checks, using `node:assert/strict`:
+
+```ts
+import assert from "node:assert/strict";
+
+assert.deepEqual(twoPrices([12, 7, 3, 9, 5], 12), [2, 3]);
+assert.deepEqual(twoPrices([1, 2], 10), []);
+assert.throws(() => findCopy(2), NotFoundError);
+console.log("002 ok");
+```
+
+`deepEqual` compares arrays and objects by content; `equal` uses `===` and fails on two arrays with the same values. With the `strict` import, both are the strict versions, so `1` and `"1"` are different. `node p002_two_prices.ts` runs the file; an assertion that fails throws and prints the expected and actual values.
+
+When you want named tests, `node:test` is built in and needs no installation:
+
+```ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { twoPrices } from "./p002_two_prices.ts";
+
+const cases: [number[], number, number[]][] = [
+  [[12, 7, 3, 9, 5], 12, [2, 3]],
+  [[4, 4, 1], 8, [0, 1]],
+  [[1, 2], 10, []],
+  [[], 5, []],
+];
+
+test("twoPrices", () => {
+  for (const [prices, budget, want] of cases) {
+    assert.deepEqual(twoPrices(prices, budget), want, `twoPrices([${prices}], ${budget})`);
+  }
+});
+```
+
+`node --test` finds files named `*.test.ts` and runs them. The table of cases is the same shape the Go section uses, and the message argument tells you which row failed. In a shared editor that cannot run code, write the same table as comments and trace each row by hand, as in step 5.
