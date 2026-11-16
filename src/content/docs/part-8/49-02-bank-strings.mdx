@@ -139,3 +139,264 @@ Constraints: `0 ≤ source.length, target.length ≤ 5 × 10⁴`, letters `a` to
 **Complexity.** O(n) time, O(1) space: each map holds at most 26 entries.
 
 **Common mistake.** Keeping only the forward map, which accepts `"bell"` and `"cool"` because nothing stops both `e` and `l` from mapping to `o`.
+
+## 031 · Add Two Binary Strings
+
+**Strings · Easy**
+
+Two non-negative integers are written in binary as strings of `0` and `1`, most significant bit first, with no leading zeros (zero itself is `"0"`). Return their sum as a binary string in the same format. The strings can be far longer than any built-in integer type, so the answer must be built digit by digit.
+
+```text
+Example 1
+  input:  a = "1011", b = "111"
+  output: "10010"       (11 + 7 = 18)
+
+Example 2
+  input:  a = "1111", b = "1"
+  output: "10000"       (the carry adds a digit)
+```
+
+Constraints: `1 ≤ a.length, b.length ≤ 10⁴`, both contain only `0` and `1`, no leading zeros except `"0"`.
+
+**Approach.** Converting both strings to integers, adding and converting back is one line in Python, but elsewhere a 64-bit integer overflows once a string passes 63 digits (TypeScript numbers lose precision past 53), and the conversion skips the carry logic the problem is about. Do the addition you would do on paper: one index at the end of each string and a carry. In each step add the carry and whichever digits are left, write `total % 2` and carry `total / 2`, and keep going while either string has digits or the carry is 1. The digits come out least significant first, so collect them and reverse once at the end instead of prepending, which would copy the string on every step.
+
+<Solutions n="031" />
+
+**Complexity.** O(n + m) time, O(max(n, m)) space for the result.
+
+**Common mistake.** Stopping when both indices run out and forgetting the last carry, which returns `"0"` instead of `"10"` for `"1"` plus `"1"`.
+
+## 032 · Run-Length Encode a String
+
+**Strings · Easy**
+
+Compress a string by replacing each run of identical consecutive characters with the character followed by the length of the run, written in decimal. Every run is written this way, including runs of length 1, and runs longer than 9 use as many digits as needed. Uppercase and lowercase letters are different characters. The input contains only letters, so the encoding can always be read back, and an empty string encodes to an empty string.
+
+```text
+Example 1
+  input:  s = "aaabccdddd"
+  output: "a3b1c2d4"
+
+Example 2
+  input:  s = "zzzzzzzzzzzz"
+  output: "z12"         (twelve z's: the count has two digits)
+```
+
+Constraints: `0 ≤ s.length ≤ 10⁵`, `s` contains only `a`–`z` and `A`–`Z`.
+
+**Approach.** There is no slow version worth coding here; the work is getting the loop boundaries right. Keep `i` at the start of the current run and move a second index `j` forward while `s[j]` equals `s[i]`. When it stops, the run is `j - i` long, so append `s[i]` and that count, and jump `i` to `j`. Because the inner loop ends at the end of the string as well as at a change of character, the last run is written by the same code as every other run, with no extra step after the loop. Build the output with the language's string builder (or a list joined at the end), since appending to an immutable string in a loop copies it each time.
+
+<Solutions n="032" />
+
+**Complexity.** O(n) time (each index only moves forward), O(n) space for the output.
+
+**Common mistake.** Writing a run only when the character changes, inside a single loop, and forgetting to write the final run after it, which turns `"abb"` into `"a1"`.
+
+## 033 · Is It a Rotation?
+
+**Strings · Easy**
+
+A rotation of a string moves some number of characters from its front to its back without changing their order: the rotations of `"parcel"` include `"arcelp"`, `"celpar"` and `"parcel"` itself. Given two strings `a` and `b`, return `true` if `b` is a rotation of `a` and `false` otherwise. Two empty strings count as rotations of each other.
+
+```text
+Example 1
+  input:  a = "parcel", b = "celpar"
+  output: true          (move "par" to the back)
+
+Example 2
+  input:  a = "parcel", b = "parcle"
+  output: false         (same letters, but no rotation gives this order)
+```
+
+Constraints: `0 ≤ a.length, b.length ≤ 10⁴`, both contain only printable ASCII characters.
+
+**Approach.** The simple solution builds each of the `n` rotations, `a.slice(k) + a.slice(0, k)`, and compares it with `b`: O(n²) time. The idea that removes the loop is that `a + a` contains every rotation of `a` as a substring (rotation `k` starts at position `k`), and nothing else of length `n`. So `b` is a rotation exactly when the two strings have the same length and `b` occurs in `a + a`, which is one call to the language's substring search: `includes`, `Contains`, `contains`, `in` or `strings.Contains`. The length check is not optional, because a shorter `b` can appear inside `a + a` without being a rotation.
+
+<Solutions n="033" />
+
+**Complexity.** O(n) extra space for `a + a`. The time is that of the substring search on a text of length `2n`: O(n) for a linear algorithm such as Knuth–Morris–Pratt, up to O(n²) for the simple search of 034. Libraries mix strategies, so say which one you are assuming.
+
+**Common mistake.** Leaving out the length check: `"a"` occurs in `"aaaa"`, so `"a"` is wrongly reported as a rotation of `"aa"`.
+
+## 034 · Find a Needle in a Haystack
+
+**Strings · Easy**
+
+Given two strings, `haystack` and `needle`, return the index in `haystack` where the first occurrence of `needle` starts, or `-1` if `needle` does not occur. An empty `needle` occurs at index `0` of every string, including the empty one. Write the search yourself: do not call the language's `indexOf`, `IndexOf`, `find` or `strings.Index`.
+
+```text
+Example 1
+  input:  haystack = "hold-14-seat-14", needle = "14"
+  output: 5             (the first "14"; the second starts at 13)
+
+Example 2
+  input:  haystack = "parcel", needle = "pulse"
+  output: -1
+```
+
+Constraints: `0 ≤ haystack.length, needle.length ≤ 10⁴`, both contain only printable ASCII characters.
+
+**Approach.** Say first that the library call is the one-line answer, then write what it does. Try every start position from `0` to `n - m` (where `n` and `m` are the two lengths), compare `needle` with the haystack character by character, and stop at the first mismatch; if all `m` characters match, return the start. The loop condition `start + m ≤ n` covers the edge cases with no extra code: a needle longer than the haystack runs no iterations, and an empty needle matches at `0`. This is O(n × m) in the worst case, for inputs like `"aaaa…ab"` and `"aaab"`, where each start matches almost the whole needle before failing. If the interviewer asks for linear time, the follow-up is Knuth–Morris–Pratt, which precomputes for each prefix of the needle how far it can fall back, so the search never re-reads a haystack character it has already matched.
+
+<Solutions n="034" />
+
+**Complexity.** O(n × m) time in the worst case and close to O(n) on typical text, O(1) space.
+
+**Common mistake.** Writing the loop as `start < n - m`, which never tries the last possible start, so `"c"` is not found in `"abc"`.
+
+## 035 · Shift Cipher
+
+**Strings · Easy**
+
+Encode a message by shifting every English letter `shift` places forward in the alphabet, wrapping from `z` back to `a`. Lowercase letters stay lowercase and uppercase stay uppercase; every other character (digits, spaces, punctuation) is copied unchanged. A negative `shift` moves letters backwards, so shifting by `-3` decodes a message shifted by `3`, and the shift can be larger than 26 in either direction.
+
+```text
+Example 1
+  input:  text = "Hold seat 14!", shift = 3
+  output: "Krog vhdw 14!"
+
+Example 2
+  input:  text = "Abc", shift = -1
+  output: "Zab"         (A wraps back to Z)
+```
+
+Constraints: `0 ≤ text.length ≤ 10⁵`, `text` is ASCII, `-10⁹ ≤ shift ≤ 10⁹`.
+
+**Approach.** Shifting one place at a time, `shift` times, would be O(n × |shift|), and a shift of 10⁹ makes that hopeless. Shifting by 26 changes nothing, so reduce the shift once to a value `k` between 0 and 25, then map each letter with arithmetic: its position in the alphabet is `ch - 'a'`, the new position is `(ch - 'a' + k) % 26`, and adding `'a'` back gives the letter (the same with `'A'` for capitals). In TypeScript, C#, Java, Kotlin and Go the remainder keeps the sign of the left operand, so `-1 % 26` is `-1` and the reduction has to be written `((shift % 26) + 26) % 26`; in Python `shift % 26` is already between 0 and 25. Work on a copy of the characters (a character array, a byte slice or a list) and turn it back into a string once.
+
+<Solutions n="035" />
+
+**Complexity.** O(n) time, O(n) space for the encoded copy.
+
+**Common mistake.** Reducing the shift with a plain `shift % 26` outside Python: for `shift = -1` the letter `A` becomes the character before `A` in ASCII, `@`, instead of `Z`.
+
+## 036 · Reverse the Words of a Sentence
+
+**Strings · Easy**
+
+A sentence is a string of words separated by spaces, where a word is any run of characters other than the space. There may be several spaces between two words and spaces at either end. Return the words in reverse order, separated by exactly one space, with no space at the start or the end. A sentence with no words gives an empty string.
+
+```text
+Example 1
+  input:  sentence = "seat 14 is free"
+  output: "free is 14 seat"
+
+Example 2
+  input:  sentence = "  return   the copy "
+  output: "copy the return"   (extra spaces disappear)
+```
+
+Constraints: `0 ≤ sentence.length ≤ 10⁴`, the only whitespace character is the space.
+
+**Approach.** The direct solution is three steps, and the vocabulary is the whole problem: split into words, reverse the list, join with single spaces. The split must drop the empty pieces that runs of spaces produce, and each language says that differently: Python's `split()` with no argument and Go's `strings.Fields` drop them by themselves, C# needs `StringSplitOptions.RemoveEmptyEntries`, and TypeScript, Java and Kotlin split on `" "` and filter out the empty strings. If the interviewer forbids `split`, the same result comes from scanning from the right: skip spaces, find where the word starts, append it, and repeat, which is also O(n).
+
+<Solutions n="036" />
+
+**Complexity.** O(n) time, O(n) space for the words and the result.
+
+**Common mistake.** Trusting Java's `split(" ")` to clean up: it drops trailing empty strings but keeps the leading ones, so `"  return the copy"` comes back as `"copy the return  "` with two trailing spaces.
+
+## 037 · Numbers to Roman Numerals
+
+**Strings · Medium**
+
+Convert a whole number between 1 and 3999 to Roman numerals. The symbols are `I` 1, `V` 5, `X` 10, `L` 50, `C` 100, `D` 500 and `M` 1000, written from largest to smallest and added up. Six pairs are written subtractively instead, a smaller symbol before a larger one: `IV` 4, `IX` 9, `XL` 40, `XC` 90, `CD` 400 and `CM` 900. No symbol is repeated more than three times in a row, so 4 is `IV`, never `IIII`.
+
+```text
+Example 1
+  input:  n = 2026
+  output: "MMXXVI"
+
+Example 2
+  input:  n = 1994
+  output: "MCMXCIV"     (1000 + 900 + 90 + 4)
+```
+
+Constraints: `1 ≤ n ≤ 3999`.
+
+**Approach.** One way is to treat each decimal digit separately with a table of the ten patterns for units, tens, hundreds and thousands, which works but means writing forty strings correctly from memory. Shorter: put the seven symbols and the six subtractive pairs in one table of thirteen values, sorted from 1000 down to 1. Walk the table and, while `n` is at least the current value, append its symbol and subtract it. Because `900` comes before `500` and `400` before `100`, the greedy choice always produces the subtractive form when it applies, and the rule "at most three in a row" follows by itself. Keep the values and symbols in two parallel arrays (or pairs) so the order is explicit.
+
+<Solutions n="037" />
+
+**Complexity.** O(1) time and space: `n` is at most 3999, so the result has at most 15 symbols (`MMMDCCCLXXXVIII`, 3888), and the table has 13 entries.
+
+**Common mistake.** A table with only the seven single symbols, which turns 4 into `"IIII"` and 1994 into `"MDCCCCLXXXXIIII"`.
+
+## 038 · Parse an Integer Strictly
+
+**Strings · Medium**
+
+A SeatLock endpoint reads the number of seats to hold from a query parameter, and it must reject anything that is not exactly an integer. A valid string is an optional single `+` or `-`, followed by one or more ASCII digits `0`–`9`, and nothing else: no spaces anywhere, no decimal point, no second sign. Leading zeros are allowed, and `"-0"` is `0`. The value must fit in a signed 32-bit integer, from `-2147483648` to `2147483647`. Return the value for a valid string; for anything else return no value: `null` in TypeScript, C#, Java and Kotlin, `None` in Python, and `(0, false)` in Go. Parse it yourself, character by character, without the language's `parseInt`, `int.Parse`, `Integer.parseInt`, `toInt`, `strconv.Atoi` or `int()`.
+
+```text
+Example 1
+  input:  s = "-2147483648"
+  output: -2147483648   (the smallest 32-bit integer is valid)
+
+Example 2
+  input:  s = "2147483648"
+  output: null          (one more than the largest 32-bit integer)
+```
+
+Constraints: `0 ≤ s.length ≤ 100`, `s` is ASCII.
+
+**Approach.** The quick answer is the library parser, but library parsers accept things this definition rejects: `Number("")` is `0`, C#'s `int.Parse(" 42 ")` and Python's `int(" 42")` allow surrounding spaces, and Go's `strconv.Atoi` takes any value that fits a 64-bit `int`. So agree on the format in step 2 and write the loop, which is one pass. Read an optional sign; if nothing is left after it (or the string was empty), the input is invalid. Reject every remaining character that is not between `'0'` and `'9'`, and fold each digit in with `value = value × 10 + digit`. Check the range after every digit rather than at the end, against `2147483647` for a positive number and `2147483648` for a negative one, so the accumulator never grows past about `2 × 10¹⁰` however long the string is: a 64-bit `long` in C# and Java (`Long` in Kotlin), Go's `int` (64 bits on the usual platforms), and plain numbers in TypeScript and Python are enough. In TypeScript, return `0 - value` rather than `-value` for a negative number, so that `"-0"` gives `0` and not `-0`.
+
+<Solutions n="038" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Accumulating in a 32-bit `int` and checking the range only after the loop: `"2147483648"` wraps around to `-2147483648` and is accepted as a valid number.
+
+## 039 · Longest Palindromic Stretch
+
+**Strings · Medium**
+
+Given a string of lowercase letters, return its longest contiguous stretch that reads the same forwards and backwards. A single letter is a palindrome, so any non-empty string has an answer of length at least 1. If several stretches share the maximum length, return the one that starts earliest. For an empty string, return an empty string.
+
+```text
+Example 1
+  input:  s = "xabbaracecarz"
+  output: "racecar"     ("abba" is a palindrome too, but shorter)
+
+Example 2
+  input:  s = "xyzzyabba"
+  output: "yzzy"        (ties with "abba"; "yzzy" starts first)
+```
+
+Constraints: `0 ≤ s.length ≤ 1000`, `s` contains only `a`–`z`.
+
+**Approach.** The simple solution checks every stretch: O(n²) of them, each checked in O(n), for O(n³). The repeated work is that a palindrome is a smaller palindrome with one equal letter added on each side, so grow palindromes outwards from their centre instead of checking each one from scratch. Every palindrome has a centre that is either a letter (odd length) or the gap between two letters (even length), giving `2n - 1` centres; from each, expand while the letters on both sides match, which finds the longest palindrome at that centre in O(n). A palindrome of length `L` around index `i` starts at `i - (L - 1) / 2` (integer division) in both cases. Visiting the centres from left to right and replacing the best only when a new one is strictly longer keeps the earliest stretch on a tie. Manacher's algorithm reaches O(n), but it is rarely expected in a round.
+
+<Solutions n="039" />
+
+**Complexity.** O(n²) time, O(1) extra space besides the returned string.
+
+**Common mistake.** Expanding only around letters, which handles odd lengths only: `"abba"` comes back as `"a"` instead of `"abba"`.
+
+## 040 · Pack and Unpack a List of Strings
+
+**Strings · Medium**
+
+A Parcel and Pulse worker sends batches of delivery notes to another service through a channel that carries one string per message. Write two functions: `pack`, which turns a list of strings into a single string, and `unpack`, which turns that string back into exactly the original list. The notes can contain any ASCII character, including spaces, digits and `#`, and can be empty. Use this format: for each string, its length in decimal, then `#`, then the string itself, with nothing between entries. An empty list packs to an empty string. `unpack` only receives strings produced by `pack`.
+
+```text
+Example 1
+  input:  words = ["truck 7", "", "door#2"]
+  output: pack   -> "7#truck 70#6#door#2"
+          unpack -> ["truck 7", "", "door#2"]
+
+Example 2
+  input:  words = ["parcel-12345"]
+  output: pack   -> "12#parcel-12345"   (the length can have several digits)
+```
+
+Constraints: `0 ≤ words.length ≤ 10⁴`, `0 ≤ words[i].length ≤ 200`, the strings are ASCII.
+
+**Approach.** The first idea is to join the strings with a separator such as `,` and split on it, but any separator can also appear inside a note, and an escaping scheme fixes that only at the cost of fiddly code in both directions. A length prefix makes the content irrelevant: `unpack` reads digits up to the first `#`, which is always the end of a length because a length has only digits, and then takes exactly that many characters without looking at them, so a `#` or a digit inside a note is never misread. Then the next entry starts. Read the length by accumulating digits (`length × 10 + digit`) as you scan, which saves a second pass and a call to the library parser. The ASCII constraint matters only when two languages exchange packed strings: a length counts UTF-16 units in TypeScript, C#, Java and Kotlin, bytes in Go and code points in Python.
+
+<Solutions n="040" />
+
+**Complexity.** O(N) time for each function, where N is the total length of all the strings, and O(N) space for the output.
+
+**Common mistake.** Splitting the packed string on `#` in `unpack`: `["door#2"]` packs to `"6#door#2"`, and splitting it gives three pieces instead of one note.
