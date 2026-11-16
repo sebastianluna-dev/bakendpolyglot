@@ -7,3 +7,267 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+Binary search throws away half of the remaining range with every comparison, so it finds a position among a million sorted values in about twenty steps, and it works on anything that switches from "no" to "yes" exactly once, such as the first failing build or the first number whose square is too big. Its bugs are almost all off-by-one bugs, so every solution in this topic uses one shape and nothing else: a half-open range `[lo, hi)`, the midpoint `lo + (hi - lo) / 2`, and a loop `while lo < hi` that sets `hi = mid` when the condition holds at `mid` and `lo = mid + 1` when it does not. When the loop ends, `lo` equals `hi` and is the first position where the condition holds, or the end of the range if it holds nowhere. Learn that loop once in each language; each problem then changes only the condition and what it does with `lo`.
+
+## 091 · Binary Search
+
+**Binary Search · Easy**
+
+Shelfwise gives every copy a numeric ID, and each branch keeps the IDs of the copies it holds in an array sorted in increasing order, with no repeats. Given that array and a `target` ID, return the position of `target` in the array, or `-1` if the branch does not hold that copy. An empty array holds nothing. The search must take O(log n) time.
+
+```text
+Example 1
+  input:  ids = [3, 8, 15, 21, 40, 57], target = 21
+  output: 3
+
+Example 2
+  input:  ids = [3, 8, 15, 21, 40, 57], target = 10
+  output: -1        (it would sit between 8 and 15)
+```
+
+Constraints: `0 ≤ ids.length ≤ 10⁵`, `1 ≤ ids[i], target ≤ 10⁹`, `ids` strictly increasing.
+
+**Approach.** The simple solution scans from the left until it finds the ID: O(n), and it ignores the order. One comparison with the middle element rules out half of the array: if `ids[mid] ≥ target`, the first ID that is at least `target` is at `mid` or to its left, and otherwise it is to the right. So keep the half-open range `[lo, hi)` that must contain that first position, starting with `[0, n)`, where `n` means "every ID is smaller", and shrink it: `hi = mid` when `ids[mid] ≥ target`, `lo = mid + 1` otherwise. When `lo == hi` the loop has found the position, and the target is there only if `lo < n` and `ids[lo] == target`. Searching for "the first ID ≥ target" instead of stopping on equality gives a loop with just two branches, and it is the same loop the rest of this topic reuses. TypeScript writes the midpoint as `lo + Math.floor((hi - lo) / 2)`, because `>> 1` truncates to 32 bits and breaks in problem 094, where the range reaches 2³¹.
+
+<Solutions n="091" />
+
+**Complexity.** O(log n) time, O(1) space.
+
+**Common mistake.** Mixing two templates, for example `hi = mid - 1` from the closed-range version with this loop's `while (lo < hi)`: the element at `mid` is skipped, and `[3, 8, 15]` with target 8 returns -1.
+
+## 092 · Where Would It Go?
+
+**Binary Search · Easy**
+
+Parcel and Pulse plans a truck's stops as an array of delivery deadlines, in minutes after midnight, sorted in non-decreasing order; several stops may share a deadline. Given the array and the `deadline` of a new stop, return the position where the new stop should be inserted so that the array stays sorted. If stops with the same deadline already exist, the new one goes before all of them, so the answer is the first position whose deadline is at least `deadline`. If there is no such position, the answer is the length of the array, which makes it 0 for an empty array.
+
+```text
+Example 1
+  input:  deadlines = [480, 540, 600, 720], deadline = 610
+  output: 3         (after 600, before 720)
+
+Example 2
+  input:  deadlines = [480, 540, 540, 600], deadline = 540
+  output: 1         (before both 540s)
+```
+
+Constraints: `0 ≤ deadlines.length ≤ 10⁵`, `0 ≤ deadlines[i], deadline < 1440`.
+
+**Approach.** A scan for the first deadline that is at least the new one is O(n). That position is exactly what the loop from problem 091 computes before its final equality check, so the whole solution is that loop returning `lo`. Starting `hi` at `n` is what makes "after every stop" a possible answer. The libraries have this search too: Python's `bisect.bisect_left` returns this position, and so does Go's `sort.Search(n, func(i int) bool { return a[i] >= x })`. Java's `Arrays.binarySearch` and C#'s `Array.BinarySearch` encode the insertion point in a negative result when the value is missing, but when it appears more than once they may return any of the equal positions, so they don't answer this question on their own.
+
+<Solutions n="092" />
+
+**Complexity.** O(log n) time, O(1) space.
+
+**Common mistake.** Writing the condition as `deadlines[mid] > deadline`, which finds the position after the equal deadlines: Example 2 returns 3 instead of 1.
+
+## 093 · The First Failing Build
+
+**Binary Search · Easy**
+
+Parcel and Pulse's routing service has `n` builds, numbered 1 to `n` in the order they were made. One commit broke a test: every build from that commit onwards fails, and every build before it passes. You are given `n` and a function `isBad(build)` that runs the test suite on one build and returns `true` if it fails. Return the number of the first failing build, or `-1` if no build fails. Running the suite is slow, so call `isBad` O(log n) times; the checks allow at most 10 calls for 1,000 builds.
+
+```text
+Example 1
+  input:  n = 5, isBad(b) is true for b ≥ 4
+  output: 4
+
+Example 2
+  input:  n = 3, isBad(b) is false for every build
+  output: -1
+```
+
+Constraints: `1 ≤ n ≤ 2 × 10⁹`.
+
+**Approach.** The simple solution tests builds 1, 2, 3 and so on until one fails: up to `n` calls. The answers of `isBad` are a run of `false` followed by a run of `true`, which is exactly what the topic's loop searches: the first position where the condition holds. Search the half-open range `[1, n + 1)`, where `n + 1` stands for "nothing fails"; it is never passed to `isBad`, because `mid` is always below `hi`. Each call halves the range, so the loop makes at most ⌊log₂ n⌋ + 1 calls, which is 31 for 2 × 10⁹ builds. The predicate is a function type in TypeScript, Kotlin, Go and Python, a `Func<int, bool>` in C# and an `IntPredicate` in Java, where you call it with `test`.
+
+<Solutions n="093" />
+
+**Complexity.** O(log n) time and calls to `isBad`, O(1) space.
+
+**Common mistake.** Computing the midpoint as `(lo + hi) / 2`: with `n = 2 × 10⁹` and the first failure at build 1,999,999,999, `lo + hi` passes 2³¹ − 1 once `lo` has moved up, so with a 32-bit `int` the sum wraps and `mid` becomes negative.
+
+## 094 · Integer Square Root
+
+**Binary Search · Easy**
+
+Parcel and Pulse stacks identical boxes on a pallet in square layers. Given `x` boxes, return the side of the largest square layer they can fill: the largest integer `k` with `k × k ≤ x`, which is the square root of `x` rounded down. Do not use the language's square root or power functions. Zero boxes give a side of 0.
+
+```text
+Example 1
+  input:  x = 17
+  output: 4         (a 4 × 4 layer uses 16 boxes; 5 × 5 would need 25)
+
+Example 2
+  input:  x = 36
+  output: 6
+```
+
+Constraints: `0 ≤ x ≤ 2³¹ − 1`.
+
+**Approach.** The simple solution tries `k = 0, 1, 2, …` until `k × k > x`: O(√x), about 46,000 steps for the largest `x`. The condition `k × k > x` is false for small `k` and true from some point on, so the topic's loop finds the first `k` where it holds, and the answer is the one before it. Search `[0, x + 1)`: `k = x + 1` always satisfies the condition, so it is a safe end of the range. The trap is the size of the numbers. `mid × mid` reaches about 4.6 × 10¹⁸ and `x + 1` reaches 2³¹, both beyond a 32-bit `int`, so C#, Java and Kotlin keep `lo`, `hi` and `mid` in `long`. Go's `int` is 64 bits on 64-bit platforms, Python's integers do not overflow, and in TypeScript the squares that large lose precision but stay far above `x`, so the comparison is still correct.
+
+<Solutions n="094" />
+
+**Complexity.** O(log x) time, about 31 steps, and O(1) space.
+
+**Common mistake.** Doing the arithmetic in 32-bit `int`: for `x = 2³¹ − 1`, `x + 1` wraps to −2³¹, the loop never runs and the function returns -1 instead of 46340; and with that fixed, `mid * mid` still overflows for every `mid` above 46340.
+
+## 095 · Search a Rotated Sorted Array
+
+**Binary Search · Medium**
+
+The departure board at a Parcel and Pulse depot lists the day's truck departures as minutes after midnight, all different. The board starts at the next departure and wraps around midnight, so the list is a sorted list that has been rotated: it increases, may drop once, and then increases again, and every value after the drop is smaller than every value before it. Given the board and a time `target`, return the position of the departure at that time, or `-1` if no truck leaves then. The board may not be rotated at all, and it may be empty. Use O(log n) time.
+
+```text
+Example 1
+  input:  times = [900, 1020, 1200, 60, 300, 480], target = 300
+  output: 4
+
+Example 2
+  input:  times = [900, 1020, 1200, 60, 300, 480], target = 600
+  output: -1
+```
+
+Constraints: `0 ≤ times.length ≤ 10⁵`, `0 ≤ times[i], target < 1440`, all values different.
+
+**Approach.** A scan finds the time in O(n). To stay in O(log n), split the board into its two sorted runs and search only the one that can hold the target. First find where the second run starts, as in problem 096: a value is in the second run exactly when it is at most the last value, a condition that is false before the drop and true after it, so the topic's loop finds the start. If `target` is at most the last value, it can only be in `[start, n)`; otherwise it can only be in `[0, start)`. A second search for the first value at least `target` in that run, plus an equality check, finishes the job, and two binary searches are still O(log n). There is a well-known version with a single loop that decides at each midpoint which half is sorted, but it has more branches to get wrong under pressure; this one reuses the same loop twice.
+
+<Solutions n="095" />
+
+**Complexity.** O(log n) time, O(1) space.
+
+**Common mistake.** Choosing the run by comparing `target` with the first value instead of the last: on a board that is not rotated, the start is 0 and the first run `[0, start)` is empty, so `[60, 300, 480]` with target 300 returns -1.
+
+## 096 · Minimum of a Rotated Sorted Array
+
+**Binary Search · Medium**
+
+Take the departure board from problem 095 again: departure times in minutes after midnight, all different, sorted and then rotated, possibly not at all. Return the earliest departure of the day, which is the smallest value on the board. The board has at least one departure, and the search must take O(log n) time.
+
+```text
+Example 1
+  input:  times = [900, 1020, 1200, 60, 300, 480]
+  output: 60
+
+Example 2
+  input:  times = [60, 300, 480]
+  output: 60        (not rotated)
+```
+
+Constraints: `1 ≤ times.length ≤ 10⁵`, `0 ≤ times[i] < 1440`, all values different.
+
+**Approach.** Taking the minimum of every value is O(n). Compare each value with the last one instead. Every value in the first run is greater than the last value and every value in the second run is at most the last value, so `times[i] ≤ last` is false for a while and then true until the end. The first position where it holds is the start of the second run, and that is the minimum, so the topic's loop with this condition is the whole solution. On a board that is not rotated, the condition holds everywhere and the loop returns position 0, which is right without a special case. The last value works as the reference because it is always in the run that holds the minimum.
+
+<Solutions n="096" />
+
+**Complexity.** O(log n) time, O(1) space.
+
+**Common mistake.** Comparing with the first value instead (`times[mid] < times[0]`): a board that is not rotated has no value below its first one, so the condition never holds, the loop ends at position `n` and the code reads past the end of `[60, 300, 480]`.
+
+## 097 · First and Last Position of a Value
+
+**Binary Search · Medium**
+
+Shelfwise lists a member's loans by due date, as an array of day numbers sorted in non-decreasing order; several loans can fall due on the same day. Given the array and a `day`, return `[first, last]`, the first and last positions holding that day, or `[-1, -1]` if no loan is due that day. The search must take O(log n) time, even when every loan is due on the same day.
+
+```text
+Example 1
+  input:  days = [3, 5, 5, 5, 8, 9], day = 5
+  output: [1, 3]
+
+Example 2
+  input:  days = [3, 5, 8], day = 6
+  output: [-1, -1]
+```
+
+Constraints: `0 ≤ days.length ≤ 10⁵`, `0 ≤ days[i], day ≤ 10⁹`.
+
+**Approach.** The simple solution finds any position holding `day` and walks outwards in both directions, which is O(n) when most loans share the day. Use two searches with one helper instead, `firstAtLeast(a, target)`, the loop from problem 092. The first position is `firstAtLeast(days, day)`, and if that is past the end or holds a different day, the answer is `[-1, -1]`. Because the values are integers, the first value at least `day + 1` is the first one greater than `day`, so the last position is `firstAtLeast(days, day + 1) - 1`. The constraint keeps `day + 1` from overflowing; if values could reach the `int` maximum, write a second helper whose condition is `a[mid] > target` instead.
+
+<Solutions n="097" />
+
+**Complexity.** O(log n) time, O(1) space.
+
+**Common mistake.** Reading `days[first]` without checking `first < days.length` first: for `[3, 5, 8]` and day 10, `first` is 3, one past the last position.
+
+## 098 · Find a Peak
+
+**Binary Search · Medium**
+
+A Parcel and Pulse truck records the altitude of its route every hundred metres, and two consecutive readings are never equal. A hilltop is a reading higher than its neighbours; the first and last readings have only one neighbour, and they are hilltops if they are higher than it. Return the position of any hilltop, in O(log n) time. At least one always exists, and any hilltop is accepted: the checks verify that the returned position is a hilltop, not which one it is.
+
+```text
+Example 1
+  input:  altitudes = [120, 135, 150, 140, 160, 155]
+  output: 2         (4 is also a hilltop; either answer is accepted)
+
+Example 2
+  input:  altitudes = [10, 20, 30]
+  output: 2         (the last reading only needs to beat 20)
+```
+
+Constraints: `1 ≤ altitudes.length ≤ 10⁵`, `-500 ≤ altitudes[i] ≤ 9000`, `altitudes[i] ≠ altitudes[i + 1]`.
+
+**Approach.** The simple solution returns the first position whose reading is higher than the next one, or the last position if there is none: O(n). Binary search works here even though the readings are not sorted, because of one fact. If the route goes down right after `mid` (`altitudes[mid] > altitudes[mid + 1]`), there is a hilltop at `mid` or to its left: walk left from `mid` while the reading on the left is higher, and you stop on a hilltop, at position 0 at the latest. If the route goes up after `mid`, the same argument puts a hilltop to the right of `mid`. So the loop keeps a range that always contains a hilltop and halves it each step. It is the topic's loop with `hi` starting at `n - 1` instead of `n`: the condition reads `altitudes[mid + 1]`, so `mid` must stay below the last position, and the last position itself is the answer when the route never goes down.
+
+<Solutions n="098" />
+
+**Complexity.** O(log n) time, O(1) space.
+
+**Common mistake.** Starting `hi` at `n` as in the other problems of this topic: for `[10, 20, 30]` the loop reaches `mid = 2` and reads `altitudes[3]`, past the end.
+
+## 099 · Search a Sorted Matrix
+
+**Binary Search · Medium**
+
+A Shelfwise branch keeps its call numbers in a grid, `shelves[r][c]`, where every shelf (row) has the same length. Each shelf is sorted from left to right, and the first call number on each shelf is greater than the last one on the shelf above. Given the grid and a `target`, return `true` if the target is on a shelf and `false` otherwise. The grid may have no shelves, or shelves of length 0. The search must take O(log(rows × cols)) time.
+
+```text
+Example 1
+  input:  shelves = [[1, 4, 7, 11], [15, 18, 21, 26], [30, 34, 40, 52]], target = 21
+  output: true
+
+Example 2
+  input:  shelves = [[1, 4, 7, 11], [15, 18, 21, 26], [30, 34, 40, 52]], target = 13
+  output: false
+```
+
+Constraints: `0 ≤ rows × cols ≤ 10⁴`, `0 ≤ shelves[r][c], target ≤ 10⁹`, all shelves the same length.
+
+**Approach.** Checking every cell is O(rows × cols), and walking from the top-right corner, left when the value is too big and down when it is too small, is O(rows + cols). The two ordering rules mean more than that: read row by row, the grid is one sorted array of `rows × cols` numbers. Position `i` of that array is `shelves[i / cols][i % cols]`, so the topic's loop runs over `[0, rows × cols)` without building the array, and an equality check at `lo` gives the answer. Searching first for the row and then inside it has the same complexity, but it is two loops instead of one.
+
+<Solutions n="099" />
+
+**Complexity.** O(log(rows × cols)) time, O(1) space.
+
+**Common mistake.** Dividing by the number of rows instead of the number of columns when turning a position into a cell: in the 3 × 4 grid of the examples, position 11 (the value 52) becomes row `11 / 3 = 3`, a shelf that does not exist.
+
+## 100 · Config Values at a Point in Time
+
+**Binary Search · Medium**
+
+SeatLock keeps the history of its configuration, so an incident review can ask what a setting was at a given moment. Build `ConfigHistory` with two operations. `set(key, value, timestamp)` records that `key` took `value` at `timestamp`; for any one key, timestamps arrive in strictly increasing order, although calls for different keys interleave. `get(key, timestamp)` returns the value the key had at that moment: the value of the `set` with the largest timestamp that is at most `timestamp`, or `""` if the key had not been set by then or never was. Values are never empty, so `""` always means "no value".
+
+```text
+Example 1
+  calls:   set("hold.minutes", "10", 100), set("hold.minutes", "15", 250),
+           get("hold.minutes", 249), get("hold.minutes", 250), get("hold.minutes", 99)
+  returns: "10", "15", ""
+
+Example 2
+  calls:   set("currency", "EUR", 120), get("currency", 500), get("currency", 119),
+           get("refunds", 500)
+  returns: "EUR", "", ""
+```
+
+Constraints: `1 ≤ timestamp ≤ 10⁹`, `1 ≤ key.length, value.length ≤ 50`, at most `10⁵` calls in total.
+
+**Approach.** The simple solution keeps a list per key and scans it from the newest entry back on every `get`: O(k) for a key with `k` entries. Because each key's timestamps only grow, appending keeps every list sorted by timestamp, so a hash map from key to its list of `(timestamp, value)` pairs makes `set` an append and `get` a binary search over one list. The search uses the topic's loop to find the first entry set after `timestamp`; the answer is the entry just before it, or `""` when that first entry is at position 0. An unknown key behaves like an empty list. The pairs are tuples in TypeScript, C# and Python, a record in Java, a `Pair` in Kotlin and a small struct in Go.
+
+<Solutions n="100" />
+
+**Complexity.** O(1) amortized time per `set` and O(log k) per `get`, where `k` is the number of values recorded for that key; O(n) space for the `n` entries recorded in total.
+
+**Common mistake.** Searching for the first entry whose timestamp is at least `timestamp` and returning it: `get("hold.minutes", 249)` returns `"15"`, a value that was set after the moment asked about.
