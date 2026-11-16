@@ -1419,3 +1419,402 @@ for (Case c : cases) {
 ```
 
 A record holding arrays compares them by reference, so compare the fields with `Arrays.equals`, not the records. The message names the failing row. A real project would make it a JUnit 5 `@ParameterizedTest` fed by a `@MethodSource`, run by Maven or Gradle (Chapter 17); in the round, one file is enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
+
+## Kotlin
+
+Kotlin is the easiest language in this chapter to half-know. If you have read the Java section, you know its runtime library already: the same `HashMap`, the same `PriorityQueue`, the same 32-bit `Int` that wraps without a word. What Kotlin changes is everything you type around them. Collections are read-only or mutable, a missing map key is a `null` the compiler makes you handle, `==` calls `equals`, ranges include their end, and there is no C-style `for` loop and no ternary operator. The traps are the places where Kotlin looks like the language you came from and means something else.
+
+Everything here compiles with Kotlin 2.1 on JDK 21, standard library only, the way the files in `apps/interview-bank` do. Chapter 6 covers the language; this section covers only what you type in the round.
+
+### Syntax by heart
+
+These are the structures the problem bank uses, with the costs you will name in step 6.
+
+| Structure | Write it as | Operations to know |
+| --- | --- | --- |
+| List | `val a = mutableListOf<Int>()`, or `IntArray(n)` for a fixed size | `add`, `a[i]`, `a.last()`, `removeLast()`, `size`: O(1). `add(0, x)`, `removeAt(0)`, `x in a`, `indexOf`: O(n) |
+| Map | `val m = HashMap<String, Int>()` | `m[k]` (`null` when missing), `m[k] = v`, `getOrDefault`, `getOrPut`, `k in m`, `remove`, `size`: O(1) average. `mutableMapOf()` is a `LinkedHashMap` and keeps insertion order |
+| Set | `val s = HashSet<Int>()` | `add` (returns `false` if already there), `x in s`, `remove`: O(1) average |
+| Stack | `ArrayDeque<Char>()` | `addLast`, `removeLast`, `last()`: O(1). `removeLast` throws when empty; `removeLastOrNull` returns `null` |
+| Queue | `ArrayDeque<Int>()` | `addLast`, `removeFirst`, `first()`: O(1) |
+| Deque | `ArrayDeque<Int>()` | O(1) at both ends, and `d[i]` is O(1) too |
+| Heap | `PriorityQueue<Int>()`, imported from `java.util` | `add`, `poll`, `peek`, as in the Java section |
+| Grid | `Array(rows) { IntArray(cols) }` | `g[r][c]`, `g.size`, `g[0].size` |
+| Pair | `r to c`, `Pair(r, c)`, `Triple`, or a `data class` | Destructure with `val (r, c) = cell`. Equal by value, so it works as a key |
+
+`ArrayDeque` with no import is `kotlin.collections.ArrayDeque`, Kotlin's own ring buffer. It is a stack, a queue and a deque, and it can be indexed, so you never need `java.util.Stack` or `LinkedList`. Import `java.util.PriorityQueue` by name: `import java.util.*` takes priority over the default imports, and `ArrayDeque` silently becomes Java's, which has no indexing.
+
+Three types look like "an array of ints". `IntArray` is Java's `int[]`: fixed size, unboxed, zeroed, and the type in every bank signature (`intArrayOf(1, 2)`, `IntArray(n) { it * 2 }`). `Array<Int>` is a boxed `Integer[]`, rarely what you want except as the outer type of a grid. `List<Int>` is read-only and has no `add`; `MutableList<Int>` is the one you change. Convert with `toList()`, `toMutableList()` and `toIntArray()`. `val` stops you reassigning the variable, not changing the list.
+
+The everyday moves:
+
+```kotlin
+val copies = mutableListOf<Int>()
+copies.add(4)
+copies += 9                                // the same as add
+val top = copies.last()                    // 9, without removing it
+val popped = copies.removeLast()           // 9
+
+val loansPerMember = HashMap<String, Int>()
+loansPerMember["ana"] = (loansPerMember["ana"] ?: 0) + 1       // count with a default
+loansPerMember["ana"] = loansPerMember.getOrDefault("ana", 0) + 1
+val byAuthor = HashMap<String, MutableList<String>>()
+byAuthor.getOrPut("Le Guin") { mutableListOf() }.add("Earthsea")  // group without an if
+
+val seen = mutableSetOf(3, 1, 3)           // [3, 1]
+val added = seen.add(7)                    // true; false if 7 was already there
+
+val visited = hashSetOf(0 to 1)            // a Pair: equal by value
+val found = (0 to 1) in visited            // true
+val cells = hashSetOf(Cell(2, 3))          // data class Cell(val r: Int, val c: Int)
+
+val stack = ArrayDeque<Char>()
+stack.addLast('(')
+val peek = stack.last()                    // '(' without removing it
+val ch = stack.removeLastOrNull()          // '('; null on an empty stack, where removeLast throws
+
+val deque = ArrayDeque<Int>()
+deque.addLast(5)
+deque.addFirst(2)
+val front = deque.first()                  // 2
+deque.removeLast()                         // O(1) at both ends
+
+val grid = Array(3) { IntArray(4) }        // 3 rows of 4 zeros; grid[r][c]
+```
+
+`getOrPut` is the one to memorise: it returns the existing value or stores a new one, which removes the `if` from every grouping and adjacency-list problem.
+
+There is no ternary operator, because `if` is an expression. `when` replaces `switch` and also replaces a chain of `else if`:
+
+```kotlin
+val bigger = if (a > b) a else b           // no ternary: if is an expression
+val kind = when {
+    ch.isDigit() -> "digit"
+    ch in 'a'..'z' -> "lower"
+    else -> "other"
+}
+val result = when (op) {
+    "+" -> a + b
+    "-" -> a - b
+    else -> error("unknown operator $op")
+}
+```
+
+In breadth-first search, `ArrayDeque` is the queue, and since a set's `add` returns a `Boolean`, the "seen" check and the insert are one call:
+
+```kotlin
+fun bfsOrder(graph: Map<Int, List<Int>>, start: Int): List<Int> {
+    val order = mutableListOf<Int>()
+    val seen = hashSetOf(start)
+    val queue = ArrayDeque(listOf(start))
+    while (queue.isNotEmpty()) {
+        val node = queue.removeFirst()
+        order.add(node)
+        for (next in graph[node].orEmpty())
+            if (seen.add(next)) queue.addLast(next)
+    }
+    return order
+}
+```
+
+<FromTS title="Equality compares content">
+In Kotlin `==` calls `equals`, so strings, lists, pairs and data classes compare by content, and `===` is the reference check. That is why `Pair` and data classes work as `HashSet` and `HashMap` keys with no `"r,c"` strings. Arrays are the exception: `IntArray` keeps Java's reference equality, so two arrays with the same values are not `==`.
+</FromTS>
+
+<Pitfall title="Checking an array result">
+`check(twoPrices(prices, 12) == intArrayOf(2, 3))` always fails, and `println(result)` prints something like `[I@7b23ec81`. Compare arrays with `contentEquals` and print them with `contentToString()`, or turn them into lists with `toList()`, which compare and print by content.
+</Pitfall>
+
+### Strings and characters
+
+Strings are immutable, and `s[i]` is a `Char`, a UTF-16 code unit as in Java. `Char` minus `Char` is an `Int` and `Char` plus `Int` is a `Char`, so you need no casts. Single quotes make a `Char`, and `"a" == 'a'` does not compile.
+
+```kotlin
+val s = "Shelfwise"
+val first = s[0]                           // 'S', a Char
+val lastCh = s.last()                      // 'e'
+val part = s.substring(1, 4)               // "hel", end index excluded
+val alsoPart = s.substring(1..3)           // "hel": a range includes its end
+val pos = s[1] - 'a'                       // 7: Char minus Char is an Int
+val letter = 'a' + 7                       // 'h': Char plus Int is a Char
+val code = s[1].code                       // 104
+val fromCode = Char(104)                   // 'h'
+val digit = '7'.digitToInt()               // 7, the same as '7' - '0'
+val words = "  two   words ".trim().split(Regex("\\s+"))     // [two, words]
+val padded = "7".padStart(3, '0')          // "007"
+val reversed = "stressed".reversed()       // "desserts"
+val joined = listOf(1, 2, 3).joinToString(", ")             // "1, 2, 3"
+val sortedKey = "listen".toCharArray().sorted().joinToString("")   // "eilnst"
+```
+
+`take(n)`, `drop(n)` and `takeLast(n)` save index arithmetic and never throw on short strings. `split` with a string splits on that literal text, not a regular expression, and keeps empty fields: `"a,b,,".split(",")` has four elements. Pass a `Regex` for a pattern. Use templates (`"next: ${n + 1}"`) instead of concatenation, and `buildString { append(ch).append(count) }` for long strings.
+
+For letter counts, `IntArray(26)` and `counts[ch - 'a']++` is the standard move; compare two count arrays with `contentEquals`. `s.groupingBy { it }.eachCount()` gives a `Map<Char, Int>` when the alphabet is open. `ch.isDigit()` accepts any Unicode digit, while `ch in '0'..'9'` is the strict ASCII test. `<` works on strings and compares by code unit, so `"B" < "a"` and `sorted()` give the ordinal order most problems mean.
+
+### Sorting with a comparator
+
+`sort()` sorts a `MutableList` or an array in place. `sorted()` returns a new `List`, and on an `IntArray` that list is a `List<Int>`; use `sortedArray()` to keep the array type. A read-only `List` has no `sort` at all.
+
+```kotlin
+val nums = intArrayOf(10, 9, 1)
+nums.sort()                                     // [1, 9, 10], in place
+val desc = nums.sortedDescending()              // [10, 9, 1], a new List<Int>
+val copy = nums.sortedArray()                   // a sorted IntArray copy
+
+val loans = mutableListOf(Loan("cy", 3), Loan("ana", 7), Loan("bo", 3))
+loans.sortBy { it.due }                         // in place, stable: cy stays before bo
+val ordered = loans.sortedWith(compareBy<Loan> { it.due }.thenBy { it.member })
+val sameOrder = loans.sortedWith(compareBy({ it.due }, { it.member }))
+val latestFirst = loans.sortedWith(compareByDescending<Loan> { it.due }.thenBy { it.member })
+loans.sortWith { a, b -> if (a.due != b.due) a.due.compareTo(b.due) else a.member.compareTo(b.member) }
+
+data class Loan(val member: String, val due: Int)
+```
+
+`compareBy` with one or more selectors is the shortest correct comparator; it needs `compareBy<Loan>` only when nothing else gives the compiler the type, as before `thenBy`. List sorts are stable, as in the Java section. Write comparators with `compareTo`, never `a - b`: `listOf(1, Int.MIN_VALUE, 5).sortedWith { a, b -> a - b }` returns `[1, 5, -2147483648]`. `Pair` is not `Comparable`, so `pairs.sorted()` does not compile; write `pairs.sortedWith(compareBy({ it.first }, { it.second }))`.
+
+<Pitfall title="A sorted() that sorts nothing">
+`xs.sorted()` on its own line compiles, runs and leaves `xs` as it was: it returns a new list, which you threw away, and the compiler does not warn. Write `xs.sort()` to sort in place or `val ys = xs.sorted()` for a copy.
+</Pitfall>
+
+### Iteration
+
+There is no `for (int i = 0; i < n; i++)`. Every counted loop goes over a range:
+
+```kotlin
+for (i in 0 until n) { }                   // 0 to n - 1
+for (i in 0..<n) { }                       // the same
+for (i in 0..n) { }                        // 0 to n: n included
+for (i in titles.indices) { }              // every valid index
+for ((i, t) in titles.withIndex()) { }     // index and value
+for (i in n - 1 downTo 0) { }              // backwards
+for (i in 0 until 10 step 3) { }           // 0, 3, 6, 9
+for ((title, count) in stock) { }          // a Map: each entry destructures
+for ((dr, dc) in dirs) { }                 // dirs = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
+repeat(3) { }                              // three times, with the counter as it
+```
+
+`10..0` is an empty range, not a countdown, so the loop runs zero times; use `downTo`. To leave nested loops, label the outer one: `outer@ for (...)`, then `break@outer` or `continue@outer`. A bare `return` inside `forEach { }` returns from the enclosing function, not from the lambda, so use a `for` loop when you need `break`. Adding to a list inside its own `for` throws `ConcurrentModificationException`, as in Java; `removeAll { it % 2 == 0 }` removes in place.
+
+### Numbers
+
+`Int` is 32 bits and `Long` is 64, and overflow wraps silently, as in the Java section. What Kotlin adds is that it never widens for you:
+
+```kotlin
+val a = 50_000
+val b = 50_000
+val wrong = a * b                          // -1794967296, and no error
+val right = a.toLong() * b                 // 2500000000
+val big = 3_000_000_000                    // too big for Int, so inferred as Long
+```
+
+`val total: Long = a * b` does not compile, where Java compiles it and gets it wrong; `val x = a * b` is wrong in both. Convert one operand before multiplying. `Math.multiplyExact` throws on overflow, and `java.math.BigInteger` goes past 64 bits.
+
+| You want | Write | Note |
+| --- | --- | --- |
+| Integer division toward zero | `a / b` | `-7 / 2` is `-3`, and `7 / 2` is `3` |
+| A real quotient | `a.toDouble() / b` | Convert before dividing |
+| Integer division rounding down | `a.floorDiv(b)` | `(-7).floorDiv(2)` is `-4`, like Python's `//` |
+| Remainder | `a % b` | Takes the sign of `a`: `-7 % 3` is `-1` |
+| Always-positive modulo | `a.mod(m)` | `(-7).mod(3)` is `2`; without the parentheses, `-7.mod(3)` is `-(7.mod(3))`, which is `-1` |
+| Midpoint | `lo + (hi - lo) / 2` | `(lo + hi) / 2` overflows once the sum passes `Int.MAX_VALUE` |
+| Sentinels | `Int.MAX_VALUE`, `Int.MIN_VALUE`, `Long.MAX_VALUE` | `Int.MAX_VALUE + 1` wraps to `Int.MIN_VALUE` |
+| Bits | `1 shl k`, `x shr 1`, `x ushr 1`, `x and 1`, `x or y`, `x xor y`, `x.inv()` | Kotlin has no `<<` or `&` operators; these are infix functions |
+| Larger, smaller | `maxOf(a, b, c)`, `minOf(a, b)` | No import; `abs` needs `import kotlin.math.abs` |
+
+`"42".toInt()` throws `NumberFormatException` on `"12a"` and also on `" 42 "`; `toIntOrNull()` returns `null` instead, which pairs well with `?:`. `"1.5".toDouble()` ignores the machine's locale. When the problem defines what a valid number looks like, as 038 does, parse it by hand.
+
+### Errors
+
+Kotlin has no checked exceptions and no `throws` clause. `throw` and `try` are expressions, so the usual shapes are short:
+
+```kotlin
+class NotFoundException(message: String) : RuntimeException(message)
+
+val shelf = mapOf(1 to "Dune, copy 1")
+
+fun findCopy(id: Int): String = shelf[id] ?: throw NotFoundException("copy $id not found")
+
+fun findCopyOrNull(id: Int): String? =
+    try {
+        findCopy(id)
+    } catch (e: NotFoundException) {
+        null                                   // anything else keeps propagating
+    }
+
+fun loanDays(days: Int): Int {
+    require(days in 1..30) { "days must be 1 to 30, was $days" }   // IllegalArgumentException
+    return days
+}
+```
+
+Three standard functions save you writing exception classes: `require(cond) { message }` throws `IllegalArgumentException` for bad arguments, `check(cond) { message }` throws `IllegalStateException` for broken assumptions, and `error(message)` throws `IllegalStateException` with the type `Nothing`, so `map[key] ?: error("no owner")` has the value's type. `runCatching { ... }` catches everything, which suits tests and is too broad in real code.
+
+Know what the library throws: `IndexOutOfBoundsException` for a bad index, `NoSuchElementException` for `first()` or `max()` on an empty collection and `getValue(k)` on a missing key, and `NullPointerException` for `!!`. Each has a partner that returns `null` instead (`getOrNull`, `firstOrNull`, `maxOrNull`, `m[k]`), and that partner plus `?:` is usually the clearer code.
+
+### Concurrency basics
+
+Chapter 6 introduced coroutines, the usual answer in a Kotlin backend. But they live in `kotlinx.coroutines`, a separate library, and a plain `kotlinc` file does not have it, so ask whether the editor includes it. If not, use the JDK as in the Java section, with Kotlin syntax: `thread { }` from `kotlin.concurrent` starts a thread, `synchronized(lock) { }` is a function rather than a keyword, and executors, atomics and concurrent maps come from `java.util.concurrent`.
+
+Bounded concurrency is a fixed-size pool, with one future per item:
+
+```kotlin
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+
+fun <T, R> mapLimit(items: List<T>, limit: Int, fn: (T) -> R): List<R> =
+    Executors.newFixedThreadPool(limit).use { pool ->
+        val futures = items.map { item -> pool.submit(Callable { fn(item) }) }
+        futures.map { it.get() }               // in input order; get() rethrows a task's failure
+    }
+```
+
+At most `limit` calls run at once, and reading the futures in order keeps results in input order. `use` closes the pool, which waits for its tasks (executors are `AutoCloseable` since JDK 19). A failing task surfaces as an `ExecutionException` whose `cause` is the original error. For I/O-bound work, `Executors.newVirtualThreadPerTaskExecutor()` fits the same `use` block (Chapter 5).
+
+For shared state, the rules are Java's:
+
+```kotlin
+val total = AtomicInteger()
+val workers = List(8) { thread { repeat(100_000) { total.incrementAndGet() } } }
+workers.forEach { it.join() }              // total.get() is 800000; a plain var with ++ loses updates
+
+val counts = ConcurrentHashMap<String, Int>()
+counts.merge("ana", 1, Int::plus)          // an atomic count
+
+val lock = Any()
+synchronized(lock) { loans["bo"] = (loans["bo"] ?: 0) + 1 }
+```
+
+If the editor has `kotlinx.coroutines`, this is the version to write, and the one to name even if it does not:
+
+```kotlin
+suspend fun <T, R> mapLimit(items: List<T>, limit: Int, fn: suspend (T) -> R): List<R> = coroutineScope {
+    val gate = Semaphore(limit)
+    items.map { item -> async { gate.withPermit { fn(item) } } }.awaitAll()
+}
+```
+
+One coroutine per item; the `Semaphore` (from `kotlinx.coroutines.sync`, not `java.util.concurrent`) admits `limit` at a time. `awaitAll` keeps input order, and `coroutineScope` cancels the other children if one fails. Call it from `runBlocking { }` in `main`.
+
+<InterviewLens>
+"Why not coroutines?" They need the `kotlinx.coroutines` dependency, and they pay off for I/O fan-out with timeouts and cancellation; for CPU-bound work a fixed pool the size of the core count is the right tool anyway. Then name the coroutine version: `coroutineScope`, `async`, `awaitAll` and a `Semaphore` with `withPermit`. You have shown the Kotlin answer and where its boundary is.
+</InterviewLens>
+
+### The heap
+
+The heap is `java.util.PriorityQueue`, a min-heap, with the caveats of the Java section: `poll` returns `null` when empty, there is no decrease-key, and iteration is not in sorted order. Kotlin makes the comparator shorter:
+
+```kotlin
+val byDue = PriorityQueue<Pair<Int, String>>(compareBy { it.first })   // smallest due first
+byDue.add(14 to "Dune")
+byDue.add(3 to "Emma")
+byDue.add(7 to "Ulysses")
+val next = byDue.peek()                    // (3, Emma), without removing it
+val (due, title) = byDue.poll()            // 3, "Emma"
+while (byDue.isNotEmpty()) println(byDue.poll())   // (7, Ulysses), then (14, Dune)
+
+val maxHeap = PriorityQueue<Int>(compareByDescending { it })
+val byDueThenTitle = PriorityQueue<Pair<Int, String>>(compareBy({ it.first }, { it.second }))
+val cheap = PriorityQueue<IntArray>(compareBy { it[0] })   // [priority, value], no boxing per field
+```
+
+`poll()` and `peek()` return a platform type (Chapter 6): the compiler lets you treat the result as non-null, and on an empty heap the `null` becomes a `NullPointerException` as soon as you destructure it or use it as an `Int`. Guard with `isNotEmpty()`. For "the k largest", keep a min-heap of size k:
+
+```kotlin
+fun kthLargest(nums: IntArray, k: Int): Int {
+    val heap = PriorityQueue<Int>()            // a min-heap of the k largest so far
+    for (x in nums) {
+        heap.add(x)
+        if (heap.size > k) heap.poll()         // drop the smallest
+    }
+    return heap.peek()
+}
+```
+
+For Dijkstra's algorithm, use lazy deletion: queue a node again on a shorter path, and skip stale entries when they come out:
+
+```kotlin
+fun shortestFrom(graph: List<List<Pair<Int, Int>>>, source: Int): IntArray {
+    val dist = IntArray(graph.size) { Int.MAX_VALUE }
+    dist[source] = 0
+    val heap = PriorityQueue<Pair<Int, Int>>(compareBy { it.first })   // (distance, node)
+    heap.add(0 to source)
+    while (heap.isNotEmpty()) {
+        val (d, node) = heap.poll()
+        if (d > dist[node]) continue           // stale: a shorter path was found after this was queued
+        for ((next, cost) in graph[node]) {
+            if (d + cost < dist[next]) {
+                dist[next] = d + cost
+                heap.add(dist[next] to next)   // queue it again instead of updating the old entry
+            }
+        }
+    }
+    return dist
+}
+```
+
+The heap can hold one entry per edge, so say O(E log E). For "the largest key at most x", use `java.util.TreeMap` and declare the result nullable: `val floor: Int? = shelves.floorKey(15)`.
+
+### Standard-library tools that save time
+
+| Tool | What it saves |
+| --- | --- |
+| `List(n) { it }`, `IntArray(n) { -1 }`, `(0 until n).toList()` | Building a list or array from its index |
+| `a.sum()`, `a.sumOf { }`, `a.maxOf { }`, `a.maxBy { }`, `a.count { }` | Folds in one call; `max()` on an empty list throws, `maxOrNull()` does not |
+| `groupBy { }`, `groupingBy { }.eachCount()`, `associateWith { }` | Grouping, counting and building a map |
+| `withIndex()`, `zip`, `zipWithNext()`, `windowed(k)`, `chunked(n)` | Indices, pairs in step, neighbours, sliding windows, batches |
+| `a.scan(0) { acc, x -> acc + x }` | A prefix-sum list of size n + 1 |
+| `binarySearch(x)` on a sorted list or array | Binary search; a negative result is `-(insertionPoint) - 1` |
+| `buildList { }`, `buildString { }`, `buildMap { }` | Building with mutation, returning a read-only result |
+| `intersect`, `union`, `subtract` | Set algebra, returning a new set |
+| `getOrNull(i)`, `firstOrNull { }`, `indexOfFirst { }`, `lastIndex` | Lookups that do not throw |
+| `x.countOneBits()`, `x.toString(2)`, `"1101".toInt(2)` | Counting bits and binary strings |
+
+### Mistakes when coming from the other languages
+
+Each of these fails to compile or gives a wrong answer, and costs minutes.
+
+**From TypeScript.** There is no `cond ? a : b`; write `if (cond) a else b`. `0..n` includes `n`, so a loop over indices is `0 until n` or `indices`. `7 / 2` is `3` on `Int`. `listOf` gives a list without `add`; start with `mutableListOf`. `m[k] + 1` does not compile because `m[k]` is `Int?`; write `(m[k] ?: 0) + 1`. `'ab'` is not a valid `Char` literal: strings need double quotes.
+
+**From C#.** `substring(1, 4)` ends at index 4 instead of taking four characters, and `1..4` includes 4, unlike C#'s `s[1..4]`. There is no `TryGetValue`: write `m[k]?.let { ... }` or `m[k] ?: default`. There is no `checked`; use `Math.addExact`. Tuples become `Pair`, `Triple` or a data class, and `Pair` does not sort the way a C# tuple does. `PriorityQueue` takes one type and a comparator, not a separate priority.
+
+**From Java.** `==` calls `equals`, so `s1 == s2` is right for strings and boxed numbers, and `===` is Java's `==`. `split(".")` splits on a literal dot, not a regex, and keeps trailing empty strings. On a `MutableList<Int>`, `remove(1)` removes the value 1: on `[5, 7, 1]` Java's `remove(1)` deletes the 7 and Kotlin's deletes the 1. Use `removeAt(1)` for an index. Bit operators are words (`shl`, `and`, `xor`), and `when` never falls through.
+
+**From Go.** A missing key is `null`, not a zero value; add `?: 0` or use `getOrDefault`. `Int` is 32 bits, where Go's `int` is 64 on the machines you use. Arrays and lists are references, so `val b = a` shares; copy with `a.copyOf()` or `toMutableList()`. There are no multiple return values: return a `Pair` or a data class and destructure it.
+
+**From Python.** `a[-1]` throws; write `a.last()`. `//` starts a comment, so floor division is `floorDiv`, and `mod` is the `%` you expect. Integers are not unbounded. `if (items)` does not compile: write `items.isNotEmpty()`. `range(n)` is `0 until n`, not `0..n`. Slices are `subList(1, 3)`, `slice(1..2)` or `substring(1, 3)`. `Pair` works as a dictionary key, as tuples do.
+
+### Writing and running a quick test
+
+Every Kotlin file in the bank has a `package pNNN` line, the solution as a top-level function, and a `main` that calls `check`. For 002, below `twoPrices`, with one extra line that tests `findCopy` from the errors example for its exception:
+
+```kotlin
+fun main() {
+    check(twoPrices(intArrayOf(12, 7, 3, 9, 5), 12).contentEquals(intArrayOf(2, 3)))
+    check(twoPrices(intArrayOf(4, 4, 1), 8).contentEquals(intArrayOf(0, 1)))
+    check(twoPrices(intArrayOf(1, 2), 10).isEmpty())
+    check(runCatching { findCopy(2) }.exceptionOrNull() is NotFoundException)
+    println("002 ok")
+}
+```
+
+`kotlinc p002_two_prices.kt -include-runtime -d p.jar && java -jar p.jar` compiles the file into a jar with the standard library inside and runs it. The compiler records `main` in the jar's manifest under the class the file produces, `p002.P002_two_pricesKt`, which is also what `make kotlin` runs after compiling every file into one jar; the package line stops one problem's helpers clashing with another's. A failing `check` throws `IllegalStateException: Check failed.`, and the stack trace gives the line. The compiler takes a few seconds to start, so keep all of a problem's checks in one `main`.
+
+To see which case failed, use a table of triples and the lazy message form of `check`:
+
+```kotlin
+val cases = listOf(
+    Triple(intArrayOf(12, 7, 3, 9, 5), 12, intArrayOf(2, 3)),
+    Triple(intArrayOf(4, 4, 1), 8, intArrayOf(0, 1)),
+    Triple(intArrayOf(1, 2), 10, intArrayOf()),
+    Triple(intArrayOf(), 5, intArrayOf()),
+)
+for ((prices, budget, want) in cases) {
+    val got = twoPrices(prices, budget)
+    check(got.contentEquals(want)) {
+        "twoPrices(${prices.contentToString()}, $budget) = ${got.contentToString()}, want ${want.contentToString()}"
+    }
+}
+```
+
+A wrong answer now prints, for example, `twoPrices([1, 2], 10) = [0, 0], want []`. A data class would read better than `Triple`, but its generated `equals` compares array properties by reference. It is the shape the TypeScript, C# and Go sections use. A real project would write `@Test` functions with `assertEquals` from `kotlin.test` or JUnit 5, run by Gradle (Chapter 17); both are separate dependencies, so in the round one file with `check` is enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
