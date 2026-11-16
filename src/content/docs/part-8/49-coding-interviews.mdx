@@ -561,3 +561,408 @@ test("twoPrices", () => {
 ```
 
 `node --test` finds files named `*.test.ts` and runs them. The table of cases is the same shape the Go section uses, and the message argument tells you which row failed. In a shared editor that cannot run code, write the same table as comments and trace each row by hand, as in step 5.
+
+## C#
+
+C# reads so much like TypeScript and Java that the danger in a live round is code you half-remember: it compiles, then behaves differently. `int` is 32 bits and overflows without a word, a missing `Dictionary` key throws, `Substring` takes a length, and the built-in sort is not stable. In return the library has a real heap, a sorted set and tuples that work as keys. It lacks a deque, and its heap cannot change a priority.
+
+Everything here runs on .NET 10 with `dotnet run file.cs`, the way the files in `apps/interview-bank` do: one file, top-level statements, no project. `System.Linq`, `System.Collections.Generic` and `System.Threading.Tasks` are imported for you; `StringBuilder` needs `using System.Text;` and the concurrent collections `using System.Collections.Concurrent;`. Chapter 4 covers the runtime; this section covers only what you type in the round.
+
+### Syntax by heart
+
+These are the structures the problem bank uses, with the costs you will name in step 6.
+
+| Structure | Write it as | Operations to know |
+| --- | --- | --- |
+| List | `var a = new List<int>()`, or `new int[n]` for a fixed size | `Add`, `a[i]`, `a[^1]`, `RemoveAt(a.Count - 1)`, `Count`: O(1). `Insert(0, x)`, `RemoveAt(0)`, `Contains`, `IndexOf`, `Remove(x)`: O(n). Arrays use `Length` |
+| Dictionary | `new Dictionary<string, int>()` | `TryGetValue`, `ContainsKey`, `TryAdd`, `Remove`, `d[k] = v`, `Count`: O(1) average. Reading `d[k]` throws if `k` is missing. Iteration order is not guaranteed |
+| Set | `new HashSet<int>()` | `Add` (returns `false` if already there), `Contains`, `Remove`, `Count`: O(1) average |
+| Stack | `new Stack<char>()` | `Push`, `Pop`, `Peek`, `TryPop`, `TryPeek`: O(1). `Pop` and `Peek` throw when empty |
+| Queue | `new Queue<int>()` | `Enqueue`, `Dequeue`, `Peek`, `TryDequeue`: O(1) |
+| Deque | `new LinkedList<int>()` | `AddFirst`, `AddLast`, `RemoveFirst`, `RemoveLast`, `First!.Value`, `Last!.Value`: O(1). No indexing |
+| Heap | `new PriorityQueue<string, int>()` | `Enqueue`, `Dequeue`, `EnqueueDequeue`: O(log n). `Peek`, `Count`: O(1). Smallest priority first |
+| Grid | `new int[rows, cols]`, or jagged `new int[rows][]` | `g[r, c]` and `g.GetLength(0)`; jagged is `g[r][c]` and `g.Length` |
+| Pair | a tuple, `(int Count, string Title)` | Deconstruct with `var (count, title) = pair`. Equal by value, so it works as a key |
+
+For a deque, use `LinkedList<T>`: O(1) at both ends and nothing to write. It allocates a node per item, which does not matter at interview sizes; a ring buffer avoids that but has wrap-around bugs to get wrong, so write one only if asked about memory. For grids you create (a `visited` array, a DP table), use `int[,]`: one allocation, every cell zero, no rows to forget. Use `int[][]` when the input arrives that way.
+
+The everyday moves:
+
+```csharp
+var copies = new List<int>();
+copies.Add(4);
+copies.Add(9);
+var last = copies[^1];               // 9, without removing it
+copies.RemoveAt(copies.Count - 1);   // pop from the end: O(1)
+
+var loansPerMember = new Dictionary<string, int>();
+loansPerMember["ana"] = loansPerMember.GetValueOrDefault("ana") + 1;   // count with a default
+
+var seen = new HashSet<int> { 3, 1, 3 };   // {3, 1}
+var added = seen.Add(7);                   // true; false if 7 was already there
+
+var visited = new HashSet<(int, int)> { (0, 1) };
+var found = visited.Contains((0, 1));      // true: tuples compare by value
+
+var stack = new Stack<char>();
+stack.Push('(');
+var top = stack.Peek();                    // '(', without removing it
+var popped = stack.TryPop(out var ch);     // true; false on an empty stack, where Pop throws
+
+var deque = new LinkedList<int>();
+deque.AddLast(5);
+deque.AddFirst(2);
+var front = deque.First!.Value;            // 2; the ! because First is null on an empty list
+deque.RemoveLast();                        // O(1) at both ends
+
+var grid = new int[3, 4];                  // zeroed; grid[r, c], grid.GetLength(0) is 3
+var rows = new int[3][];                   // jagged: every row is null until you create it
+for (var r = 0; r < rows.Length; r++) rows[r] = new int[4];
+```
+
+<FromTS title="Composite keys without strings">
+In TypeScript a grid cell has to become the string `"r,c"` before it goes in a `Set`. In C#, tuples and records hash and compare by value, so `HashSet<(int, int)>` and `Dictionary<(int Row, int Col), int>` just work. Arrays do not: `int[]` compares by reference, as in TypeScript.
+</FromTS>
+
+Breadth-first search gets a real `Queue<T>`, and because `HashSet.Add` returns a `bool`, the "seen" check and the insert are one call:
+
+```csharp
+static List<int> BfsOrder(Dictionary<int, List<int>> graph, int start)
+{
+    var order = new List<int>();
+    var seen = new HashSet<int> { start };
+    var queue = new Queue<int>([start]);
+    while (queue.Count > 0)
+    {
+        var node = queue.Dequeue();
+        order.Add(node);
+        foreach (var next in graph.GetValueOrDefault(node, []))
+            if (seen.Add(next)) queue.Enqueue(next);
+    }
+    return order;
+}
+```
+
+<Pitfall title="Reading a key that isn't there">
+`counts[word]++` throws `KeyNotFoundException` the first time it meets a word: the indexer returns no default, unlike a Go map or `Map.get`. Use `TryGetValue` when you need to know whether the key was there and `GetValueOrDefault` when zero is the right answer.
+</Pitfall>
+
+### Strings and characters
+
+Strings are immutable, and `s[i]` is a `char`, a 16-bit UTF-16 code unit. Arithmetic on a `char` gives an `int`; cast back with `(char)`. Single quotes make a `char`, double quotes a `string`, and they do not mix: `"a" == 'a'` does not compile.
+
+```csharp
+var s = "Shelfwise";
+var first = s[0];                          // 'S', a char
+var lastCh = s[^1];                        // 'e'
+var part = s[1..4];                        // "hel", end index excluded
+var sub = s.Substring(1, 4);               // "helf": the second argument is a length
+var pos = s[1] - 'a';                      // 7: char minus char is an int
+var letter = (char)('a' + 7);              // 'h': cast back to char
+var digit = '7' - '0';                     // 7
+var words = "  two   words ".Split(' ', StringSplitOptions.RemoveEmptyEntries);   // ["two", "words"]
+var padded = "7".PadLeft(3, '0');          // "007"
+var reversed = new string("stressed".Reverse().ToArray());   // "desserts"
+var joined = string.Join(", ", new[] { 1, 2, 3 });            // "1, 2, 3"
+```
+
+For messy input, `Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)` drops empty fields and trims the rest; pass `(char[]?)null` as the separator to split on any whitespace. For letter counts, `new int[26]` is already zeroed; compare two count arrays with `SequenceEqual`, never `==`. Build long strings with `StringBuilder` (`sb.Append(ch).Append(count)`, then `ToString()`). `char.IsDigit` and `char.IsLetter` accept any Unicode digit or letter; `char.IsAsciiDigit` and `char.IsAsciiLetter` are the strict versions. Spans (`s.AsSpan(start, length)`) avoid the copy `Substring` makes, but are worth raising only if asked about allocations.
+
+### Sorting with a comparator
+
+`Array.Sort` and `List.Sort` sort in place and return `void`, so `var sorted = Array.Sort(a)` does not compile. LINQ's `Order` and `OrderBy` return a new sequence.
+
+```csharp
+int[] nums = [10, 9, 1];
+Array.Sort(nums);                                   // [1, 9, 10], in place
+Array.Sort(nums, (a, b) => b.CompareTo(a));         // descending
+var asc = nums.Order().ToArray();                   // a sorted copy; nums unchanged
+```
+
+A `Comparison<T>` returns a negative number, zero or a positive one. Use `CompareTo`, not `a - b`, which overflows: `[1, int.MinValue, 5]` sorted with `(a, b) => a - b` comes out as `[1, 5, -2147483648]`. Chain keys with a conditional:
+
+```csharp
+loans.Sort((a, b) => a.Due != b.Due ? a.Due.CompareTo(b.Due) : string.CompareOrdinal(a.Member, b.Member));
+var ordered = loans.OrderBy(l => l.Due).ThenBy(l => l.Member, StringComparer.Ordinal).ToList();
+
+record Loan(string Member, int Due);   // loans is a List<Loan>; type declarations go at the end of the file
+```
+
+`<` does not compile on strings, and the default string comparison is culture-sensitive: it sorts `["b", "a", "B", "A"]` as `a, A, b, B`, while ordinal order, what most problems mean by "lexicographic", is `A, B, a, b`. Pass `string.CompareOrdinal` or `StringComparer.Ordinal`. Tuples compare field by field, so a `List<(int, int)>` sorts with a plain `Sort()`.
+
+<Pitfall title="An unstable sort that passes small tests">
+`Array.Sort` and `List.Sort` use introsort, which is not stable. Small arrays go through insertion sort and happen to keep ties in order, so a five-element test passes and the same code fails on fifty. When ties must keep their original order, use `OrderBy(...).ThenBy(...)`, which is stable, or add the original index as the last key.
+</Pitfall>
+
+### Iteration
+
+```csharp
+(int Dr, int Dc)[] dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+
+for (var i = 0; i < titles.Length; i++) { /* index and value */ }
+foreach (var t in titles) { /* values */ }
+foreach (var (i, t) in titles.Index()) { /* index and value, .NET 9 and later */ }
+for (var i = titles.Length - 1; i >= 0; i--) { /* backwards */ }
+foreach (var (title, count) in stock) { /* a Dictionary: each KeyValuePair deconstructs */ }
+foreach (var (dr, dc) in dirs) { /* the four neighbours of a grid cell */ }
+```
+
+Changing a `List`, or adding a key to a `Dictionary`, inside its own `foreach` throws `InvalidOperationException`; loop over a copy (`counts.Keys.ToList()`) or use `list.RemoveAll(predicate)`. And LINQ is lazy (Chapter 4): a stored `Where` runs again on every enumeration, so call `ToList()` if you read it twice.
+
+### Numbers
+
+`int` is 32 bits and `long` is 64, everywhere. Overflow wraps silently unless you ask for a check:
+
+```csharp
+int a = 50_000, b = 50_000;
+int wrong = a * b;                // -1794967296, and no error
+long stillWrong = a * b;          // the same: the multiplication happens in int
+long right = (long)a * b;         // 2500000000
+int boom = checked(a * b);        // throws OverflowException
+```
+
+If values can pass about 2.1 × 10⁹, say so in step 2 and use `long`; beyond 64 bits there is `BigInteger` in `System.Numerics`. While practising, `#:property CheckForOverflowUnderflow=true` at the top of a file-based app turns every silent wrap into an exception.
+
+| You want | Write | Note |
+| --- | --- | --- |
+| Integer division toward zero | `a / b` | `-7 / 2` is `-3`, and `7 / 2` is `3`: two ints never give 3.5 |
+| A real quotient | `(double)a / b` | Cast before dividing; `(double)(a / b)` is already truncated |
+| Integer division rounding down | `(int)Math.Floor((double)a / b)` | `-4`, like Python's `//`. Exact for `int`; for `long` use `FloorDiv` below |
+| Remainder | `a % b` | Takes the sign of `a`: `-7 % 3` is `-1` |
+| Always-positive modulo | `((a % m) + m) % m` | `2` for `-7` and `3` |
+| Midpoint | `lo + (hi - lo) / 2` | `(lo + hi) / 2` overflows once the sum passes `int.MaxValue` |
+| Sentinels | `int.MaxValue`, `int.MinValue` | `int.MaxValue + 1` wraps to `int.MinValue`, so never add to a sentinel |
+| Absolute value | `Math.Abs(x)` | Throws `OverflowException` for `int.MinValue` |
+
+```csharp
+static long FloorDiv(long a, long b) => a / b - (a % b != 0 && (a < 0) != (b < 0) ? 1 : 0);
+```
+
+`int.Parse("12a")` throws `FormatException`, while `int.Parse(" 42 ")` returns 42 because surrounding whitespace is allowed. `int.TryParse(s, out var n)` returns `false` instead of throwing. `double.Parse` follows the machine's culture, and under `es-ES` it reads `"1.5"` as 15, so pass `CultureInfo.InvariantCulture` (from `System.Globalization`). When the problem defines the format, as 038 does, parse by hand.
+
+### Errors
+
+Exceptions are unchecked: there is no `throws` clause, and writing one is a syntax error. Throw a standard type (`ArgumentException`, `InvalidOperationException`) or declare your own in one line with a primary constructor:
+
+```csharp
+var shelf = new Dictionary<int, string> { [1] = "Dune, copy 1" };
+
+string FindCopy(int id) =>
+    shelf.TryGetValue(id, out var copy) ? copy : throw new NotFoundException($"copy {id} not found");
+
+string? FindCopyOrNull(int id)
+{
+    try
+    {
+        return FindCopy(id);
+    }
+    catch (NotFoundException)
+    {
+        return null;        // anything else keeps propagating: don't catch Exception here
+    }
+}
+
+class NotFoundException(string message) : Exception(message);   // type declarations go last in the file
+```
+
+Rethrow with `throw;`, which keeps the stack trace; `throw e;` starts a new one. For "may be missing", the library uses the `Try` pattern, a `bool` plus an `out` value, and it suits your own helpers too. Know what the collections throw: `IndexOutOfRangeException` for an array index, `ArgumentOutOfRangeException` for a `List` index, and `InvalidOperationException` for `Pop`, `Dequeue` or `Peek` when empty and `First` on an empty sequence.
+
+### Concurrency basics
+
+Here C# differs most from TypeScript. Tasks run on a pool of real threads, and the code after an `await` may resume on any of them (Chapter 4), so two tasks that touch one variable can race. Protect shared state with `Interlocked` for a number, `lock` for anything bigger, or a concurrent collection.
+
+```csharp
+var bookTask = LoadBook(bookId);           // both calls start here
+var memberTask = LoadMember(memberId);
+await Task.WhenAll(bookTask, memberTask);
+var (book, member) = (await bookTask, await memberTask);   // already complete: no waiting
+string[] titles = await Task.WhenAll(ids.Select(LoadBook));   // results in input order
+await Task.Delay(100);                     // a sleep that does not block a thread
+```
+
+The TypeScript `mapLimit` translates directly, except that `next++` is now a real race. `Interlocked.Increment` makes the read and the increment one atomic step, so each index goes to exactly one worker:
+
+```csharp
+static async Task<R[]> MapLimit<T, R>(T[] items, int limit, Func<T, Task<R>> fn)
+{
+    var results = new R[items.Length];
+    var next = -1;
+    async Task Worker()
+    {
+        int i;
+        while ((i = Interlocked.Increment(ref next)) < items.Length)
+            results[i] = await fn(items[i]);
+    }
+    var workers = Enumerable.Range(0, Math.Min(limit, items.Length)).Select(_ => Worker());
+    await Task.WhenAll(workers);
+    return results;
+}
+```
+
+The more common C# version starts a task per item and lets a `SemaphoreSlim` admit `limit` at a time:
+
+```csharp
+static async Task<R[]> MapLimitGate<T, R>(T[] items, int limit, Func<T, Task<R>> fn)
+{
+    using var gate = new SemaphoreSlim(limit);
+    var tasks = items.Select(async item =>
+    {
+        await gate.WaitAsync();
+        try { return await fn(item); }
+        finally { gate.Release(); }
+    });
+    return await Task.WhenAll(tasks);
+}
+```
+
+Both keep results in input order. `Parallel.ForEachAsync` with `MaxDegreeOfParallelism` is the built-in version; name it, then write one of these if asked for the mechanism. For other shared state:
+
+```csharp
+var total = 0;
+await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+{
+    for (var k = 0; k < 100_000; k++) Interlocked.Increment(ref total);   // total++ here loses updates
+})));                                      // total is 800000
+
+var gate = new Lock();                     // C# 13 and .NET 9; before that, new object()
+lock (gate) loansPerMember[m] = loansPerMember.GetValueOrDefault(m) + 1;
+```
+
+`ConcurrentDictionary` and `ConcurrentQueue` cover shared collections; workers draining one `ConcurrentQueue` with `TryDequeue` are another correct `mapLimit`.
+
+<InterviewLens>
+"Several threads write into `results` with no lock. Is that safe?" Yes: `Interlocked.Increment` hands out each index once, so no two workers share a slot, and `await Task.WhenAll` makes every write visible before you read the array. Then say what would break it: `next++` instead, which lets two workers read the same value, so one item runs twice and another never runs.
+</InterviewLens>
+
+### The heap
+
+`PriorityQueue<TElement, TPriority>` is a min-heap that stores each element with a separate priority. In Java and Python the element is its own priority; here, for plain numbers, you write the value twice: `heap.Enqueue(x, x)`.
+
+```csharp
+var byDue = new PriorityQueue<string, int>();      // element, then priority; smallest priority first
+byDue.Enqueue("Dune", 14);
+byDue.Enqueue("Emma", 3);
+byDue.Enqueue("Ulysses", 7);
+var next = byDue.Peek();                           // "Emma", without removing it
+var title = byDue.Dequeue();                       // "Emma"; Dequeue and Peek throw when empty
+while (byDue.TryDequeue(out var t, out var due))   // the element and its priority
+    Console.WriteLine($"{t} {due}");               // "Ulysses 7", then "Dune 14"
+
+var maxHeap = new PriorityQueue<int, int>(Comparer<int>.Create((a, b) => b.CompareTo(a)));
+var byDueThenId = new PriorityQueue<string, (int Due, int Id)>();   // tuples compare field by field
+```
+
+Equal priorities are not guaranteed to come out first in, first out; if that matters, add a sequence number to the priority tuple. For "the k largest", keep a min-heap of size k. `EnqueueDequeue` adds an item and removes the smallest in one step, cheaper than the two calls:
+
+```csharp
+static int KthLargest(int[] nums, int k)
+{
+    var heap = new PriorityQueue<int, int>();      // a min-heap of the k largest so far
+    foreach (var x in nums)
+    {
+        if (heap.Count < k) heap.Enqueue(x, x);
+        else heap.EnqueueDequeue(x, x);           // add x, then remove the smallest, in one step
+    }
+    return heap.Peek();
+}
+```
+
+**The queue cannot update a priority.** There is no decrease-key, and the `Remove` added in .NET 9 scans the whole queue. For Dijkstra's algorithm, use lazy deletion: on a shorter path, enqueue the node again with the new distance, and skip any dequeued entry worse than the best known.
+
+```csharp
+static int[] ShortestFrom(List<(int To, int Cost)>[] graph, int source)
+{
+    var dist = new int[graph.Length];
+    Array.Fill(dist, int.MaxValue);
+    dist[source] = 0;
+    var heap = new PriorityQueue<int, int>();
+    heap.Enqueue(source, 0);
+    while (heap.TryDequeue(out var node, out var d))
+    {
+        if (d > dist[node]) continue;             // stale: a shorter path was found after this was queued
+        foreach (var (next, cost) in graph[node])
+        {
+            if (d + cost < dist[next])
+            {
+                dist[next] = d + cost;
+                heap.Enqueue(next, d + cost);     // queue it again instead of updating the old entry
+            }
+        }
+    }
+    return dist;
+}
+```
+
+The heap can hold one entry per edge, so say O(E log E) in step 6. Unreachable nodes keep `int.MaxValue`, which is never added to, since only finite distances are queued. For a truly updatable queue, `SortedSet<(int Dist, int Node)>` has `Min`, `Remove` and `Add` in O(log n).
+
+### Standard-library tools that save time
+
+| Tool | What it saves |
+| --- | --- |
+| `Enumerable.Range(0, n)` | A range, for loops or to build an array with `Select` |
+| `Array.Fill(a, -1)`, `[.. a]` | Filling, and copying an input you must not change |
+| `a.Sum()`, `a.Max()`, `a.MaxBy(f)`, `a.MinBy(f)` | Folds in one call; on an empty sequence of numbers `Max` throws |
+| `a.CountBy(f)`, `a.GroupBy(f)`, `ToDictionary()` | Counting and grouping (`CountBy` is .NET 9 and later) |
+| `a.Index()`, `a.Zip(b)`, `a.Chunk(n)` | Indices, two sequences in step, fixed-size batches |
+| `Array.BinarySearch(a, x)` | Binary search; a negative result is `~insertionPoint` |
+| `SortedSet<T>`, `SortedDictionary<TKey, TValue>` | Ordered data with `Min`, `Max` and `GetViewBetween(lo, hi)` |
+| `IntersectWith`, `UnionWith`, `ExceptWith` | Set algebra, in place |
+| `int.PopCount(x)`, `Convert.ToString(x, 2)` | Counting bits, and a binary string |
+
+### Mistakes when coming from the other languages
+
+Each of these fails to compile or gives a wrong answer, and costs minutes.
+
+**From TypeScript.** `7 / 2` is `3`, so an average of `int` values needs a cast before dividing. `Substring(1, 4)` takes a length; `s[1..4]` is the slice you meant. A missing key throws instead of returning `undefined`. `'ab'` is an invalid `char` literal: strings need double quotes. An array's `ToString()` prints `System.Int32[]`, so debug with `string.Join(", ", a)`. And numbers that were safe up to 2⁵³ now overflow near 2.1 × 10⁹.
+
+**From Java and Kotlin.** `substring(1, 4)` ends at index 4; C#'s `Substring(1, 4)` takes four characters. `Dictionary` throws where `map.get(k)` returned `null`. `List.Sort` is unstable, where `Collections.sort` and Kotlin's `sortBy` are stable. Kotlin's `1..4` includes 4; C#'s `s[1..4]` stops before it. There is no `Math.floorMod`, so use the formula from the numbers table. `length` and `size()` become `Length` on arrays and strings and `Count` on collections.
+
+**From Go.** C#'s `int` is always 32 bits, while Go's is 64 on the machines you use, so a sum that was fine in Go overflows here. A missing key throws; `GetValueOrDefault` gives Go's zero value. `pts[0].X = 5` on a `List` of structs or tuples does not compile, because the indexer returns a copy; replace the whole element. Arrays are references, so `var b = a` shares the array that Go would copy.
+
+**From Python.** `a[-1]` throws; write `a[^1]`. `//` starts a comment, so `a // b` stops compiling. `%` keeps the sign of the left operand, and integers are not unbounded. `if (count)` does not compile: write `if (count > 0)`. `x in items` is `items.Contains(x)`, O(n) on a `List`. Tuples as dictionary keys work just as in Python.
+
+### Writing and running a quick test
+
+Every C# file in the bank is a file-based app: top-level statements call a `Check` helper and print a line, static local functions follow, and any `class` or `record` goes last, because top-level statements must come before type declarations:
+
+```csharp
+Check(TwoPrices([12, 7, 3, 9, 5], 12).SequenceEqual([2, 3]));
+Check(TwoPrices([1, 2], 10).Length == 0);
+Throws<NotFoundException>(() => FindCopy(2));
+Console.WriteLine("002 ok");
+
+static void Check(bool ok)
+{
+    if (!ok) throw new Exception("test failed");
+}
+
+static void Throws<TException>(Action act) where TException : Exception
+{
+    try { act(); }
+    catch (TException) { return; }
+    throw new Exception($"expected {typeof(TException).Name}");
+}
+```
+
+`dotnet run p002_two_prices.cs` builds and runs the file. A failing `Check` throws, and the stack trace gives the line. `SequenceEqual` is there because `==` on arrays compares references. Prefer `Check` to `Debug.Assert`, which is compiled out of Release builds.
+
+To see which case failed, use a table of tuples:
+
+```csharp
+(int[] Prices, int Budget, int[] Want)[] cases =
+[
+    ([12, 7, 3, 9, 5], 12, [2, 3]),
+    ([4, 4, 1], 8, [0, 1]),
+    ([1, 2], 10, []),
+    ([], 5, []),
+];
+
+foreach (var (prices, budget, want) in cases)
+{
+    var got = TwoPrices(prices, budget);
+    if (!got.SequenceEqual(want))
+        throw new Exception($"TwoPrices([{string.Join(", ", prices)}], {budget}) = [{string.Join(", ", got)}], want [{string.Join(", ", want)}]");
+}
+```
+
+It is the shape the TypeScript and Go sections use, and the message names the failing row. A real project would make it an xUnit `[Theory]` with one `[InlineData]` per row, run by `dotnet test` (Chapter 17); in the round, one file is enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
