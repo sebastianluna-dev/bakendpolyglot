@@ -141,3 +141,283 @@ Constraints: `0 ≤ s.length ≤ 10⁵`, `s` contains only `a`–`z`.
 **Complexity.** O(n) time, O(n) space for the stack.
 
 **Common mistake.** Removing pairs in a single pass without checking the letters each removal brings together: `"abccbd"` becomes `"abbd"` instead of `"ad"`.
+
+## 071 · Round-Robin Elimination
+
+**Stacks and Queues · Easy**
+
+SeatLock gives one backstage pass to a fan chosen by a counting game. `n` fans, numbered `1` to `n`, stand in a circle in that order. Counting starts at fan 1 and goes round the circle; the fan counted `k`-th leaves, and counting starts again from 1 with the next fan still in the circle. This repeats until every fan has left. Return the fan numbers in the order they leave, so the last number is the winner.
+
+```text
+Example 1
+  input:  n = 5, k = 2
+  output: [2, 4, 1, 5, 3]   (count 1, 2: fan 2 leaves; count resumes at 3, so fan 4 leaves…)
+
+Example 2
+  input:  n = 4, k = 3
+  output: [3, 2, 4, 1]
+```
+
+Constraints: `1 ≤ n ≤ 1000`, `1 ≤ k ≤ 10⁹`.
+
+**Approach.** The simple solution counts literally, moving one fan per count, which is O(n × k) and far too slow when `k` is 10⁹. Model the circle as a queue instead: the front is the fan the next count starts at, and moving a counted fan from the front to the back is one step round the circle. Before each removal, rotate `(k - 1) mod size` fans, where `size` is the number still in the circle, because every full lap brings the count back to the same fan; then dequeue the fan at the front and record it. That is at most `size - 1` moves per removal. (If only the winner were asked for, a recurrence would find it in O(n), but it does not give the order.) TypeScript has no queue, so it uses an array with a head index, as in the TypeScript section; Go uses a slice, appending at the back and reslicing at the front; Python uses `collections.deque`.
+
+<Solutions n="071" />
+
+**Complexity.** O(n × min(n, k)) time, O(n) space for the queue. In TypeScript the array also keeps every fan that was ever moved, up to O(n²) entries.
+
+**Common mistake.** Rotating `k` fans instead of `k - 1` before removing one, which removes the fan after the one counted `k`-th: `n = 5, k = 2` returns `[3, 1, 5, 2, 4]` instead of `[2, 4, 1, 5, 3]`.
+
+## 072 · Evaluate Postfix Expressions
+
+**Stacks and Queues · Medium**
+
+In postfix notation an operator comes after its two operands: `3 4 +` means `3 + 4`, and `5 1 2 + *` means `5 * (1 + 2)`, with no parentheses needed. Given a postfix expression as an array of tokens, return its value. A token is either an integer, written with an optional leading `-` (so `"-7"` is a number and `"-"` is an operator), or one of `"+"`, `"-"`, `"*"`, `"/"`. An operator applies to the two values just before it, the earlier one as the left operand.
+
+Division is integer division that truncates toward zero: `-7 / 2` is `-3`, not `-4`. That is what `/` on integers does in C#, Java, Kotlin and Go, and what `Math.trunc` does in TypeScript, but not Python's `//`, which rounds down toward negative infinity. The expression is always valid, nothing is divided by zero, and every intermediate value fits in a signed 32-bit integer.
+
+```text
+Example 1
+  input:  tokens = ["4", "13", "5", "/", "+"]
+  output: 6            (13 / 5 is 2, then 4 + 2)
+
+Example 2
+  input:  tokens = ["-7", "2", "/", "3", "*"]
+  output: -9           (-7 / 2 truncates to -3, then -3 * 3)
+```
+
+Constraints: `1 ≤ tokens.length ≤ 10⁴`, each number is between `-10⁴` and `10⁴`.
+
+**Approach.** The simple solution scans for the first operator, replaces it and its two operands with the result, and scans again from the start: O(n²). The rescanning is unnecessary because the operands an operator needs are always the two most recent values that no operator has used yet, which is exactly what a stack holds. Push each number; on an operator, pop the right operand first, then the left one, and push the result. When the tokens run out, the stack holds one value, the answer. Decide whether a token is an operator by comparing the whole token, never its first character. In Python, divide the absolute values with `//` and put the sign back; in TypeScript, `Math.trunc(-2 / 5)` is `-0`, which `assert.equal` from `node:assert/strict` treats as different from `0` (it compares with `Object.is`), so the code adds `0` to the quotient, which turns `-0` into `0`.
+
+<Solutions n="072" />
+
+**Complexity.** O(n) time, O(n) space for the stack.
+
+**Common mistake.** Popping the operands in the wrong order: the first value popped is the right operand, so treating it as the left one makes `["8", "2", "/"]` return `0` (2 / 8) instead of `4`.
+
+## 073 · Days Until a Warmer Day
+
+**Stacks and Queues · Medium**
+
+You get the daily maximum temperatures for a run of days, one integer per day. For each day, return how many days you have to wait after it for a strictly warmer day. If no later day is warmer, the answer for that day is `0`. A day with the same temperature does not count as warmer. An empty input gives an empty output.
+
+```text
+Example 1
+  input:  temps = [18, 16, 17, 21, 20, 20, 23]
+  output: [3, 1, 1, 3, 2, 1, 0]   (day 4 at 20 waits for the 23 on day 6, not the 20 on day 5)
+
+Example 2
+  input:  temps = [30, 25, 20]
+  output: [0, 0, 0]
+```
+
+Constraints: `0 ≤ temps.length ≤ 10⁵`, `-50 ≤ temps[i] ≤ 50`.
+
+**Approach.** The simple solution scans forward from each day until it finds a warmer one: O(n²) when temperatures keep falling and only rise at the very end. The repeated work is scanning again over days whose answer is still open. Keep those days on a stack of indices instead: a day stays there until a warmer day arrives, so the temperatures on the stack never rise from bottom to top (a monotonic stack). When day `i` arrives, it is the answer for every waiting day cooler than it, and those are all at the top: pop each one, `j`, and record `i - j`. Then push `i`. Days still on the stack at the end keep `0`.
+
+<Solutions n="073" />
+
+**Complexity.** O(n) time, since each index is pushed and popped at most once; O(n) space for the stack, besides the output.
+
+**Common mistake.** Popping while the waiting day is cooler or equal (`<=`), which counts a day of the same temperature as warmer: `[5, 5, 6]` returns `[1, 1, 0]` instead of `[2, 1, 0]`.
+
+## 074 · Expand Repeated Patterns
+
+**Stacks and Queues · Medium**
+
+A compact text format writes `k[text]` for `text` repeated `k` times, and the patterns can nest. Given an encoded string, return the expanded one. The string contains only lowercase letters, digits and square brackets. Every run of digits is a count from `1` to `300` without leading zeros and is immediately followed by `[`; every `[` follows a count; the brackets are balanced and none is empty. Letters outside any bracket are copied as they are, and the empty string expands to the empty string.
+
+```text
+Example 1
+  input:  s = "3[ab]2[c]"
+  output: "abababcc"
+
+Example 2
+  input:  s = "x2[y3[z]]"
+  output: "xyzzzyzzz"     (y3[z] is "yzzz", repeated twice after the x)
+```
+
+Constraints: `0 ≤ s.length ≤ 100`, the expanded string has at most `10⁵` characters.
+
+**Approach.** The simple solution finds an innermost bracket, one with no `[` inside it, replaces it and its count with the expansion, and repeats until no brackets are left: every pass rescans and rebuilds the whole string. One left-to-right pass with a stack is enough. Keep the text built so far at the current depth and the count being read. A digit extends the count (`count × 10 + digit`, since counts can have several digits). An `[` pushes the count and the text built so far, then starts both afresh. A `]` pops them: the new current text is the popped text followed by the current text repeated the popped number of times; a letter is simply appended. C#, Java and Kotlin build the text in a `StringBuilder`; TypeScript, Go and Python concatenate strings, which is fine at this size.
+
+<Solutions n="074" />
+
+**Complexity.** O(L × d) time in the worst case, where `L` is the length of the output and `d` the nesting depth, because each `]` copies the text inside it once more; O(L) space for the text and the stacks.
+
+**Common mistake.** Setting the count to the latest digit instead of accumulating `count × 10 + digit`, so `"12[q]"` expands to `"qq"` instead of twelve `q`s.
+
+## 075 · Simplify a File Path
+
+**Stacks and Queues · Medium**
+
+Shelfwise stores cover images under Unix-style paths, and clients sometimes send paths with redundant parts. Given an absolute path, which always starts with `/`, return its canonical form: a single `/` at the start, directory names separated by exactly one `/`, no `/` at the end unless the path is the root `/` itself, and no `.` or `..` parts.
+
+The rules: several slashes in a row count as one; `.` is the current directory and disappears; `..` goes up to the parent directory, and at the root it stays at the root; any other part is an ordinary name, including `...` and names that start with a dot, such as `.hidden`.
+
+```text
+Example 1
+  input:  path = "/shelfwise//covers/./2024/../thumbs/"
+  output: "/shelfwise/covers/thumbs"
+
+Example 2
+  input:  path = "/../a/.../b/.."
+  output: "/a/..."     (".." at the root stays there; "..." is a name)
+```
+
+Constraints: `1 ≤ path.length ≤ 3000`, `path` starts with `/` and contains only letters, digits, `.`, `_`, `-` and `/`.
+
+**Approach.** The simple solution applies text rewrites until nothing changes: collapse `//`, remove `/./`, remove a name followed by `/..`. Each pass is O(n), there can be O(n) passes, and the rewrites interact in ways that are easy to get wrong. Splitting on `/` gives the parts directly. Skip empty parts (from repeated slashes or the slashes at either end) and `.`; push a name on a stack; for `..`, pop one name if the stack is not empty. The stack is then exactly the list of directories from the root down, so the answer is `/` followed by the stack joined with `/`, from bottom to top. In C#, the stack is a `List<string>`, because `Stack<T>` enumerates from the top and joining it would reverse the path; in Java, the `ArrayDeque` is used at its back for the same reason.
+
+<Solutions n="075" />
+
+**Complexity.** O(n) time, O(n) space for the parts and the stack.
+
+**Common mistake.** Popping for `..` without first checking that the stack is empty: `"/../a"` must give `"/a"`, and at the root there is no parent to pop.
+
+## 076 · Colliding Parcels on a Conveyor
+
+**Stacks and Queues · Medium**
+
+A Parcel and Pulse test rig pushes parcels along a straight track, all at the same speed. `parcels[i]` describes the `i`-th parcel from the left: a positive value is a parcel of that weight moving right, and a negative value is a parcel of weight `|value|` moving left. When a right-moving parcel meets a left-moving one, the lighter one is knocked off the track and the heavier one carries on unchanged; if they weigh the same, both fall off. Parcels moving the same way never meet, and a left-moving parcel never meets a right-moving one to its right, because they move apart.
+
+Return the parcels still on the track once no more collisions can happen, as their signed values in left-to-right order. Return an empty array if none are left.
+
+```text
+Example 1
+  input:  parcels = [4, 7, -5]
+  output: [4, 7]        (7 knocks -5 off; 4 never meets anything)
+
+Example 2
+  input:  parcels = [3, 6, -6, -8, 2]
+  output: [-8, 2]       (6 and -6 both fall; -8 knocks 3 off; 2 moves away)
+```
+
+Constraints: `0 ≤ parcels.length ≤ 10⁴`, `1 ≤ |parcels[i]| ≤ 1000`, no value is `0`.
+
+**Approach.** The simple solution simulates: find an adjacent pair where a right-moving parcel is followed by a left-moving one, resolve it, and scan again from the start: O(n²). But a left-moving parcel can only meet the right-moving parcels to its left that are still on the track, nearest first, so scan once from left to right with a stack of the parcels that have survived so far. Push a right-moving parcel; it may be hit later. A left-moving parcel fights the top of the stack while the top moves right: if the top is lighter, pop it and keep fighting; if they weigh the same, pop it and the new parcel falls too; if the top is heavier, the new parcel falls. If it is still on the track when the stack is empty or the top moves left, push it. At the end the stack, bottom to top, is the answer. C# uses a `List<int>` and Java an `ArrayDeque` used at its back, so the stack converts to the answer in order.
+
+<Solutions n="076" />
+
+**Complexity.** O(n) time, since each parcel is pushed and popped at most once; O(n) space for the stack.
+
+**Common mistake.** Treating any two neighbours with different signs as a collision: in `[-3, 4]` the parcels move apart, and both must stay on the track.
+
+## 077 · A Fixed-Size Ring Buffer
+
+**Stacks and Queues · Medium**
+
+A Parcel and Pulse handheld scanner keeps scans in a fixed array of `capacity` slots while it is offline, and uploads the oldest first. Design `RingBuffer`, a first-in, first-out queue over that array, created with `RingBuffer(capacity)`. `enqueue(value)` adds `value` at the back and returns `true`, or returns `false` and changes nothing if the buffer is full. `dequeue()` removes and returns the oldest value, or returns `-1` if the buffer is empty. `front()` returns the oldest value and `rear()` the newest, without removing them, or `-1` if the buffer is empty. `isEmpty()` and `isFull()` report the two states (`IsEmpty` and `IsFull` in C# and Go, `is_empty` and `is_full` in Python).
+
+Values are never negative, so `-1` cannot be mistaken for one. Allocate the array once, in the constructor, and do not use a growable list or a library queue for the storage. Every operation must be O(1).
+
+```text
+Example 1
+  RingBuffer(3)
+  calls:   isEmpty(), enqueue(5), enqueue(8), enqueue(2), enqueue(9), isFull(),
+           rear(), dequeue(), enqueue(9), front(), rear()
+  returns: true, true, true, true, false, true, 2, 5, true, 8, 9
+           (the second enqueue(9) wraps round into the slot 5 left free)
+
+Example 2
+  RingBuffer(1)
+  calls:   enqueue(0), isFull(), enqueue(1), front(), rear(), dequeue(), isEmpty()
+  returns: true, true, false, 0, 0, 0, true
+```
+
+Constraints: `1 ≤ capacity ≤ 1000`, `0 ≤ value ≤ 10⁹`, at most `10⁴` calls in total.
+
+**Approach.** The simple solution keeps the values in a list, appending on `enqueue` and removing index 0 on `dequeue`; that shifts every remaining value, O(n) per `dequeue`, and it is not a fixed array. Instead, leave the values where they are and move indices: `head` is the slot of the oldest value and `count` is how many are stored. The next free slot is `(head + count) mod capacity`, the newest value is at `(head + count - 1) mod capacity`, and `dequeue` moves `head` one slot forward, wrapping with the same `mod`. Keeping `count` rather than a second `tail` index makes the two edge states easy to tell apart: empty is `count == 0` and full is `count == capacity`. With only `head` and `tail`, the two indices are equal both when the buffer is empty and when it is full, and the usual fixes are a counter or a slot left unused.
+
+<Solutions n="077" />
+
+**Complexity.** O(1) time per operation, O(capacity) space for the array.
+
+**Common mistake.** Reading `rear()` from the next free slot, `(head + count) mod capacity`, instead of the last filled one: after `enqueue(5)` and `enqueue(8)` on a buffer of capacity 3, `rear()` returns whatever is in the unused third slot instead of `8`.
+
+## 078 · Remove k Digits for the Smallest Number
+
+**Stacks and Queues · Medium**
+
+You get a non-negative integer as a string of digits, `num`, and a number `k`. Remove exactly `k` digits, keeping the others in their original order, so that the number left is as small as possible. Return it as a string without leading zeros; if no digits are left, or only zeros, return `"0"`. `num` itself has no leading zeros unless it is `"0"`.
+
+```text
+Example 1
+  input:  num = "4172", k = 2
+  output: "12"
+
+Example 2
+  input:  num = "30200", k = 1
+  output: "200"        (removing the 3 leaves "0200")
+```
+
+Constraints: `1 ≤ num.length ≤ 10⁵`, `0 ≤ k ≤ num.length`, `num` contains only `0`–`9`.
+
+**Approach.** Trying every set of `k` digits to remove is exponential. A greedy rule works instead: a smaller number has smaller digits earlier, so the first digit that is larger than the digit after it should go, because removing it brings a smaller digit into its position; if no digit is larger than its successor, remove the last one. Applying that rule `k` times, rescanning from the start each time, is O(k × n). A stack applies all the removals in one pass: for each digit, while removals remain and the top of the stack is larger than it, pop the top and count one removal; then push the digit. If removals remain at the end, the stack never decreases, so drop that many digits from its end. Finally skip the leading zeros, and return `"0"` if nothing is left. C#, Java and Kotlin use a `StringBuilder` as the stack and Go a `[]byte`.
+
+<Solutions n="078" />
+
+**Complexity.** O(n) time, since each digit is pushed and popped at most once; O(n) space for the stack.
+
+**Common mistake.** Forgetting the removals left over after the loop: in `"12345"` with `k = 2` no digit is larger than the next, nothing is popped, and the answer `"123"` comes only from dropping the last two digits.
+
+## 079 · Biggest Banner Over the Skyline
+
+**Stacks and Queues · Hard**
+
+An advertiser wants to hang one rectangular banner across a row of buildings. The buildings stand side by side, each one unit wide, and `heights` gives their heights from left to right. The banner's bottom edge is on the ground and its sides are vertical; it may span several adjacent buildings, but it may only cover facades, so its height cannot exceed the lowest building it spans. Return the largest possible area of the banner. If there are no buildings, or every height is `0`, the answer is `0`.
+
+```text
+Example 1
+  input:  heights = [3, 1, 4, 5, 4, 2]
+  output: 12           (height 4 across the buildings 4, 5, 4)
+
+Example 2
+  input:  heights = [2, 4, 2]
+  output: 6            (height 2 across all three beats height 4 across one)
+```
+
+Constraints: `0 ≤ heights.length ≤ 10⁵`, `0 ≤ heights[i] ≤ 10⁴`, so the area fits in a signed 32-bit integer.
+
+**Approach.** The simple solution tries every left end and moves the right end outwards, keeping the minimum height so far: O(n²). The best banner always takes the height of some building and extends from it, both ways, until the first lower building on each side. So for each building you need the nearest lower building to its left and to its right, and a stack of indices whose heights rise from bottom to top gives both. When building `i` is not taller than the building on top of the stack, `i` is the top's right limit; its left limit is the index just below it on the stack, since everything between those two was taller and has already been popped. Pop the top and compute `height × (i - left - 1)`, using `-1` when the stack is empty. A height of `0` after the last building empties the stack at the end. Popping on equal heights undercounts the earlier of two equal buildings, but the later one, popped afterwards, spans both, so the maximum is still right.
+
+<Solutions n="079" />
+
+**Complexity.** O(n) time, since each index is pushed and popped once; O(n) space for the stack.
+
+**Common mistake.** Computing the width as `i - top`, from the popped index, instead of `i - left - 1`, which forgets the taller buildings already popped to its left: `[2, 1, 2]` gives `2` instead of `3`.
+
+## 080 · A Calculator With Parentheses
+
+**Stacks and Queues · Hard**
+
+Evaluate an arithmetic expression given as a string, without the language's `eval`. The expression follows this grammar, where `[ ]` means optional and `{ }` means repeated zero or more times:
+
+```text
+expression := [ "-" ] term { ( "+" | "-" ) term }
+term       := number | "(" expression ")"
+number     := digit { digit }
+```
+
+So the operators are binary `+` and `-`, applied left to right, and a unary minus may appear only as the first token of an expression: at the start of the string or right after `(`. There is no unary plus, no two operators in a row and no empty `()`. Spaces may appear anywhere between tokens but never inside a number. The input is always valid; return its value.
+
+```text
+Example 1
+  input:  s = "7 - (3 - (1 + 2))"
+  output: 7
+
+Example 2
+  input:  s = "-(4 - (-2 + 9)) + 10"
+  output: 13           (-2 + 9 is 7, 4 - 7 is -3, negated it is 3, plus 10)
+```
+
+Constraints: `1 ≤ s.length ≤ 3 × 10⁵`, `s` contains only digits, `+`, `-`, `(`, `)` and spaces, and the sum of all the numbers in `s` is at most `2³¹ − 1`, so every intermediate value fits in a signed 32-bit integer.
+
+**Approach.** The simple solution evaluates the innermost brackets first and splices each result back into the string, rescanning every time: O(n²), and a negative result spliced after a `-` produces `--`, which the grammar does not allow. With only `+` and `-`, the value is a sum of signed numbers, where each number's sign is its own sign times the sign in front of every bracket around it. So one pass is enough: keep the `result` of the current bracket, the `sign` of the pending number, and the `number` being read. A digit extends the number; `+` or `-` adds `sign × number` to the result and sets the next sign. `(` pushes the result and the sign in front of the bracket, then starts afresh with `0` and `+1`; `)` adds the pending number and combines the bracket with the outside: `result = savedResult + savedSign × result`. A leading unary minus needs no special case, because at the start of an expression the result and the number are both `0`, so `-x` is read as `0 - x`. A recursive-descent parser over the grammar is equally correct, but deep nesting can exhaust the call stack, which the explicit stack avoids.
+
+<Solutions n="080" />
+
+**Complexity.** O(n) time, O(n) space for the stack (two entries per open bracket).
+
+**Common mistake.** Applying the minus in front of a bracket only to its first number, as if the brackets were not there: `"1 - (2 + 3)"` becomes `1 - 2 + 3 = 2` instead of `-4`.
