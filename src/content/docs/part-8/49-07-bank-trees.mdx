@@ -7,3 +7,213 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+Almost every tree problem is one recursive function: handle the empty tree, call the function on the left and right children, and combine the two answers. These problems train that shape, and the node vocabulary that differs between the six languages: the nullable child (`TreeNode | null`, `TreeNode?`, a plain reference in Java, `*TreeNode` in Go, `TreeNode | None` in Python) and the test for a missing one. Every file builds its trees from the same level-order lists, with `null` for a missing child (`None` in Python, and a `null` constant set to `math.MinInt` in Go), so the inputs read the same in all six languages. The recursion goes as deep as the tree, so the constraints keep trees at most 500 levels deep, well below Python's default recursion limit of 1,000.
+
+## 103 · Depth of a Tree
+
+**Trees · Easy**
+
+Given the root of a binary tree, return its depth: the number of nodes on the longest path from the root down to a leaf. A single node has depth 1, and the empty tree has depth 0. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [5, 2, 9, null, 4, 7, null, null, null, 6]
+  output: 4            (5 → 9 → 7 → 6)
+
+Example 2
+  input:  root = [1, null, 2, null, 3]
+  output: 3            (every node has only a right child)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The depth of a tree is one more than the depth of its deeper subtree, and the empty tree has depth 0; that is the whole recursion, `1 + max(depth(left), depth(right))`, and it visits every node once. There is no slower brute force worth mentioning, but there is an iterative version: a breadth-first walk with a queue counts the levels one at a time and never recurses, which matters when a tree may be deeper than the call stack allows. Write the recursive one first, because it is three lines and its shape (handle `null`, recurse on both children, combine) is the shape of every problem in this topic.
+
+<Solutions n="103" />
+
+**Complexity.** O(n) time, O(h) space for the call stack, where `h` is the depth (up to `n` for a tree that is a single chain).
+
+**Common mistake.** Stopping at leaves instead of at `null`: with only a base case like "a leaf has depth 1", the call on `[1, null, 2]` still recurses into the missing left child of the root and dereferences `null`.
+
+## 104 · Mirror a Tree
+
+**Trees · Easy**
+
+Given the root of a binary tree, turn it into its mirror image in place: at every node, the left and right children swap places. Return the root. The empty tree stays empty. Trees are given in level order, with null for a missing child, and the checks read the result back the same way, without trailing nulls.
+
+```text
+Example 1
+  input:  root = [6, 2, 8, 1, 4, null, 9]
+  output: [6, 8, 2, 9, null, 4, 1]
+
+Example 2
+  input:  root = [3, 1]
+  output: [3, null, 1]   (the left child becomes a right child)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** Swapping the root's two children is not enough, because each subtree must come out mirrored too. Recursively, the new left child is the mirrored right subtree and the new right child is the mirrored left subtree, and every node is visited once. Order matters: save the old left child in a variable before overwriting it, or both sides are built from the right subtree. C#, Go and Python swap with one tuple assignment, which evaluates both mirrored subtrees before assigning either.
+
+<Solutions n="104" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Writing `root.left = mirror(root.right)` and then `root.right = mirror(root.left)` without saving the old left child: the second line reads the value the first one just wrote, so `[3, 1]` comes back as `[3]` and the 1 is lost.
+
+## 105 · Are Two Trees Identical?
+
+**Trees · Easy**
+
+Given the roots of two binary trees, `a` and `b`, return `true` if they are identical: the same shape, with equal values in the same positions. Two empty trees are identical; an empty tree and a non-empty one are not. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  a = [4, 2, 6], b = [4, 2, 6]
+  output: true
+
+Example 2
+  input:  a = [4, 2], b = [4, null, 2]
+  output: false        (2 is a left child in one and a right child in the other)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴` in each tree, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The simple solution writes both trees out as level-order lists, nulls included, and compares the lists: O(n + m) time and as much extra memory. Walking both trees in step needs no lists. If either node is `null`, they match only when both are; otherwise their values must be equal, the two left subtrees identical and the two right subtrees identical. Because `&&` (`and` in Python) short-circuits, the walk stops at the first difference.
+
+<Solutions n="105" />
+
+**Complexity.** O(min(n, m)) time, since the walk never goes past the smaller tree; O(h) space for the call stack.
+
+**Common mistake.** Comparing traversals of the values alone, without the missing children: in preorder, `[4, 2]` and `[4, null, 2]` both read 4, 2, although their shapes differ.
+
+## 106 · Is the Tree Symmetric?
+
+**Trees · Easy**
+
+Given the root of a binary tree, return `true` if it is symmetric: its own mirror image, so that the left subtree is the mirror of the right subtree in shape and in values. The empty tree and a single node are symmetric. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [7, 4, 4, 1, 9, 9, 1]
+  output: true
+
+Example 2
+  input:  root = [5, 3, 3, 8, null, null, 2]
+  output: false        (the shape is mirrored, but 8 faces 2)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The simple solution copies the tree, mirrors the copy as in problem 104, and compares it with the original as in problem 105: O(n) time, but O(n) extra memory for the copy. A helper `isMirror(a, b)` does both at once without the copy. It walks two subtrees in step like problem 105, but pairs the outer children (`a.left` with `b.right`) and the inner ones (`a.right` with `b.left`). The tree is symmetric when it is empty or when its root's two subtrees are mirrors of each other.
+
+<Solutions n="106" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Pairing `a.left` with `b.left` as in problem 105, which tests whether the two halves are copies rather than mirrors and returns `false` for Example 1, whose left half `4 → 1, 9` mirrors the right half `4 → 9, 1`.
+
+## 107 · Is the Tree Height-Balanced?
+
+**Trees · Easy**
+
+A binary tree is height-balanced when, at every node, the depths of the left and right subtrees differ by at most one, with depth counted as in problem 103 (an empty subtree has depth 0). Given the root of a binary tree, return `true` if it is height-balanced. The empty tree is balanced. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [10, 5, 15, null, null, 12, 20]
+  output: true
+
+Example 2
+  input:  root = [10, 5, null, 3, null, 1]
+  output: false        (at the root, the left subtree has depth 3 and the right one 0)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** The simple solution checks the rule at every node by calling problem 103's depth function on both children. It is correct, but every ancestor recomputes the depth of the same subtrees, which is O(n²) on a tree shaped like a chain. Computing the heights bottom-up, once, removes that repeated work: a helper returns the height of its subtree, or `-1` as soon as any subtree inside it is unbalanced. Each node checks both children's results for `-1`, then the difference between them, and either passes `-1` up or returns one more than the larger height, so a single post-order pass decides the whole tree.
+
+<Solutions n="107" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Checking the rule only at the root: `[1, 2, 3, 4, null, null, 5, 6, null, null, 7]` has subtrees of depth 3 and 3 under the root, but node 2 has a left subtree of depth 2 and no right one, so the tree is not balanced.
+
+## 108 · Longest Path Between Two Nodes
+
+**Trees · Easy**
+
+Given the root of a binary tree, return the length, in edges, of the longest path between any two of its nodes. A path follows parent–child links and never visits a node twice, and it does not have to pass through the root. The empty tree and a single node have a longest path of 0. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [8, 4, 11, 2, 6, null, null, 1]
+  output: 4            (1 → 2 → 4 → 8 → 11)
+
+Example 2
+  input:  root = [1, 2, null, 3, 4, 5, null, null, 6, 7, null, null, 8]
+  output: 6            (7 → 5 → 3 → 2 → 4 → 6 → 8, which never reaches the root)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-10⁴ ≤ val ≤ 10⁴`.
+
+**Approach.** Every path has one highest node, where it stops going up and starts going down, and the longest path turning at a node goes down the deepest branch on each side. With depth counted in nodes as in problem 103, that path has `depth(left) + depth(right)` edges. The simple solution computes this at every node with separate depth calls, which is O(n²) on a chain. But the depth function already has both numbers in hand at each node, so it can record the best `left + right` as a side effect while it returns `1 + max(left, right)` to its parent, and one pass is enough. The best value lives in a variable that a nested function updates; Java has no nested function that can change a local variable, so it passes a one-element array to a static helper.
+
+<Solutions n="108" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Computing `depth(left) + depth(right)` at the root only, which returns 4 instead of 6 for Example 2, because the longest path there turns at node 2.
+
+## 109 · A Root-to-Leaf Path With a Given Sum
+
+**Trees · Easy**
+
+Given the root of a binary tree and a target, return `true` if some path from the root down to a leaf has values that add up to the target. A leaf is a node with no children, and a path must end at one. Values and the target may be negative. The empty tree has no paths, so it returns `false` for every target, including 0. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [5, 3, 8, 1, null, null, 4], target = 9
+  output: true         (5 + 3 + 1)
+
+Example 2
+  input:  root = [2, 7], target = 2
+  output: false        (2 has a child, so it is not a leaf; the only path is 2 + 7)
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `-1000 ≤ val ≤ 1000`, `-10⁶ ≤ target ≤ 10⁶`.
+
+**Approach.** The simple solution collects the sum of every root-to-leaf path in a list and then looks for the target, which costs a list as long as the number of leaves. Carrying what is still missing needs no list: each node subtracts its value from the target and asks its children whether either can make up the rest, and a leaf answers whether its value is exactly what remains. The `||` (`or` in Python) stops at the first path that works. Because values can be negative, a branch cannot be abandoned early when its running sum passes the target.
+
+<Solutions n="109" />
+
+**Complexity.** O(n) time, O(h) space for the call stack.
+
+**Common mistake.** Treating `null` as the end of a path, with a base case like "an empty tree matches when the target is 0": the missing right child of the root in Example 2 then "ends" a path with sum 2, and the answer comes out `true`.
+
+## 110 · Sum of a Key Range in a BST
+
+**Trees · Easy**
+
+Given the root of a binary search tree and two keys `lo ≤ hi`, return the sum of every key `k` with `lo ≤ k ≤ hi`; both ends are included. In a binary search tree the keys are distinct, every key in a node's left subtree is smaller than the node's key, and every key in its right subtree is larger. If no key falls in the range, return 0. Trees are given in level order, with null for a missing child.
+
+```text
+Example 1
+  input:  root = [20, 10, 30, 5, 15, 25, 40], lo = 12, hi = 27
+  output: 60           (15 + 20 + 25)
+
+Example 2
+  input:  root = [8, 3, 12, null, 6], lo = 9, hi = 11
+  output: 0
+```
+
+Constraints: `0 ≤ number of nodes ≤ 10⁴`, the depth is at most 500, `1 ≤ key ≤ 10⁵`, `1 ≤ lo ≤ hi ≤ 10⁵`, so the sum fits in a 32-bit `int`.
+
+**Approach.** The simple solution visits every node and adds the keys in the range: O(n), and it ignores the ordering. The ordering lets the walk skip whole subtrees. If a node's key is below `lo`, everything in its left subtree is smaller still, so only the right subtree can contribute; if it is above `hi`, only the left subtree can. Otherwise the key counts, and both subtrees may hold more. Out-of-range nodes are visited only along the paths towards `lo` and `hi`, so the walk touches the keys in the range plus O(h) others.
+
+<Solutions n="110" />
+
+**Complexity.** O(h + r) time, where `r` is the number of keys in the range (O(n) in the worst case); O(h) space for the call stack.
+
+**Common mistake.** Skipping a node with `key <= lo` instead of `key < lo`, which drops `lo` itself: for Example 1's tree with `lo = 10` and `hi = 20` it returns 35 instead of 45.

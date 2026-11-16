@@ -271,3 +271,55 @@ Constraints: `1 ≤ timestamp ≤ 10⁹`, `1 ≤ key.length, value.length ≤ 50
 **Complexity.** O(1) amortized time per `set` and O(log k) per `get`, where `k` is the number of values recorded for that key; O(n) space for the `n` entries recorded in total.
 
 **Common mistake.** Searching for the first entry whose timestamp is at least `timestamp` and returning it: `get("hold.minutes", 249)` returns `"15"`, a value that was set after the moment asked about.
+
+## 101 · Median of Two Sorted Arrays
+
+**Binary Search · Hard**
+
+You get two integer arrays, `a` and `b`, each sorted in non-decreasing order, and at least one of them is non-empty. Return the median of all their values together: the middle value when the total count is odd, and the mean of the two middle values when it is even. Return it as a floating-point number (`number`, `double`, `Double`, `float64`, `float`). Because the inputs are integers, the median is always a whole number or a whole number plus one half, and both are exact in binary floating point, so the checks compare the result exactly rather than with a tolerance.
+
+```text
+Example 1
+  input:  a = [12, 18, 31], b = [9, 20, 25, 40]
+  output: 20           (all seven: 9, 12, 18, 20, 25, 31, 40)
+
+Example 2
+  input:  a = [5, 9], b = [6, 30]
+  output: 7.5          (the two middle values are 6 and 9)
+```
+
+Constraints: `0 ≤ a.length, b.length ≤ 10⁵`, `a.length + b.length ≥ 1`, `-10⁶ ≤ a[i], b[i] ≤ 10⁶`; the expected time is O(log(min(m, n))).
+
+**Approach.** The simple solution merges the two arrays as in the last step of merge sort and reads the middle: O(m + n) time, or O(1) space if it only counts its way to the middle. The binary search looks for a split instead of a value: the median splits all the values into a left half of `half = (m + n + 1) / 2` values and a right half, with every left value at most every right value. If `i` of the left values come from `a`, the other `j = half - i` come from `b`, so `i` alone fixes the split. As `i` grows, `a[i]` rises and `b[j-1]` falls, so the condition `b[j-1] ≤ a[i]` switches from "no" to "yes" once, and the first `i` where it holds is the split; that is the topic's loop over the half-open range `[0, m)`, where `m` means "take all of `a`". A neighbour beyond an end of its array counts as minus or plus infinity (the `int` limits in C#, Java, Kotlin and Go, which the values never reach). The median is then the larger left neighbour for an odd total, or its mean with the smaller right neighbour for an even one. Search the shorter array, so that `j` always stays within `0..n` and the bound is O(log(min(m, n))).
+
+<Solutions n="101" />
+
+**Complexity.** O(log(min(m, n))) time, O(1) space.
+
+**Common mistake.** Averaging the two middle values with an integer division: where `int / int` truncates, `(6 + 9) / 2` turns Example 2's 7.5 into 7, so divide by `2.0` or convert to floating point first.
+
+## 102 · Split Parcels Across k Trucks With the Lightest Peak
+
+**Binary Search · Hard**
+
+A Parcel and Pulse depot has a row of parcels on a conveyor, `weights[i]` kilograms each, and `k` trucks. The parcels stay in order: the first truck takes a run of parcels from the front, the second takes the run that follows, and so on, so every truck carries a consecutive stretch of at least one parcel and every parcel is loaded. The peak of a split is the heaviest load any truck carries. Return the smallest peak possible.
+
+```text
+Example 1
+  input:  weights = [4, 9, 3, 6, 8, 2], k = 3
+  output: 13           ([4, 9], [3, 6], [8, 2] carry 13, 9 and 10)
+
+Example 2
+  input:  weights = [3, 1, 12, 2], k = 3
+  output: 12           (no truck can carry less than the heaviest parcel)
+```
+
+Constraints: `1 ≤ k ≤ weights.length ≤ 10⁵`, `1 ≤ weights[i] ≤ 10⁴`, so the total fits in a 32-bit `int`.
+
+**Approach.** The simple solution tries every way to place the `k - 1` cuts, which is exponential, and a dynamic programme over prefixes and trucks is still O(k × n²). Binary search on the answer swaps the hard question for an easy one: given a limit, how many trucks are needed so that none carries more? A greedy pass answers that in O(n): keep loading the current truck, and start a new one when the next parcel would take it over the limit. The answer is monotonic, because a limit that works keeps working when it is raised, so the topic's loop finds the first limit that works in the half-open range `[heaviest parcel, total)`: no smaller limit can work, and if the loop reaches the end, the total is the answer, because one truck can always carry everything. Needing fewer than `k` trucks is fine, because with `k ≤ n` a stretch of two or more parcels can always be cut again without raising the peak.
+
+<Solutions n="102" />
+
+**Complexity.** O(n × log(total weight)) time, O(1) space.
+
+**Common mistake.** Starting the search at `lo = 1` instead of at the heaviest parcel: the greedy check assumes every parcel fits in a truck on its own, so a limit below 12 still loads the 12 kg parcel, and for `[3, 1, 12, 2]` with `k = 3` the search returns 4 instead of 12.
