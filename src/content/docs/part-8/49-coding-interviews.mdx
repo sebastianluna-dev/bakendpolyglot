@@ -1,0 +1,209 @@
+---
+title: Coding Interviews in Six Languages
+chapter: 49
+part: Part VIII · Senior Craft
+kicker: From reading code with an assistant to writing it from memory, out loud, against a clock.
+sidebar:
+  order: 49
+---
+import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
+
+You have built Shelfwise in eight stacks and SeatLock in five. You have written the same claim, the same idempotency key and the same webhook check in TypeScript, C#, Java, Kotlin, Go and Python, and you have read every one of them side by side. None of that guarantees you can pass a live coding round in the language you use least.
+
+Chapter 48 gave the usual advice for coding rounds: choose the language you are fastest in. This chapter is for the times you can't. The role is a Go role, or the team writes Kotlin, or the interviewer asks for Python because that is what the shared editor runs. And there is a second gap that most readers of this book share. If you write code with an AI assistant every day, you know what a hash map is for and when to reach for a heap, but you may not have typed `map[string]int{}`, `new PriorityQueue<>(Comparator.comparingInt(...))` or `heapq.heappush` from memory in a long time. In an interview there is no autocomplete to finish the line. Under pressure, your recall of the syntax is what lets you show what you understand.
+
+So this chapter teaches very few concepts. It trains recall: the same small set of tools in six languages until you can write them without looking, a method for solving a problem out loud, and enough practice to make both automatic.
+
+<Recall
+  items={[
+    { ref: 'Ch. 3–8', text: 'One chapter per language: the runtime, the type system, collections, errors and concurrency of each.' },
+    { ref: 'Ch. 9', text: 'The five ecosystems side by side, with the trade-offs made explicit.' },
+    { ref: 'Ch. 17', text: 'Tests that say what the code should do, table-driven where the language makes it cheap.' },
+    { ref: 'Ch. 23', text: 'Races, locks and the claim that lets exactly one buyer win.' },
+    { ref: 'Ch. 48', text: 'The four kinds of round in a senior loop, and how to prepare for each.' },
+  ]}
+/>
+
+The chapter has two parts. The first teaches: how a live round works and one method for any problem (this section); one section per language, all with the same structure so you can compare them; a backend round with an endpoint, SQL and a code review; a one-page cheat sheet per language; a practice plan; and an honest note on where AI fits. The second part is the **problem bank**, 200 problems from easy to hard, each solved in all six languages with the same algorithm, the same function name and the same examples. It closes the book.
+
+Every solution in the bank is also a file in `apps/interview-bank` in the companion repository (Appendix D), and CI runs all of them in every language on each change. When the book says a solution is complete and runnable, CI has run it.
+
+## How a live coding interview works
+
+The format varies between companies and between rounds, so ask the recruiter beforehand rather than guessing. The common shape is a short introduction, one problem (sometimes two, the second building on the first), and a few minutes at the end for your questions. You share a screen or a collaborative editor with one or two interviewers. Some editors run code, some only highlight it, and some do neither, so you should be able to write correct code without running it and to test it by hand.
+
+What the interviewer can observe is narrow, and that is useful to know:
+
+- **How you understand the problem.** Do you ask about the inputs, the outputs and the awkward cases before you type?
+- **How you choose an approach.** Can you name a simple solution, say why it is slow, and find a better one?
+- **Whether the code is correct and readable.** Clear names, no dead ends, edge cases handled.
+- **How you check your work.** Do you find your own bugs by tracing an example, before the interviewer points them out?
+- **How you communicate.** Can someone follow your reasoning while you work?
+
+Notice that "knows the trick" is not on the list. Interviewers usually prefer a candidate who reaches a good solution steadily and explains it to one who writes the optimal answer in silence. The method below makes that steady path the default.
+
+Two rules apply before you start. Ask whether you may use the language's documentation; some interviewers allow it, many do not. And unless the interviewer says otherwise, assume no AI assistant and no autocomplete. Practise under the same conditions, as the plan later in this chapter does.
+
+## One method for every problem
+
+Use the same six steps every time, out loud, in this order. The order matters more than speed: each step makes the next one cheaper, and skipping a step is where most interview bugs come from.
+
+| Step | What you do | What you say |
+| --- | --- | --- |
+| 1. Restate | Put the problem in your own words: inputs, outputs, types | "So I get a list of prices and a budget, and I return the positions of two items that add up to it." |
+| 2. Ask about edge cases | Empty input, one element, duplicates, negatives, no answer, size limits, whether you may change the input | "What should I return if no pair works? Can the same item count twice? How long can the list be?" |
+| 3. Simple solution first | The brute force, its complexity, and whether to code it | "Checking every pair works and is O(n²). I'd like to do better, but that's my fallback." |
+| 4. Improve | Find the repeated work and the data structure that removes it; agree before coding | "For each price I'm searching for its complement. A hash map makes that lookup O(1)." |
+| 5. Trace | Run the code by hand on an example, then on the edge cases | "j is 0, price 12, I need 0, not seen, so I store 12 at 0…" |
+| 6. State the complexity | Time and space, and the trade-off you made | "O(n) time, O(n) space for the map. If the input were sorted I could use two pointers and O(1) space." |
+
+A few habits make the method work under pressure.
+
+**Write the examples down first.** Put the inputs and expected outputs as comments at the top of the editor before any code. You will trace against them in step 5, and you will often see the algorithm while writing them.
+
+**Say the brute force even if you won't code it.** It proves you understood the problem, it gives you something to fall back on, and the improvement usually comes from asking "what is the brute force doing twice?"
+
+**Agree on the approach before you type.** One sentence ("I'll use a hash map from price to its first index, one pass") lets the interviewer redirect you before you spend fifteen minutes on the wrong idea.
+
+**Narrate decisions, not keystrokes.** "I store the index only the first time I see a price, so the earliest one wins" is useful. "Now I'm typing a for loop" is not.
+
+**When you get stuck, go smaller.** Solve the example by hand on paper, try an input of size two, or say what you know and what you don't. Saying "I'm not sure about this part" and moving forward is better than going silent, and interviewers can only give hints to someone who is talking.
+
+<Pitfall title="Jumping to the clever answer">
+Starting with the optimal solution you half-remember from practice is the most common way to fail a problem you could have solved. If you misremember a detail, you have no simpler version to fall back on and nothing on the screen that earns credit. Go through steps 1 to 3 first, even when you think you know the trick; they take a few minutes and protect the rest of the round.
+</Pitfall>
+
+## The method on one problem
+
+Here is the method applied to problem 002 from the bank, roughly as it would sound in the room.
+
+**Restate.** "I'm given an array of item prices and a budget. I return the indices of two different items whose prices add up exactly to the budget."
+
+**Ask.** The answers turn a vague problem into a precise one:
+
+- *If several pairs work, which one?* The pair whose second index is smallest; if that index pairs with several earlier items, the earliest of them.
+- *If none works?* An empty array.
+- *Can one item be used twice?* No: two different positions, although two items may have the same price.
+- *Size and values?* Up to 10⁵ prices, each a positive integer that fits easily in 32 bits.
+
+Written down as examples at the top of the editor:
+
+```text
+twoPrices([12, 7, 3, 9, 5], 12) -> [2, 3]   // 3 + 9; 7 + 5 also works but ends later
+twoPrices([4, 4, 1], 8)         -> [0, 1]   // same price, different items
+twoPrices([1, 2], 10)           -> []       // no pair
+```
+
+**Simple first.** Check every pair with two loops. With 10⁵ prices that is about 5 × 10⁹ comparisons, which is too slow, but it is correct and it shows what the work is. Looping `j` on the outside and `i` on the inside returns pairs in exactly the order the rules ask for:
+
+```ts
+for (let j = 0; j < prices.length; j++)
+  for (let i = 0; i < j; i++)
+    if (prices[i] + prices[j] === budget) return [i, j];
+return [];
+```
+
+**Improve.** The inner loop searches the earlier prices for one value, `budget - prices[j]`. A hash map from price to its **first** index answers that in O(1), so one pass is enough. Storing only the first index keeps the "earliest `i`" rule, and checking before inserting stops an item from pairing with itself.
+
+<FiveStacks title="Six Languages" note="Problem 002, the improved solution">
+<Stack id="ts">
+```ts
+function twoPrices(prices: number[], budget: number): number[] {
+  const firstIndex = new Map<number, number>(); // price -> earliest index
+  for (let j = 0; j < prices.length; j++) {
+    const i = firstIndex.get(budget - prices[j]);
+    if (i !== undefined) return [i, j];
+    if (!firstIndex.has(prices[j])) firstIndex.set(prices[j], j);
+  }
+  return [];
+}
+```
+</Stack>
+<Stack id="cs">
+```csharp
+static int[] TwoPrices(int[] prices, int budget)
+{
+    var firstIndex = new Dictionary<int, int>(); // price -> earliest index
+    for (var j = 0; j < prices.Length; j++)
+    {
+        if (firstIndex.TryGetValue(budget - prices[j], out var i)) return [i, j];
+        firstIndex.TryAdd(prices[j], j);
+    }
+    return [];
+}
+```
+</Stack>
+<Stack id="java">
+```java
+static int[] twoPrices(int[] prices, int budget) {
+    Map<Integer, Integer> firstIndex = new HashMap<>(); // price -> earliest index
+    for (int j = 0; j < prices.length; j++) {
+        Integer i = firstIndex.get(budget - prices[j]);
+        if (i != null) return new int[] {i, j};
+        firstIndex.putIfAbsent(prices[j], j);
+    }
+    return new int[0];
+}
+```
+</Stack>
+<Stack id="kotlin">
+```kotlin
+fun twoPrices(prices: IntArray, budget: Int): IntArray {
+    val firstIndex = HashMap<Int, Int>() // price -> earliest index
+    for ((j, price) in prices.withIndex()) {
+        val i = firstIndex[budget - price]
+        if (i != null) return intArrayOf(i, j)
+        firstIndex.putIfAbsent(price, j)
+    }
+    return intArrayOf()
+}
+```
+</Stack>
+<Stack id="go">
+```go
+func TwoPrices(prices []int, budget int) []int {
+	firstIndex := map[int]int{} // price -> earliest index
+	for j, p := range prices {
+		if i, ok := firstIndex[budget-p]; ok {
+			return []int{i, j}
+		}
+		if _, seen := firstIndex[p]; !seen {
+			firstIndex[p] = j
+		}
+	}
+	return []int{}
+}
+```
+</Stack>
+<Stack id="py">
+```python
+def two_prices(prices: list[int], budget: int) -> list[int]:
+    first_index: dict[int, int] = {}  # price -> earliest index
+    for j, price in enumerate(prices):
+        i = first_index.get(budget - price)
+        if i is not None:
+            return [i, j]
+        first_index.setdefault(price, j)
+    return []
+```
+</Stack>
+</FiveStacks>
+
+Look at what changes between the tabs and what doesn't. The algorithm is identical. What you have to remember is the vocabulary: `get` returning `undefined`, `null` or `None`, Go's two-value `ok` lookup, C#'s `TryGetValue` with an `out` variable, and the "insert only if absent" call (`putIfAbsent`, `TryAdd`, `setdefault`) that saves you an `if`. Those small differences are what the language sections train.
+
+**Trace.** Run the first example by hand, one row per iteration. In an editor that can't run code, this table is your test:
+
+| `j` | `prices[j]` | Need | In the map? | Map afterwards |
+| --- | --- | --- | --- | --- |
+| 0 | 12 | 0 | no | `{12: 0}` |
+| 1 | 7 | 5 | no | `{12: 0, 7: 1}` |
+| 2 | 3 | 9 | no | `{12: 0, 7: 1, 3: 2}` |
+| 3 | 9 | 3 | yes, at 2 | return [2, 3] |
+
+Then the edge cases. With `[4, 4, 1]` and 8, at `j = 0` you need 4, which isn't stored yet, so the item can't pair with itself. At `j = 1` you need 4 and find it at index 0. With no pair, the loop ends and returns the empty array. With an empty list, the loop never runs.
+
+**Complexity.** One pass with O(1) map operations on average gives O(n) time, and the map holds at most n entries, so O(n) space. Say the trade-off too: you used memory to save time, and a sorted input would allow two pointers with O(1) extra space, which is a different problem (053 uses that idea).
+
+<InterviewLens>
+"How would you test this?" Name the cases before writing any of them: the two examples, no pair, an empty list, a duplicate price that must pair with itself only at another index, and the tie-breaking rule when several pairs work. Then, if there is time, write them the way the language sections show. Testing your own code without being asked is one of the clearest signals you can give.
+</InterviewLens>

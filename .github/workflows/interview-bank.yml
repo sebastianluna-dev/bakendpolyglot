@@ -1,0 +1,61 @@
+name: interview-bank
+
+on:
+  push:
+    branches: [main]
+    paths: ["apps/interview-bank/**", ".github/workflows/interview-bank.yml"]
+  pull_request:
+    paths: ["apps/interview-bank/**", ".github/workflows/interview-bank.yml"]
+
+defaults:
+  run:
+    working-directory: apps/interview-bank
+
+jobs:
+  run:
+    name: ${{ matrix.lang }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lang: [typescript, csharp, java, kotlin, go, python]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        if: matrix.lang == 'typescript'
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@v4
+        if: matrix.lang == 'csharp'
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-java@v5
+        if: matrix.lang == 'java' || matrix.lang == 'kotlin'
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install the Kotlin compiler
+        if: matrix.lang == 'kotlin'
+        run: |
+          curl -sSL -o /tmp/kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.1.21/kotlin-compiler-2.1.21.zip
+          unzip -q /tmp/kotlin.zip -d /tmp
+          echo "/tmp/kotlinc/bin" >> "$GITHUB_PATH"
+          echo "KOTLIN_STDLIB=/tmp/kotlinc/lib/kotlin-stdlib.jar" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v5
+        if: matrix.lang == 'go'
+        with:
+          go-version: "1.24"
+          cache: false
+      - uses: actions/setup-python@v5
+        if: matrix.lang == 'python'
+        with:
+          python-version: "3.12"
+      - name: Run every solution
+        run: |
+          set +e
+          make ${{ matrix.lang }} 2>&1 | tee /tmp/out.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=${{ matrix.lang }}::$(tail -n 40 /tmp/out.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          fi
+          exit $status
