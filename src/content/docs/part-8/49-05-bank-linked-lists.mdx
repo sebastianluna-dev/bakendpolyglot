@@ -7,3 +7,269 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+A linked list problem is mostly bookkeeping: which link to save before you overwrite it, which node to keep hold of, and what happens at the head and at the end. Interviewers usually hand you the node type, but you still write and walk it from memory, and that is where the languages differ most: `ListNode | null` in TypeScript, `ListNode?` in C# and Kotlin, a reference that may be `null` in Java, a `*ListNode` that may be `nil` in Go, and `None` in Python. These problems train the few moves every list solution is built from: turning links around with three variables, a dummy node in front of the head, and a slow and a fast pointer moving at different speeds. Each file defines its own `ListNode` and two short helpers that turn an array into a list and back, so the checks read like the examples.
+
+## 081 · Reverse a Linked List
+
+**Linked Lists · Easy**
+
+Given the head of a singly linked list, reverse the order of its nodes and return the new head. Do it by changing the `next` links of the existing nodes, not by creating new nodes or rewriting values, so the old head ends up as the last node, linking to nothing. An empty list stays empty.
+
+```text
+Example 1
+  input:  head = [4, 8, 15, 16, 23]
+  output: [23, 16, 15, 8, 4]
+
+Example 2
+  input:  head = [2, 9]
+  output: [9, 2]
+```
+
+Constraints: `0 ≤ n ≤ 10⁴` nodes, `-10⁹ ≤ val ≤ 10⁹`.
+
+**Approach.** The simple solution copies the values into an array and writes them back in reverse: O(n) time and O(n) extra space, and it rewrites the values the problem asks you to leave alone. One walk is enough if each link is turned around as you pass it. Keep `prev`, the reversed part (empty at first), and `node`, the rest; save `node.next`, point `node.next` at `prev`, then move `prev` and `node` one step on. When `node` runs out, `prev` is the new head. A recursive version is shorter but uses O(n) stack, and 10⁴ nodes is past CPython's default recursion limit of 1000. In Kotlin the field is called `value`, because `val` is a keyword.
+
+<Solutions n="081" />
+
+**Complexity.** O(n) time, O(1) space (three references, whatever the length).
+
+**Common mistake.** Overwriting `node.next` before saving it: once `node.next = prev` has run, the rest of the list is unreachable, so `[4, 8, 15]` comes back as `[4]`.
+
+## 082 · Merge Two Sorted Lists
+
+**Linked Lists · Easy**
+
+Two singly linked lists are each sorted in non-decreasing order. Merge them into one sorted list by relinking their nodes, without creating new ones, and return its head. When the same value appears in both lists, the node from the first list comes first. Either list, or both, may be empty.
+
+```text
+Example 1
+  input:  a = [1, 4, 6], b = [2, 3, 6, 9]
+  output: [1, 2, 3, 4, 6, 6, 9]   (the 6 from a comes before the 6 from b)
+
+Example 2
+  input:  a = [], b = [5, 8]
+  output: [5, 8]
+```
+
+Constraints: `0 ≤ n ≤ 10⁴` nodes in each list, `-10⁹ ≤ val ≤ 10⁹`.
+
+**Approach.** The simple solution pours the values of both lists into an array, sorts it and builds a new list: O((m + n) log(m + n)) time and O(m + n) space, ignoring that both lists are already sorted. A merge only ever compares the two front nodes: take the smaller one (the one from `a` on a tie), link it after the tail of the result, and step that list forward. A dummy node in front of the result means the first node needs no special case: `tail` starts at the dummy, and the answer is `dummy.next`. When one list runs out, the rest of the other is already sorted, so a single link attaches all of it.
+
+<Solutions n="082" />
+
+**Complexity.** O(m + n) time, O(1) space (a dummy node and a few references).
+
+**Common mistake.** Leaving the loop without attaching what remains of the other list: `[1, 5]` and `[2]` merge into `[1, 2]`, and the 5 is lost.
+
+## 083 · Does the List Loop?
+
+**Linked Lists · Easy**
+
+In a broken singly linked list, the last node's `next` link may point back to an earlier node, or to itself, instead of to nothing, so following the links never reaches an end. Given the head, return `true` if the list loops and `false` if it ends. Do not change the list. An empty list does not loop.
+
+The examples and the checks describe each list by its values and the index of the node the last node links back to, with `-1` for no loop.
+
+```text
+Example 1
+  input:  values = [3, 8, 1, 6], last node links to index 1
+  output: true         (3 → 8 → 1 → 6 → 8 → 1 → …)
+
+Example 2
+  input:  values = [4, 2], last node links to -1
+  output: false
+```
+
+Constraints: `0 ≤ n ≤ 10⁴` nodes, values may repeat.
+
+**Approach.** The simple solution walks the list with a hash set of the nodes visited so far, the nodes themselves rather than their values: reaching a node already in the set means a loop, reaching the end means none. That is O(n) time and O(n) space. Floyd's idea removes the set: move `slow` one node per step and `fast` two. If the list ends, `fast` gets there first; if it loops, both end up going round the loop, and `fast` gains one node per step, so it lands on `slow` within one lap. Compare the nodes themselves (`===` in TypeScript and Kotlin, `==` on references in C#, Java and Go, `is` in Python), never their values.
+
+<Solutions n="083" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Remembering values instead of nodes: `[2, 5, 2]` has no loop, but its second 2 looks as if it was visited before, so a set of values reports a loop.
+
+## 084 · The Middle Node
+
+**Linked Lists · Easy**
+
+Given the head of a singly linked list, return its middle node. With an odd number of nodes there is one middle; with an even number there are two, and you return the second of them. In both cases, for `n` nodes that is the node at index `n / 2` rounded down, counting from 0. Return the node itself, not its value; for an empty list return no node (`null`, `nil` or `None`).
+
+```text
+Example 1
+  input:  head = [3, 1, 4, 1, 5]
+  output: the node holding 4   (index 2; the list from there is [4, 1, 5])
+
+Example 2
+  input:  head = [2, 7, 1, 8]
+  output: the node holding 1   (index 2, the second of the two middles)
+```
+
+Constraints: `0 ≤ n ≤ 10⁵` nodes.
+
+**Approach.** The simple solution walks the list once to count `n` and again to stop after `n / 2` steps: O(n) time and O(1) space, which is perfectly acceptable. The one-pass version is worth knowing because later problems (087) build on it: move `slow` one node and `fast` two nodes per step, and stop when `fast` cannot take two more steps. When `fast` reaches the end, `slow` has gone exactly half as far. The loop condition decides which middle you get: continuing while `fast` and `fast.next` both exist stops on the second middle of an even list, the one this problem asks for. The checks read the list from the returned node onwards, and one of them confirms it is the original node, not a copy.
+
+<Solutions n="084" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Continuing only while `fast.next` and `fast.next.next` exist: the loop stops one step earlier on even lengths and returns the first middle, 7 instead of 1 for `[2, 7, 1, 8]`.
+
+## 085 · Drop Repeated Values From a Sorted List
+
+**Linked Lists · Easy**
+
+A singly linked list is sorted in non-decreasing order, so equal values sit next to each other. Remove nodes so that each value appears exactly once, keeping the first node of each run of equal values, and return the head. Change the links in place, without creating nodes. An empty list stays empty.
+
+```text
+Example 1
+  input:  head = [1, 1, 2, 3, 3, 3]
+  output: [1, 2, 3]
+
+Example 2
+  input:  head = [4, 4, 4]
+  output: [4]
+```
+
+Constraints: `0 ≤ n ≤ 10⁴` nodes, `-10⁹ ≤ val ≤ 10⁹`, sorted in non-decreasing order.
+
+**Approach.** In an unsorted list you would need a hash set of the values seen so far: O(n) time and O(n) space. Sorting puts every repeat right after the node it repeats, so one pointer and no extra memory are enough: if the next node holds the same value as the current one, unlink it by pointing past it; otherwise move on. The detail to get right is that the pointer stays where it is after an unlink, because the new next node may repeat the same value too. The head never changes, since the first node of the first run is always kept.
+
+<Solutions n="085" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Moving the pointer forward after an unlink as well: in a run of three equal values the third is never compared with the first, so `[4, 4, 4]` comes back as `[4, 4]`.
+
+## 086 · Remove the k-th Node From the End
+
+**Linked Lists · Medium**
+
+Given the head of a singly linked list and an integer `k`, remove the k-th node counting from the end, where `k = 1` is the last node, and return the head of the shortened list. `k` is always between 1 and the length of the list, so the list has at least one node; removing the only node leaves an empty list.
+
+```text
+Example 1
+  input:  head = [10, 20, 30, 40, 50], k = 2
+  output: [10, 20, 30, 50]   (40 is second from the end)
+
+Example 2
+  input:  head = [1, 2], k = 2
+  output: [2]                (the head itself goes)
+```
+
+Constraints: `1 ≤ k ≤ n ≤ 10⁵`, where `n` is the number of nodes.
+
+**Approach.** The simple solution counts the nodes in one pass and then walks `n - k` steps from a dummy node placed in front of the head, which lands just before the node to remove: O(n) time and O(1) space already. Interviewers usually ask for a single pass, and a gap of `k` nodes gives it. Move a `lead` pointer `k` nodes in from the head, then move it and a `trail` pointer, starting at the dummy, together until `lead` falls off the end; `trail` is then just before the node to remove, and `trail.next = trail.next.next` unlinks it. The dummy is what lets you remove the head, when `k` equals the length, without a special case, and returning `dummy.next` returns the new head.
+
+<Solutions n="086" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Starting `trail` at the head instead of at a dummy node in front of it: when `k` equals the length, the node to remove is the head, which has no node before it, so `[1, 2]` with `k = 2` returns `[1]` instead of `[2]`.
+
+## 087 · Interleave a List With Its Reverse
+
+**Linked Lists · Medium**
+
+Given the head of a singly linked list `L0 → L1 → … → Ln`, reorder it in place to `L0 → Ln → L1 → Ln-1 → L2 → …`: the first node, then the last, then the second, then the second to last, and so on until the two ends meet. Move the nodes by changing links; do not create nodes or change values. The function returns nothing. With an odd number of nodes, the middle one ends up last.
+
+```text
+Example 1
+  input:  head = [1, 2, 3, 4, 5, 6]
+  output: [1, 6, 2, 5, 3, 4]
+
+Example 2
+  input:  head = [3, 8, 5, 2, 9]
+  output: [3, 9, 8, 2, 5]   (the middle node, 5, ends up last)
+```
+
+Constraints: `0 ≤ n ≤ 5 × 10⁴` nodes.
+
+**Approach.** The simple solution copies the nodes into an array and relinks them with one index at each end, moving inwards: O(n) time and O(n) space for the array. Without the array, the hard part is reaching the back half in reverse order, and two earlier problems solve it: find the middle with a slow and a fast pointer (084), cut the list after it, and reverse the second half (081). The answer is then the two halves interleaved: one node from the front half, one from the reversed back half, until the back half runs out. Stopping `fast` when it cannot take two more steps leaves the front half one node longer on odd lengths, so the middle node stays at the end of the front half and comes out last.
+
+<Solutions n="087" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Forgetting to cut the front half off (`slow.next = null`) before interleaving: the old link from the front half into the back half survives, and on `[1, 2, 3, 4]` the last step links node 3 to itself, so the list never ends.
+
+## 088 · Add Two Numbers Stored as Lists
+
+**Linked Lists · Medium**
+
+Two non-negative integers are stored as singly linked lists of their decimal digits, least significant digit first, so 925 is `[5, 2, 9]`. Return their sum as a new list in the same form. Each input has at least one node and no leading zeros, except the number 0 itself, which is `[0]`. Build the result from new nodes and leave the inputs unchanged.
+
+```text
+Example 1
+  input:  a = [5, 2, 9], b = [8, 4]
+  output: [3, 7, 9]      (925 + 48 = 973)
+
+Example 2
+  input:  a = [9, 9, 9], b = [1]
+  output: [0, 0, 0, 1]   (999 + 1 = 1000, longer than both)
+```
+
+Constraints: `1 ≤ n ≤ 100` nodes in each list, each node holds a digit from `0` to `9`.
+
+**Approach.** Converting both lists to integers, adding and converting back needs arbitrary-precision integers, because 100 digits is far beyond 64 bits: Python's `int` has them built in, the other languages need `BigInteger`, `BigInt` or `math/big`, and it sidesteps the exercise. The digits arrive least significant first, which is the order of addition by hand, so do exactly that: walk both lists together, add the two digits and the carry, append `sum % 10` to the result and keep `sum / 10` (integer division) as the next carry. A list that has run out contributes 0, and the loop keeps going while either list has digits or the carry is not zero, so a final carry becomes a new last digit. A dummy node in front of the result again saves a special case for the first digit. TypeScript, C# and Kotlin read a missing digit with `?.` and a default; Java, Go and Python use an `if` per list.
+
+<Solutions n="088" />
+
+**Complexity.** O(max(m, n)) time, O(max(m, n)) space for the result (O(1) besides it).
+
+**Common mistake.** Looping only while either list has digits left: the last carry is dropped, so `[9, 9]` plus `[1]` gives `[0, 0]` instead of `[0, 0, 1]`.
+
+## 089 · Deep-Copy a List With Random Links
+
+**Linked Lists · Medium**
+
+Each node of a singly linked list has a value, a `next` link and a `random` link that points to any node of the same list, itself included, or to nothing. Return a deep copy: a list of new nodes with the same values in the same `next` order, whose `random` links point to the corresponding nodes of the copy. No link of the copy may point into the original, and the original must be unchanged afterwards. The copy of an empty list is empty.
+
+The examples and the checks describe a list as `[value, randomIndex]` pairs, one per node in order, with `-1` when `random` points to nothing. The checks also confirm that the copy shares no node with the original.
+
+```text
+Example 1
+  input:  [[4, 2], [9, 0], [6, -1]]
+  output: [[4, 2], [9, 0], [6, -1]]   (the same shape, made of new nodes)
+
+Example 2
+  input:  [[7, 1], [7, 0]]
+  output: [[7, 1], [7, 0]]            (equal values: links follow nodes, not values)
+```
+
+Constraints: `0 ≤ n ≤ 10⁴` nodes, values may repeat.
+
+**Approach.** Copying the `next` chain is easy; the trouble is that a `random` link can point forward to a node that has no copy yet. The simple fix copies the chain first, then for each random link counts how far its target is from the head of the original and walks the copy the same number of steps: O(n²). A hash map from each original node to its copy removes the searching: one pass creates every copy, and a second pass sets each copy's `next` and `random` to the copies of the original's targets. The map is keyed by node identity, which is the default for a class that defines no equality of its own in all six languages. An O(1)-extra-space version exists (put each copy right after its original, set `random` through `node.random.next`, then separate the two lists), but the map is the version to write under time pressure. Java's `HashMap.get(null)`, Go's lookup of a `nil` key and Python's `dict.get(None)` return nothing for a missing target, so those three need no null check; TypeScript, C# and Kotlin check first.
+
+<Solutions n="089" />
+
+**Complexity.** O(n) time, O(n) space for the map.
+
+**Common mistake.** Copying the `random` link as it is (`copy.random = node.random`): the values look right, but the copy's random links point into the original, so for `[[4, 2], [9, 0], [6, -1]]` the copy's first node still points at the original node holding 6.
+
+## 090 · Reverse in Groups of k
+
+**Linked Lists · Hard**
+
+Given the head of a singly linked list and a positive integer `k`, reverse the nodes of each consecutive group of `k`, starting from the head, and return the new head. If the last group has fewer than `k` nodes, leave it in its original order. Rearrange the nodes themselves by changing links; rewriting the values does not count, and one of the checks confirms that the old head is now the k-th node.
+
+```text
+Example 1
+  input:  head = [1, 2, 3, 4, 5, 6, 7, 8], k = 3
+  output: [3, 2, 1, 6, 5, 4, 7, 8]   (7 and 8 are a short group, left as they are)
+
+Example 2
+  input:  head = [4, 5, 6], k = 4
+  output: [4, 5, 6]                  (no full group)
+```
+
+Constraints: `0 ≤ n ≤ 5000` nodes, `1 ≤ k ≤ 5000`.
+
+**Approach.** The simple solution copies the values into an array, reverses each full block of `k` and writes them back: O(n) time and O(n) space, and it rewrites values, which the rules forbid. The in-place version repeats one step per group. Keep `before`, the node just before the next group, starting at a dummy in front of the head, and walk `k` nodes from it to find the group's last node; if the list runs out first, the rest is a short group and you are done. Otherwise reverse the group as in 081, but start `prev` at the node after the group instead of at nothing, so the group's old first node, its new tail, already links onward. Then link `before` to the group's old last node and move `before` to the old first node. Counting the `k` nodes before reversing anything is what keeps the short final group intact.
+
+<Solutions n="090" />
+
+**Complexity.** O(n) time (each node is counted once and relinked once), O(1) space.
+
+**Common mistake.** Reversing a group before checking that it is complete: the short final group is reversed too, so `[1, 2, 3, 4, 5, 6, 7, 8]` with `k = 3` ends in `8, 7` instead of `7, 8`.
