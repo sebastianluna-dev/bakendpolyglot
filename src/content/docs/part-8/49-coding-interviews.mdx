@@ -8,6 +8,53 @@ sidebar:
 ---
 import { FiveStacks, Stack, Recall, FromTS, Pitfall, InTheWild, InterviewLens, Quiz, Flashcards, Figure } from '../../../components/book';
 
+export const quiz = [
+  {
+    q: 'In TypeScript, what does [10, 9, 1].sort() return?',
+    options: ['[1, 9, 10]', '[1, 10, 9]', '[10, 9, 1]', 'A TypeError, because sort needs a comparator'],
+    answer: 1,
+    why: 'Without a comparator, sort converts the elements to strings and compares those, so "10" comes before "9". Pass (a, b) => a - b for numbers.',
+  },
+  {
+    q: 'In which language does integer division of -7 by 2 give -4?',
+    options: ['C# (-7 / 2)', 'Go (-7 / 2)', 'Python (-7 // 2)', 'Java (-7 / 2)'],
+    answer: 2,
+    why: 'Python’s // rounds down, and its % follows the sign of the divisor (-7 % 3 is 2). C#, Java, Kotlin and Go truncate toward zero (-3, and -7 % 3 is -1); TypeScript has no integer division, so you choose Math.trunc or Math.floor.',
+  },
+  {
+    q: 'C#’s PriorityQueue<TElement, TPriority> cannot change an element’s priority. How do you run Dijkstra’s algorithm with it?',
+    options: ['Remove the element and enqueue it again with Remove', 'Enqueue the node again with the shorter distance, and skip stale entries when they are dequeued', 'Use a SortedList instead, which is a heap', 'You cannot; Dijkstra needs a decrease-key operation'],
+    answer: 1,
+    why: 'Lazy deletion: the heap may hold several entries for one node, and an entry whose distance is worse than the best known is skipped. The same trick works with Java’s PriorityQueue, Go’s container/heap and Python’s heapq.',
+  },
+  {
+    q: 'In Go, what does counts["missing"] return for counts := map[string]int{}?',
+    options: ['nil', 'A panic', '0, the zero value of int', 'false'],
+    answer: 2,
+    why: 'Reading a missing key returns the value type’s zero value. Use the two-value form, n, ok := counts[k], when you need to know whether the key was there.',
+  },
+  {
+    q: 'Why do the Java and Kotlin files in the bank use a check(...) helper instead of the assert keyword?',
+    options: ['assert is deprecated', 'assert statements are skipped unless the JVM runs with -ea', 'assert cannot compare arrays', 'assert only works inside JUnit'],
+    answer: 1,
+    why: 'Java assertions are disabled by default, so a failing assert would pass silently. A plain method that throws always runs. Python has the opposite trap: python -O removes assert statements.',
+  },
+  {
+    q: 'In step 3 of the method, why say the brute-force solution even if you will not code it?',
+    options: ['Interviewers award points for every solution mentioned', 'It proves you understood the problem, gives you a fallback, and the better solution usually comes from what it repeats', 'It is required before you may ask questions', 'It lets you skip tracing the code later'],
+    answer: 1,
+    why: 'The simple solution shows understanding and earns credit even if time runs out; asking "what is it doing twice?" is how you find the improvement in step 4.',
+  },
+];
+
+export const cards = [
+  { front: 'The six steps', back: 'Restate, ask about edge cases, simple solution first, improve, trace by hand, state the complexity. Out loud, in that order.' },
+  { front: 'A queue in each language', back: 'TS: array + head index. C#: Queue<T>. Java and Kotlin: ArrayDeque. Go: a slice. Python: collections.deque.' },
+  { front: 'A min-heap in each language', back: 'TS: write MinHeap. C#: PriorityQueue<E, P>. Java and Kotlin: PriorityQueue. Go: container/heap and five methods. Python: heapq.' },
+  { front: 'A missing map key', back: 'TS: undefined. C#: the indexer throws. Java and Kotlin: null. Go: the zero value. Python: KeyError; use get or defaultdict.' },
+  { front: 'Integer overflow', back: 'C#, Java, Kotlin and Go wrap silently. TS loses precision past 2^53. Python integers are unbounded.' },
+];
+
 You have built Shelfwise in eight stacks and SeatLock in five. You have written the same claim, the same idempotency key and the same webhook check in TypeScript, C#, Java, Kotlin, Go and Python, and you have read every one of them side by side. None of that guarantees you can pass a live coding round in the language you use least.
 
 Chapter 48 gave the usual advice for coding rounds: choose the language you are fastest in. This chapter is for the times you can't. The role is a Go role, or the team writes Kotlin, or the interviewer asks for Python because that is what the shared editor runs. And there is a second gap that most readers of this book share. If you write code with an AI assistant every day, you know what a hash map is for and when to reach for a heap, but you may not have typed `map[string]int{}`, `new PriorityQueue<>(Comparator.comparingInt(...))` or `heapq.heappush` from memory in a long time. In an interview there is no autocomplete to finish the line. Under pressure, your recall of the syntax is what lets you show what you understand.
@@ -3542,3 +3589,311 @@ Phrasing matters as much as finding. Chapter 48 gave the rules: label each comme
 > **Question:** if the mailer accepts the email but the response is lost, the retry sends a second receipt. Does the mailer accept an idempotency key? If not, I'd move the email to a job written in the same transaction as the loans.
 
 The first states a fact and a fix, because the problem is certain. The second asks, because the answer depends on a system you can't see, which is how a senior reviewer handles it in a real team too. Describe what the code does, not what its author failed to do.
+
+## Cheat sheets
+
+These six sheets are the language sections cut down to what you read the morning of the interview: the same rows in the same order, then the traps that section warned about. They cover only what you type in a coding round; for everyday backend idioms translated from TypeScript, see [Appendix B](/appendix/b-cheat-sheets/).
+
+In every table, `x` is a value, `k` a key, `m` a map, and `loans` holds `Loan` values with a `member` string and a `due` number, as in the sections.
+
+### TypeScript
+
+| Need | Write |
+| --- | --- |
+| List: create, append, pop, last | `const a: number[] = []`, `a.push(x)`, `a.pop()`, `a.at(-1)` |
+| Map: get with default, count | `const m = new Map<string, number>()`, `m.get(k) ?? 0`, `m.set(k, (m.get(k) ?? 0) + 1)` |
+| Set | `const s = new Set<number>()`, `s.add(x)`, `s.has(x)` |
+| Stack | `st.push(x)`, `st.pop()`, `st.at(-1)` on an array |
+| Queue | `const q = [start]; let head = 0`, `q.push(x)`, `q[head++]`, `while (head < q.length)` |
+| Deque | `d.push(x)`, `d.pop()`, `d[head++]`: an array plus a head index, never adding at the front |
+| Min-heap: push, pop, peek | the section's `MinHeap` class, `const h = new MinHeap<number>((a, b) => a < b)`, `h.push(x)`, `h.pop()`, `h.peek()` |
+| Max-heap | `new MinHeap<number>((a, b) => a > b)` |
+| Pair or composite key | `` const key = `${r},${c}` ``, `const [count, title] = pair` |
+| Grid of zeros | `Array.from({ length: rows }, () => new Array(cols).fill(0))` |
+| Sort ascending | `a.sort((x, y) => x - y)`, or `a.toSorted((x, y) => x - y)` for a copy |
+| Sort by two keys | `loans.sort((a, b) => a.due - b.due \|\| (a.member < b.member ? -1 : a.member > b.member ? 1 : 0))` |
+| String builder | `parts.push(s)`, then `parts.join("")` |
+| Char to index and back | `ch.charCodeAt(0) - 97`, `String.fromCharCode(97 + i)` |
+| Split on whitespace | `s.trim().split(/\s+/)` |
+| Integer division and modulo | `Math.trunc(a / b)`, `Math.floor(a / b)`, `a % b`, `((a % m) + m) % m` |
+| Max int sentinel | `Infinity`, `-Infinity` |
+| Loop with index | `for (let i = 0; i < n; i++)`, `for (const [i, x] of a.entries())` |
+| Iterate a map | `for (const [k, v] of m)` |
+| Check a result in a quick test | `import assert from "node:assert/strict"`, `assert.deepEqual(got, want)` |
+
+**Don't forget**
+
+- `sort()` with no comparator compares as strings: `[10, 9, 1].sort()` is `[1, 10, 9]`.
+- `Map` and `Set` compare arrays by reference, so `new Set([[0, 1]]).has([0, 1])` is `false`. Turn a composite key into a string.
+- `new Array(rows).fill(new Array(cols).fill(0))` puts one row in every slot. Build the grid with `Array.from`.
+- There is no heap: type the `MinHeap` class first, or ask whether you may treat it as given. `shift` can be O(n), so a queue keeps a head index.
+- `if (m.get(k))` treats a count of `0` as missing. Use `has`, or compare with `undefined`.
+
+### C#
+
+| Need | Write |
+| --- | --- |
+| List: create, append, pop, last | `var a = new List<int>()`, `a.Add(x)`, `a.RemoveAt(a.Count - 1)`, `a[^1]` |
+| Map: get with default, count | `var m = new Dictionary<string, int>()`, `m.GetValueOrDefault(k)`, `m[k] = m.GetValueOrDefault(k) + 1` |
+| Set | `var s = new HashSet<int>()`, `s.Add(x)` (`false` if present), `s.Contains(x)` |
+| Stack | `var st = new Stack<int>()`, `st.Push(x)`, `st.Pop()`, `st.Peek()` |
+| Queue | `var q = new Queue<int>()`, `q.Enqueue(x)`, `q.Dequeue()`, `while (q.Count > 0)` |
+| Deque | `var d = new LinkedList<int>()`, `d.AddFirst(x)`, `d.AddLast(x)`, `d.RemoveFirst()`, `d.RemoveLast()`, `d.First!.Value` |
+| Min-heap: push, pop, peek | `var h = new PriorityQueue<int, int>()`, `h.Enqueue(x, x)`, `h.Dequeue()`, `h.Peek()` |
+| Max-heap | `new PriorityQueue<int, int>(Comparer<int>.Create((a, b) => b.CompareTo(a)))` |
+| Pair or composite key | `new HashSet<(int, int)>()`, `s.Add((r, c))`, `var (r, c) = pair` |
+| Grid of zeros | `var g = new int[rows, cols]`, `g[r, c]`, `g.GetLength(0)` |
+| Sort ascending | `Array.Sort(a)`, `list.Sort()`, or `a.Order().ToArray()` for a copy |
+| Sort by two keys | `loans.OrderBy(l => l.Due).ThenBy(l => l.Member, StringComparer.Ordinal).ToList()` |
+| String builder | `using System.Text;`, `var sb = new StringBuilder()`, `sb.Append(x)`, `sb.ToString()` |
+| Char to index and back | `ch - 'a'`, `(char)('a' + i)` |
+| Split on whitespace | `s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)` |
+| Integer division and modulo | `a / b` (toward zero), `a % b`, `((a % m) + m) % m` |
+| Max int sentinel | `int.MaxValue`, `int.MinValue` |
+| Loop with index | `for (var i = 0; i < a.Length; i++)`, `foreach (var (i, x) in a.Index())` |
+| Iterate a map | `foreach (var (k, v) in m)` |
+| Check a result in a quick test | `static void Check(bool ok) { if (!ok) throw new Exception("test failed"); }`, `Check(got.SequenceEqual(want))` |
+
+**Don't forget**
+
+- Reading `m[k]` throws `KeyNotFoundException` for a missing key, so `counts[w]++` fails the first time. Use `GetValueOrDefault` or `TryGetValue`.
+- `int` is 32 bits and wraps silently: `50_000 * 50_000` is `-1794967296`. Write `(long)a * b`, and compare with `CompareTo`, never `a - b`.
+- `Substring(1, 4)` takes a length; `s[1..4]` is the slice that ends before index 4.
+- `Array.Sort` and `List.Sort` are not stable, and the default string order is culture-sensitive. Use `OrderBy(...).ThenBy(...)` and `StringComparer.Ordinal`.
+- In a file-based app, `record` and `class` declarations go after the top-level statements.
+
+### Java
+
+| Need | Write |
+| --- | --- |
+| List: create, append, pop, last | `List<Integer> a = new ArrayList<>()`, `a.add(x)`, `a.removeLast()`, `a.getLast()` |
+| Map: get with default, count | `Map<String, Integer> m = new HashMap<>()`, `m.getOrDefault(k, 0)`, `m.merge(k, 1, Integer::sum)` |
+| Set | `Set<Integer> s = new HashSet<>()`, `s.add(x)` (`false` if present), `s.contains(x)` |
+| Stack | `Deque<Integer> st = new ArrayDeque<>()`, `st.push(x)`, `st.pop()`, `st.peek()` |
+| Queue | `Deque<Integer> q = new ArrayDeque<>()`, `q.offer(x)`, `q.poll()`, `q.peek()` |
+| Deque | `d.offerFirst(x)`, `d.offerLast(x)`, `d.pollFirst()`, `d.pollLast()`, `d.peekFirst()`, `d.peekLast()` |
+| Min-heap: push, pop, peek | `PriorityQueue<Integer> h = new PriorityQueue<>()`, `h.offer(x)`, `h.poll()`, `h.peek()` |
+| Max-heap | `new PriorityQueue<Integer>(Comparator.reverseOrder())` |
+| Pair or composite key | `record Cell(int r, int c) {}`, `seen.add(new Cell(r, c))`; `int[]` only where nothing looks it up |
+| Grid of zeros | `int[][] g = new int[rows][cols]` |
+| Sort ascending | `Arrays.sort(a)`, `Collections.sort(list)` |
+| Sort by two keys | `loans.sort(Comparator.comparingInt(Loan::due).thenComparing(Loan::member))` |
+| String builder | `var sb = new StringBuilder()`, `sb.append(x)`, `sb.toString()` |
+| Char to index and back | `s.charAt(i) - 'a'`, `(char) ('a' + i)` |
+| Split on whitespace | `s.trim().split("\\s+")` |
+| Integer division and modulo | `a / b` (toward zero), `Math.floorDiv(a, b)`, `a % b`, `Math.floorMod(a, m)` |
+| Max int sentinel | `Integer.MAX_VALUE`, `Integer.MIN_VALUE`, `Long.MAX_VALUE` |
+| Loop with index | `for (int i = 0; i < a.length; i++)`, `for (int x : a)` |
+| Iterate a map | `for (var e : m.entrySet())` with `e.getKey()`, `e.getValue()` |
+| Check a result in a quick test | `static void check(boolean ok) { if (!ok) throw new AssertionError("test failed"); }`, `check(Arrays.equals(got, want))` |
+
+**Don't forget**
+
+- `==` compares references on `String` and `Integer`. Two boxed 1000s are different objects on a default JVM, so write `equals`.
+- `int c = m.get(k)` throws `NullPointerException` for a missing key, and `list.remove(1)` on a `List<Integer>` removes index 1, not the value.
+- `Arrays.sort` on an `int[]` takes no comparator. In comparators, use `Integer.compare`, never `a - b`.
+- `split` takes a regular expression: `"a.b.c".split(".")` is empty, so write `split("\\.")`.
+- `assert` is off unless you run `java -ea`; a failing one passes in silence. Use a `check` helper.
+
+### Kotlin
+
+| Need | Write |
+| --- | --- |
+| List: create, append, pop, last | `val a = mutableListOf<Int>()`, `a.add(x)`, `a.removeLast()`, `a.last()` |
+| Map: get with default, count | `val m = HashMap<String, Int>()`, `m[k] ?: 0`, `m[k] = (m[k] ?: 0) + 1` |
+| Set | `val s = HashSet<Int>()`, `s.add(x)` (`false` if present), `x in s` |
+| Stack | `val st = ArrayDeque<Int>()`, `st.addLast(x)`, `st.removeLast()`, `st.last()` |
+| Queue | `val q = ArrayDeque<Int>()`, `q.addLast(x)`, `q.removeFirst()`, `q.first()` |
+| Deque | `d.addFirst(x)`, `d.addLast(x)`, `d.removeFirst()`, `d.removeLast()`, `d.first()`, `d.last()`, `d[i]` |
+| Min-heap: push, pop, peek | `import java.util.PriorityQueue`, `val h = PriorityQueue<Int>()`, `h.add(x)`, `h.poll()`, `h.peek()` |
+| Max-heap | `PriorityQueue<Int>(compareByDescending { it })` |
+| Pair or composite key | `hashSetOf(r to c)`, `val (r, c) = cell`, or `data class Cell(val r: Int, val c: Int)` |
+| Grid of zeros | `Array(rows) { IntArray(cols) }` |
+| Sort ascending | `a.sort()` in place, `val b = a.sorted()` for a copy |
+| Sort by two keys | `loans.sortedWith(compareBy({ it.due }, { it.member }))` |
+| String builder | `buildString { append(x) }` |
+| Char to index and back | `ch - 'a'`, `'a' + i` |
+| Split on whitespace | `s.trim().split(Regex("\\s+"))` |
+| Integer division and modulo | `a / b` (toward zero), `a.floorDiv(b)`, `a % b`, `a.mod(m)` |
+| Max int sentinel | `Int.MAX_VALUE`, `Int.MIN_VALUE`, `Long.MAX_VALUE` |
+| Loop with index | `for (i in 0 until n)`, `for ((i, x) in a.withIndex())`, `for (i in n - 1 downTo 0)` |
+| Iterate a map | `for ((k, v) in m)` |
+| Check a result in a quick test | `check(got.contentEquals(want))` for arrays, `check(got == want) { "got $got, want $want" }` for lists |
+
+**Don't forget**
+
+- `listOf` gives a read-only `List` with no `add`; start with `mutableListOf`. `xs.sorted()` on its own line sorts nothing.
+- `0..n` includes `n`, so indices are `0 until n`; `10..0` is empty, so count down with `downTo`.
+- `import java.util.*` turns `ArrayDeque` into Java's, which has no indexing. Import `java.util.PriorityQueue` by name.
+- `IntArray` compares by reference: `==` on two arrays fails. Use `contentEquals` and `contentToString()`.
+- On a `MutableList<Int>`, `remove(1)` removes the value 1; use `removeAt(1)` for an index. And `-7.mod(3)` is `-1`: write `(-7).mod(3)`.
+
+### Go
+
+| Need | Write |
+| --- | --- |
+| List: create, append, pop, last | `a := []int{}`, `a = append(a, x)`, `a = a[:len(a)-1]`, `a[len(a)-1]` |
+| Map: get with default, count | `m := map[string]int{}`, `m[k]` (zero if missing), `m[k]++`, `v, ok := m[k]` |
+| Set | `s := map[int]bool{}`, `s[x] = true`, `if s[x]` |
+| Stack | `st = append(st, x)`, `top := st[len(st)-1]`, `st = st[:len(st)-1]` |
+| Queue | `q = append(q, x)`, `front := q[0]`, `q = q[1:]` |
+| Deque | `d = d[1:]`, `d = d[:len(d)-1]`; to push at the front, `l := list.New()`, `l.PushFront(x)`, `l.Front().Value.(int)` |
+| Min-heap: push, pop, peek | five methods on `type IntHeap []int`, then `h := &IntHeap{}`, `heap.Push(h, x)`, `heap.Pop(h).(int)`, `(*h)[0]` |
+| Max-heap | `func (h IntHeap) Less(i, j int) bool { return h[i] > h[j] }` |
+| Pair or composite key | `map[[2]int]bool{}` with `seen[[2]int{r, c}]`, or `type cell struct{ r, c int }` as the key |
+| Grid of zeros | `g := make([][]int, rows)`, then `g[i] = make([]int, cols)` for each row |
+| Sort ascending | `slices.Sort(a)` |
+| Sort by two keys | `slices.SortFunc(loans, func(a, b loan) int { return cmp.Or(cmp.Compare(a.due, b.due), strings.Compare(a.member, b.member)) })` |
+| String builder | `var sb strings.Builder`, `sb.WriteString(s)`, `sb.WriteByte(c)`, `sb.String()` |
+| Char to index and back | `int(s[i] - 'a')`, `string(rune('a' + i))` |
+| Split on whitespace | `strings.Fields(s)` |
+| Integer division and modulo | `a / b` (toward zero), `a % b`, `((a % m) + m) % m`; floor division is a helper you write |
+| Max int sentinel | `math.MaxInt`, `math.MinInt` |
+| Loop with index | `for i, x := range a`, `for i := range n`, `for i := len(a) - 1; i >= 0; i--` |
+| Iterate a map | `for k, v := range m`, or `for _, k := range slices.Sorted(maps.Keys(m))` in key order |
+| Check a result in a quick test | `if !slices.Equal(got, want) { t.Errorf("got %v, want %v", got, want) }` |
+
+**Don't forget**
+
+- Map order is random and changes from run to run. Sort the keys whenever the answer depends on order.
+- Slices alias: `append` can write into an array another slice still sees. In backtracking, save `slices.Clone(path)`, not `path`.
+- Call `heap.Push(h, x)` and `heap.Pop(h)`, never your own `h.Push(x)`, which appends without restoring the order.
+- `for x := range nums` gives indices; write `for _, x := range nums`. `string(65)` is `"A"`; use `strconv.Itoa`.
+- An unused import or variable is a compile error, and writing to a nil map panics: create maps with a literal or `make`.
+
+### Python
+
+| Need | Write |
+| --- | --- |
+| List: create, append, pop, last | `a: list[int] = []`, `a.append(x)`, `a.pop()`, `a[-1]` |
+| Map: get with default, count | `d.get(k, 0)`, `d[k] = d.get(k, 0) + 1`, or `Counter(items)` |
+| Set | `s = set()`, `s.add(x)`, `x in s` |
+| Stack | `st.append(x)`, `st.pop()`, `st[-1]` on a list |
+| Queue | `from collections import deque`, `q = deque([start])`, `q.append(x)`, `q.popleft()` |
+| Deque | `d.append(x)`, `d.appendleft(x)`, `d.pop()`, `d.popleft()`, `d[0]`, `d[-1]` |
+| Min-heap: push, pop, peek | `import heapq`, `heapq.heappush(h, x)`, `heapq.heappop(h)`, `h[0]` |
+| Max-heap | `heapq.heappush(h, -x)`, `-heapq.heappop(h)`, `-h[0]` |
+| Pair or composite key | `seen = {(r, c)}`, `r, c = cell`; heap entries as `(priority, seq, item)` |
+| Grid of zeros | `[[0] * cols for _ in range(rows)]` |
+| Sort ascending | `a.sort()`, or `b = sorted(a)` for a copy |
+| Sort by two keys | `sorted(loans, key=lambda loan: (loan.due, loan.member))` |
+| String builder | `parts.append(s)`, then `"".join(parts)` |
+| Char to index and back | `ord(ch) - ord("a")`, `chr(ord("a") + i)` |
+| Split on whitespace | `s.split()` |
+| Integer division and modulo | `a // b` (rounds down), `a % b` (sign of `b`), `divmod(a, b)`, `-(-a // b)` to round up |
+| Max int sentinel | `math.inf`, `-math.inf` |
+| Loop with index | `for i in range(n)`, `for i, x in enumerate(a)`, `for i in range(n - 1, -1, -1)` |
+| Iterate a map | `for k, v in d.items()` |
+| Check a result in a quick test | `assert got == want, f"got {got}, want {want}"` |
+
+**Don't forget**
+
+- `[[0] * c] * r` holds one row `r` times, so writing a cell changes every row. Build the grid with a comprehension.
+- `-7 // 2` is `-4` and `-7 % 3` is `2`. Truncating division (`/` in C#, Java, Kotlin and Go, `Math.trunc` in TypeScript) gives `-3`, and the other five `%` operators give `-1`.
+- `if i:` treats a found index of `0` as missing; test `is None`. `{}` is an empty dict, not a set.
+- `nums = nums.sort()` leaves `None` in `nums`. A default `seen=[]` is shared by every call; default to `None`.
+- Recursion stops at 1,000 frames, and `max = 0` hides the built-in `max`. Use an explicit stack for deep searches and keep built-in names free.
+
+## A practice plan
+
+The bank has 200 problems, and you do not need all of them. You need enough repetitions in one language that the vocabulary stops costing you attention. The plan below covers 69 of them in four weeks of five days (59 without the optional hard ones), with a one-week version for when the interview is close. Both follow the same rules.
+
+**Practise the way the round works.** Pick one target language and stay in it. Write in a plain editor with completion and inline suggestions turned off, and with no assistant. Set a timer for 30 minutes for a medium problem and 15 for an easy one. Say the six steps out loud, even alone; it feels strange for two days and then it doesn't.
+
+**Only check the bank afterwards.** When the timer ends, or when your solution passes your own trace, open the problem's solution in your target language and compare the two. Look first at the vocabulary, not the algorithm: the method you didn't remember, the import you missed, the conversion you wrote in four lines that the library does in one.
+
+**Keep a recall list.** Every time you had to look something up, or got it wrong, write one line: what you needed and the exact syntax. `heapq.heappush(h, (dist, node))`. `map.getOrDefault(k, 0)`. `strings.Builder` and `WriteString`. At the start of each session, cover the right-hand side and write the syntax from memory. When a line has been right three sessions in a row, cross it out.
+
+**Redo what failed.** A problem you could not finish goes back into the plan two days later, from a blank file. Solving it a second time without looking is the repetition that counts.
+
+### Four weeks
+
+Each day has two easy problems to warm up, one medium as the main problem, and an optional hard one if you have time. Weeks 1 and 2 build the core vocabulary (arrays, maps, strings, stacks, pointers); weeks 3 and 4 add the structures that each language spells differently (heaps, graphs, recursion) and finish with the backend tasks.
+
+| Day | Warm-up | Main | Stretch |
+| --- | --- | --- | --- |
+| 1 | 001, 003 | 014 | |
+| 2 | 008, 012 | 015 | |
+| 3 | 026, 029 | 038 | |
+| 4 | 046, 050 | 053 | 064 |
+| 5 | 051, 052 | 055 | |
+| 6 | 066, 067 | 073 | |
+| 7 | 068, 070 | 075 | 080 |
+| 8 | 081, 082 | 086 | |
+| 9 | 091, 093 | 095 | 101 |
+| 10 | 103, 105 | 111 | |
+| 11 | 106, 109 | 113 | 120 |
+| 12 | 123, 124 | 128 | |
+| 13 | 125, 127 | 130 | 137 |
+| 14 | 141, 142 | 144 | 149 |
+| 15 | 151, 152 | 154 | 161 |
+| 16 | 163, 164 | 170 | |
+| 17 | 165, 167 | 174 | 177 |
+| 18 | 181, 182 | 185 | |
+| 19 | 191, 193 | 195 | 199 |
+| 20 | Two unseen mediums, back to back, timed as a real round: 058 and 145 | | |
+
+On day 20, pick someone to play the interviewer if you can. If not, record yourself and listen to the first five minutes: that is where restating and the edge-case questions either happen or don't.
+
+### One week
+
+When the interview is days away, train the method and the most common structures, and skip the rest:
+
+| Day | Problems | What they train |
+| --- | --- | --- |
+| 1 | 002, 014, 055 | Hash map lookups, grouping by a key, a sliding window |
+| 2 | 066, 073, 091 | A stack, a monotonic stack, binary search |
+| 3 | 081, 111, 128 | Pointer manipulation, breadth-first search on a tree and on a grid |
+| 4 | 144, 154, 170 | A heap, backtracking, dynamic programming |
+| 5 | 185, 195, 130 | Sorting intervals, a design problem, topological order |
+
+The day before the interview, don't learn anything new. Read your recall list once, write the syntax table of your target language from memory, and stop.
+
+<InterviewLens>
+"Which language would you like to use?" If the role allows any language, answer with the one you have practised, and say why in one sentence: "Python, because I can write it fastest without an IDE." If the role requires a language you know less well, say so honestly and early, before the problem starts, and then show that you can still reason clearly while the syntax is slower. Interviewers can see the difference between not knowing a method name and not knowing what to do.
+</InterviewLens>
+
+## The honest role of AI
+
+If you write code with an assistant every day, this chapter asks you to do something unusual: practise without it. That is not a judgement about how software should be written. It is a statement about what a live coding round measures. The round shows whether you can turn an idea into correct code yourself, out loud, in a fixed time. An assistant does exactly that part for you, so practising with one trains the wrong thing for this particular test.
+
+There is a specific reason it trains the wrong thing. Reading a correct line and recognising it as correct is much easier than producing it from nothing. Suggestions keep you in recognition: you see `Collections.sort(list, Comparator.comparingInt(...))`, it looks right, you accept it. In the interview there is nothing to recognise, and you find out that you never practised producing it. The result is a gap that only shows up under pressure, which is the worst moment to discover it.
+
+### Where AI does help you prepare
+
+None of that means you should keep AI away from your preparation. It is useful in the places where it does not replace the thing you are training:
+
+- **Reviewing your solution after you finish.** Paste your own working answer and ask what is wrong with it: bugs, missed edge cases, non-idiomatic code. Ask for a review, not a rewrite, and fix the problems yourself.
+- **Making variations.** Ask for a version of a bank problem with one constraint changed: the input is sorted, the values can be negative, the answer must use constant space. Solving a variation without help shows whether you understood the original or only memorised it.
+- **Playing the interviewer.** Ask it to question your approach, request a different trade-off, or ask "how would you test this?" after you finish. It is a cheap substitute for a person when no person is available.
+- **Explaining after you have tried.** When a compiler error or a library behaviour confuses you, ask after you have made your own attempt to understand it. Then write the explanation into your recall list in your own words.
+- **Drilling your recall list.** Turn the list into questions ("the call that adds to a Python heap") and answer them without looking.
+
+Two cautions apply to all of these. First, an assistant can be confidently wrong about a library detail or a language version, so check anything surprising against the official documentation or by running the code; the bank's files are a reliable reference because CI runs them. Second, ask for hints rather than answers. When you are stuck, a useful question is "what should I look at?", not "what is the solution?". Once you have seen the solution, that problem no longer measures you.
+
+### A protocol for a stuck problem
+
+1. Work on it alone until the timer ends, out loud.
+2. If you are stuck, go smaller first: solve the example by hand, or try an input of size two.
+3. Still stuck: ask for one hint, about the idea only, not the code. Set a new, shorter timer.
+4. Finish the code yourself and trace it.
+5. Then ask for a review of your solution, and compare it with the bank's.
+6. Put the problem back in the plan for two days later, from a blank file.
+
+### In the interview itself
+
+Unless the interviewer tells you otherwise, assume that no assistant and no autocomplete are allowed, and don't open one. If a company explicitly allows AI tools in a round, the round is measuring something else, such as how you break a task down, check generated code and catch its mistakes, and you should prepare for that format separately. Ask the recruiter which format each round uses; it is a normal question.
+
+You may also be asked how you use AI in your daily work. Answer it the way you would describe any other tool: what you use it for, how you check its output, and where you decided not to rely on it. A clear, specific answer is better than either extreme.
+
+<Pitfall title="Practising with suggestions on">
+Solving the bank in an editor with inline suggestions enabled feels productive and leaves the recall gap exactly where it was. Turn suggestions off for practice sessions, or use an editor that doesn't have them, and leave them on for your daily work. The two settings serve two different jobs.
+</Pitfall>
+
+## Review
+
+<Quiz id="ch49" questions={quiz} />
+
+<Flashcards cards={cards} />
+
+The problem bank follows, one page per topic, and then its index by topic and difficulty.
