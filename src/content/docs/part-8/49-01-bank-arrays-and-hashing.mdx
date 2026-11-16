@@ -269,3 +269,280 @@ Constraints: `0 ≤ n ≤ 30` (the largest value, 77,558,760, fits in a 32-bit i
 **Complexity.** O(n²) time, O(n²) space, all of it the returned rows.
 
 **Common mistake.** Running the inner loop over `0 ≤ c ≤ r`, which reads `rows[r - 1][-1]` and one past the end of the previous row; the first and last 1 already come from the initial row.
+
+## 011 · The Balance Point
+
+**Arrays and Hashing · Easy**
+
+Given an array of integers, return the smallest index `i` where the sum of the elements before `i` equals the sum of the elements after `i`. The element at `i` belongs to neither side, and an empty side sums to 0, so index 0 qualifies when everything after it sums to 0. If no index qualifies, including when the array is empty, return `-1`.
+
+```text
+Example 1
+  input:  nums = [3, 1, 5, 2, 2]
+  output: 2        (3 + 1 = 4 on the left, 2 + 2 = 4 on the right)
+
+Example 2
+  input:  nums = [1, 2, 3]
+  output: -1
+```
+
+Constraints: `0 ≤ nums.length ≤ 10⁵`, `-1000 ≤ nums[i] ≤ 1000`.
+
+**Approach.** The simple solution adds up the left side and the right side again for every index: O(n²). Both sums change by only one element as `i` moves right, so there is no need to recompute them. Add the whole array once to get the total, then walk it keeping a running `left` sum: the right side is `total - left - nums[i]`. Compare before adding `nums[i]` to `left`, because the element at `i` is on neither side.
+
+<Solutions n="011" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Adding `nums[i]` to `left` before the comparison, which counts the middle element on the left and returns `-1` for `[7]` instead of `0`.
+
+## 012 · Shared Members of Two Lists
+
+**Arrays and Hashing · Easy**
+
+Shelfwise exports two lists of member IDs, for example the members who borrowed a book in March and those who borrowed one in April. Either list may repeat an ID. Return the IDs that appear in both lists, each exactly once, in the order of their first appearance in the first list. If no ID is shared, return an empty array.
+
+```text
+Example 1
+  input:  first = [104, 211, 104, 350, 87], second = [87, 104, 999, 104]
+  output: [104, 87]        (104 is listed once, in the order of first)
+
+Example 2
+  input:  first = [1, 2], second = [3, 4]
+  output: []
+```
+
+Constraints: `0 ≤ first.length, second.length ≤ 10⁵`, `1 ≤ id ≤ 10⁹`.
+
+**Approach.** The simple solution scans `second` for every ID of `first`, and then scans the result to skip IDs already added: O(n × m). A hash set of `second` turns the first scan into an O(1) lookup. For the duplicates, remove the ID from the set the moment you add it to the result: a later repeat in `first` no longer finds it, so one set does both jobs. In TypeScript, C#, Java and Kotlin the set's remove method returns whether the element was there, so the check and the removal are one call; in Go and Python they are two lines.
+
+<Solutions n="012" />
+
+**Complexity.** O(n + m) time, O(m) space for the set of the second list.
+
+**Common mistake.** Checking membership without removing, which returns `[104, 104, 87]` for Example 1.
+
+## 013 · Collapse Consecutive IDs Into Ranges
+
+**Arrays and Hashing · Easy**
+
+A list of copy IDs is sorted in strictly increasing order. Collapse it into ranges for display: every maximal run of consecutive IDs becomes `"a-b"` (first and last ID of the run, joined by a hyphen), and an ID with no neighbour becomes just `"a"`. Return the strings in order. An empty list gives an empty result.
+
+```text
+Example 1
+  input:  ids = [1, 2, 3, 7, 9, 10]
+  output: ["1-3", "7", "9-10"]
+
+Example 2
+  input:  ids = [0, 2, 4]
+  output: ["0", "2", "4"]        (no two IDs are consecutive)
+```
+
+Constraints: `0 ≤ ids.length ≤ 10⁵`, `0 ≤ ids[i] ≤ 10⁹`, `ids` strictly increasing.
+
+**Approach.** Because the list is sorted, a run is always a stretch of neighbouring elements, so one pass is enough and no hash map is needed. Remember where the run starts, move `i` forward while the next ID is exactly one more than the current one, then emit either the single ID or `start-end` and continue after the run. This is a warm-up for the loop shape, not for the data structure: an inner loop that advances the same index as the outer one, and a string built from two numbers.
+
+<Solutions n="013" />
+
+**Complexity.** O(n) time, O(1) extra space besides the output.
+
+**Common mistake.** Emitting a range only when the next ID breaks the run, which forgets the last run of the list: `[1, 2, 3]` returns `[]` instead of `["1-3"]`.
+
+## 014 · Group Words by Their Letters
+
+**Arrays and Hashing · Medium**
+
+Group the words that use exactly the same letters, the same number of times each (anagrams). Return a list of groups. The groups appear in the order of their first word in the input, and the words inside a group keep their input order. Duplicate words are kept, and the empty string is a word like any other.
+
+```text
+Example 1
+  input:  words = ["listen", "stone", "silent", "notes", "enlist", "tones", "tab"]
+  output: [["listen", "silent", "enlist"], ["stone", "notes", "tones"], ["tab"]]
+
+Example 2
+  input:  words = ["loop", "pool", "polo", "lop"]
+  output: [["loop", "pool", "polo"], ["lop"]]        (lop has one o, not two)
+```
+
+Constraints: `0 ≤ words.length ≤ 10⁴`, `0 ≤ words[i].length ≤ 100`, lowercase `a`–`z` only.
+
+**Approach.** The simple solution compares each word with the first word of every existing group, sorting both to compare them: O(n × g × k log k) for `g` groups. The repeated work is that comparison, and it disappears once every word has a key that is equal exactly for anagrams: its letters in sorted order. A hash map from key to the index of its group in a list of groups puts each word in place in O(1) after sorting it, and the list (rather than the map's own iteration order) keeps the groups in first-appearance order. A key made of 26 letter counts would remove the sort, but the sorted key is shorter to write from memory and fast enough here.
+
+<Solutions n="014" />
+
+**Complexity.** O(n × k log k) time for `n` words of length up to `k`, O(n × k) space for the keys and the groups.
+
+**Common mistake.** Returning the map's values directly: Go, Java's `HashMap` and C#'s `Dictionary` do not promise input order (Go randomises it on purpose), so `["tab", "bat", "cat"]` can come back as `[["cat"], ["tab", "bat"]]`.
+
+## 015 · The k Most Borrowed Books
+
+**Arrays and Hashing · Medium**
+
+Shelfwise logs one title per loan. Given the log and an integer `k`, return the `k` titles with the most loans. Order them by number of loans, highest first; titles with the same number of loans go in ascending order of the title, compared character by character by character code (not by locale). If there are fewer than `k` distinct titles, return all of them in that order.
+
+```text
+Example 1
+  input:  loans = ["dune", "emma", "dune", "ulysses", "emma", "dune", "beloved"], k = 2
+  output: ["dune", "emma"]        (3 loans, then 2)
+
+Example 2
+  input:  loans = ["emma", "beloved", "ulysses", "beloved", "emma"], k = 2
+  output: ["beloved", "emma"]        (both have 2 loans, so alphabetical)
+```
+
+Constraints: `0 ≤ loans.length ≤ 10⁵`, `1 ≤ k ≤ 10⁵`, titles are 1 to 50 printable ASCII characters.
+
+**Approach.** The simple solution counts each title by scanning the whole log again: O(n²). One pass with a hash map from title to count removes that rescanning. Then sort the `m` distinct titles by count descending and title ascending, and keep the first `k`; every language uses this counting map plus a comparison sort. A heap of size `k` would bring the sort down to O(m log k), and bucket sort by count to O(n) before the ties are ordered, but the sort is the version to write in an interview unless the interviewer asks for more. The tie rule is what makes the output unique: without it, titles with the same count come out in the map's iteration order, which differs between languages.
+
+<Solutions n="015" />
+
+**Complexity.** O(n + m log m) time for `n` loans and `m` distinct titles, O(m) space for the counts.
+
+**Common mistake.** Breaking ties with a locale-aware comparison (TypeScript's `localeCompare`, C#'s default string comparer), which puts `"apple"` before `"Zola"` when character codes put `"Zola"` first, or with Python's `Counter.most_common`, which keeps tied titles in first-appearance order.
+
+## 016 · Product of Everything Else
+
+**Arrays and Hashing · Medium**
+
+Given an array of integers, return a new array of the same length where position `i` holds the product of every element except the one at `i`. Do not use division. For an array of one element the answer is `[1]` (the product of nothing), and an empty array gives an empty array.
+
+```text
+Example 1
+  input:  nums = [2, 3, 4, 5]
+  output: [60, 40, 30, 24]        (60 = 3 × 4 × 5)
+
+Example 2
+  input:  nums = [4, 0, 5]
+  output: [0, 20, 0]        (only the zero's own position skips the zero)
+```
+
+Constraints: `0 ≤ nums.length ≤ 10⁵`, `-30 ≤ nums[i] ≤ 30`, every answer fits in a 32-bit signed integer.
+
+**Approach.** The simple solution multiplies the other `n - 1` elements for every position: O(n²). Dividing the total product by `nums[i]` would be O(n), but it breaks as soon as the array contains a zero, which is why the rule forbids it. Instead, notice that the answer at `i` is the product of everything before `i` times the product of everything after `i`. One pass left to right writes the "before" product into the output array; a second pass right to left keeps a running "after" product in a single variable and multiplies it in. No extra array is needed besides the output.
+
+<Solutions n="016" />
+
+**Complexity.** O(n) time, O(1) extra space besides the output array.
+
+**Common mistake.** Updating the running product before writing it (`left *= nums[i]` first), which includes the element itself and turns `[2, 3, 4, 5]` into `[120, 120, 120, 120]`.
+
+## 017 · Longest Run of Consecutive IDs
+
+**Arrays and Hashing · Medium**
+
+Shelfwise issues library cards with numeric IDs, and you get them in no particular order, possibly with repeats. Return the length of the longest run of consecutive integers that all appear among the IDs, such as `101, 102, 103`. Repeats count once. An empty list gives 0. Aim for O(n) time, which rules out sorting.
+
+```text
+Example 1
+  input:  ids = [104, 7, 101, 5, 103, 6, 102]
+  output: 4        (101, 102, 103, 104)
+
+Example 2
+  input:  ids = [9, 1, 9, 2, 2]
+  output: 2        (1, 2; the repeats add nothing)
+```
+
+Constraints: `0 ≤ ids.length ≤ 10⁵`, `-10⁹ ≤ ids[i] ≤ 10⁹`.
+
+**Approach.** Sorting and scanning for neighbours works in O(n log n), and the simplest version, counting upwards from every ID with a linear search for the next one, is O(n²) or worse. Put the IDs in a hash set so that "is `x + 1` here?" costs O(1). Counting upwards from every ID still repeats work, since a run of length `L` would be walked `L` times, so only start counting at an ID whose predecessor `x - 1` is not in the set: that ID is where a run begins. Iterate over the set, not the input, so a repeated start ID is not walked twice. Each ID is then visited at most twice, once in the loop and once while extending a run.
+
+<Solutions n="017" />
+
+**Complexity.** O(n) time, O(n) space for the set.
+
+**Common mistake.** Counting from every ID instead of only from run starts, which is still correct but takes O(n²) on `[1, 2, 3, …, 100000]`.
+
+## 018 · Count Stretches With a Target Sum
+
+**Arrays and Hashing · Medium**
+
+A shelf's stock changes every day by some amount, which can be negative. Given the daily changes and a target, count the stretches of one or more consecutive days whose changes add up to exactly the target. Stretches that overlap or contain each other all count separately. An empty array has no stretches, so it gives 0.
+
+```text
+Example 1
+  input:  changes = [1, 2, 3, -2, 2], target = 3
+  output: 4        ([1, 2], [3], [2, 3, -2], [3, -2, 2])
+
+Example 2
+  input:  changes = [0, 0, 0], target = 0
+  output: 6        (every stretch sums to 0: three of length 1, two of length 2, one of length 3)
+```
+
+Constraints: `0 ≤ changes.length ≤ 2 × 10⁴`, `-1000 ≤ changes[i] ≤ 1000`, `-10⁷ ≤ target ≤ 10⁷`.
+
+**Approach.** The simple solution fixes each start day and extends the stretch to the right with a running sum: O(n²). Because changes can be negative, a sliding window does not work: growing the stretch can make the sum go down. Use prefix sums instead: a stretch ending today sums to the target exactly when an earlier prefix sum equals `sum - target`, where `sum` is today's prefix sum. A hash map from prefix sum to how many times it has occurred gives that count in O(1). Seed the map with `0 → 1` for the empty prefix, so stretches that start on day 0 are counted, and look up before you record today's sum.
+
+<Solutions n="018" />
+
+**Complexity.** O(n) time, O(n) space for the map of prefix sums.
+
+**Common mistake.** Forgetting the `0 → 1` seed, which misses every stretch that starts at the first day: `[3]` with a target of 3 returns 0 instead of 1.
+
+## 019 · Validate a Sudoku Board
+
+**Arrays and Hashing · Medium**
+
+A Sudoku board is given as 9 strings of 9 characters each, one string per row; each character is a digit `1`–`9` or `.` for an empty cell. Return `true` if no digit appears twice in the same row, the same column or the same 3 × 3 box (the nine boxes are rows 0–2, 3–5, 6–8 crossed with columns 0–2, 3–5, 6–8). Empty cells are ignored, and the board does not have to be solvable, only free of repeats.
+
+```text
+Example 1
+  input:  board = [".9.5.3.46",
+                   "5.3.46...",
+                   "1........",
+                   "9.5.....2",
+                   "..1.6...5",
+                   "4..9....1",
+                   ".583...2.",
+                   "3.46.9758",
+                   ".2...8.1."]
+  output: true
+
+Example 2
+  input:  the same board with row 2 changed to "1.9......"
+  output: false        (the new 9 repeats the 9 in row 0 inside the top-left box;
+                        its row and column have no other 9)
+```
+
+Constraints: `board.length = 9`, `board[i].length = 9`, each character is `1`–`9` or `.`.
+
+**Approach.** The simple solution checks each of the 27 units (9 rows, 9 columns, 9 boxes) separately with a fresh set, which is three passes over the board but already O(1) for a fixed size. One pass is enough if you keep three 9 × 9 tables of booleans, `inRow[r][d]`, `inCol[c][d]` and `inBox[b][d]`, where `d` is the digit minus one. The only formula to get right is the box number, `b = (r / 3) × 3 + c / 3` with integer division, which numbers the boxes 0 to 8 left to right, top to bottom. For each digit, return `false` if any of its three flags is already set, otherwise set all three.
+
+<Solutions n="019" />
+
+**Complexity.** O(1) time and space for a fixed 9 × 9 board (81 cells, 243 flags); O(n²) time and space for an `n × n` board.
+
+**Common mistake.** Computing the box as `r / 3 + c / 3`, which sends the box at rows 0–2, columns 3–5 and the box at rows 3–5, columns 0–2 to the same number and reports repeats that are not there.
+
+## 020 · Zero Out Rows and Columns
+
+**Arrays and Hashing · Medium**
+
+Given an `m × n` grid of integers, change it in place: for every cell that is 0 in the original grid, set its whole row and its whole column to 0. Only the zeros of the original grid count; a cell that becomes 0 because of this rule does not spread further. Return nothing.
+
+```text
+Example 1
+  input:  grid = [[1, 2, 3],
+                  [4, 0, 6],
+                  [7, 8, 9]]
+  output: grid becomes [[1, 0, 3],
+                        [0, 0, 0],
+                        [7, 0, 9]]
+
+Example 2
+  input:  grid = [[0, 1, 2, 0],
+                  [3, 4, 5, 6],
+                  [1, 3, 1, 5]]
+  output: grid becomes [[0, 0, 0, 0],
+                        [0, 4, 5, 0],
+                        [0, 3, 1, 0]]
+```
+
+Constraints: `1 ≤ m, n ≤ 200`, `-10⁹ ≤ grid[r][c] ≤ 10⁹`.
+
+**Approach.** The simple solution copies the grid and reads the zeros from the copy while writing into the original: O(m × n) time and O(m × n) extra space. The copy holds far more than you need: all that matters is which rows and which columns contain a zero. So make one pass that records that in two boolean arrays, one of length `m` and one of length `n`, and a second pass that zeroes every cell whose row or column is marked. Separating the two passes is what keeps new zeros from spreading. As a follow-up, the first row and first column of the grid itself can hold the marks, with two extra flags for whether they contained a zero, which brings the extra space to O(1) at the cost of trickier code.
+
+<Solutions n="020" />
+
+**Complexity.** O(m × n) time, O(m + n) space for the row and column marks.
+
+**Common mistake.** Zeroing rows and columns during the first scan, so the new zeros trigger more zeroing: `[[0, 1], [1, 1]]` ends as all zeros instead of `[[0, 0], [0, 1]]`.
