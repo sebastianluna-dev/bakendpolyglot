@@ -7,3 +7,270 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+Dynamic programming is recursion that remembers: when the same smaller question comes up again and again, answer each one once and store it. These problems train one habit, said out loud before any code: define the state in words ("`ways[i]` is the number of ways to stand on step `i`"), write the recurrence that builds a state from smaller ones, and only then choose between top-down, a memoised recursion that is quick to write but limited by stack depth (the Python section explains why `@cache` can crash on deep inputs), and bottom-up, a loop that fills the table from the smallest state upwards. The solutions here are bottom-up, so the six languages look alike and none of them hits a recursion limit, and whenever a step reads only the last row or the last few values, they keep those instead of the whole table.
+
+## 163 · Ways to Climb the Stairs
+
+**Dynamic Programming · Easy**
+
+A staircase has `n` steps, and each move climbs either one step or two. Return the number of different sequences of moves that end exactly on the top step; two sequences are different if they differ in any move. For `n = 0` there is exactly one way, the empty sequence.
+
+```text
+Example 1
+  input:  n = 4
+  output: 5        (1+1+1+1, 1+1+2, 1+2+1, 2+1+1, 2+2)
+
+Example 2
+  input:  n = 1
+  output: 1
+```
+
+Constraints: `0 ≤ n ≤ 70`. The answer grows past 2³¹ − 1 at `n = 46` and reaches about 3.1 × 10¹⁴ at `n = 70`, so return a 64-bit integer (`long`, `Long`, `int64`); that is still below 2⁵³, so a TypeScript `number` stays exact, and Python integers have no limit.
+
+**Approach.** The simple solution follows the definition: the last move is one step or two, so the count for `n` is the count for `n - 1` plus the count for `n - 2`, computed by plain recursion. That recursion asks for the same small counts again and again, and the number of calls grows like the answer itself, exponentially. State it as dynamic programming: `ways[i]` is the number of ways to stand on step `i`, with `ways[0] = ways[1] = 1` and `ways[i] = ways[i - 1] + ways[i - 2]`. Filling it from 2 to `n` is O(n), and since each value reads only the two before it, two variables replace the table. Go returns `int64` rather than `int`, whose size depends on the platform.
+
+<Solutions n="163" />
+
+**Complexity.** O(n) time, O(1) space for the two running counts.
+
+**Common mistake.** Keeping the count in a 32-bit `int`: the answer for `n = 46` is 2,971,215,073, larger than 2³¹ − 1, so it wraps to a negative number instead of failing loudly.
+
+## 164 · Rob Houses Without Tripping the Alarm
+
+**Dynamic Programming · Easy**
+
+Houses stand in a row along one street, and `cash[i]` is the amount hidden in house `i`. A burglar may break into any set of houses except two next to each other, because neighbouring houses share an alarm line. Return the largest total the burglar can take. With no houses the total is 0.
+
+```text
+Example 1
+  input:  cash = [6, 1, 2, 9]
+  output: 15        (houses 0 and 3)
+
+Example 2
+  input:  cash = [5, 10, 4, 3, 8]
+  output: 18        (houses 1 and 4)
+```
+
+Constraints: `0 ≤ cash.length ≤ 10⁴`, `0 ≤ cash[i] ≤ 10⁴`.
+
+**Approach.** The simple solution tries every set of houses with no two neighbours, and the number of such sets grows exponentially with the length of the street. Greedy rules such as "take every other house" or "take the richest house first" fail on inputs like `[2, 1, 1, 2]`. State it instead: `best[i]` is the largest total from the first `i` houses. For the next house there are two choices, skip it and keep `best[i]`, or take it, which rules out the house before, for `best[i - 1] + cash[i]`; the larger one wins. Each step reads only the last two values, so, as in problem 163, two variables replace the table: the best total up to here and the best total up to the house before.
+
+<Solutions n="164" />
+
+**Complexity.** O(n) time, O(1) space for the two running totals.
+
+**Common mistake.** Comparing the sum of the even-indexed houses with the sum of the odd-indexed ones, which returns 3 for `[2, 1, 1, 2]` instead of 4: the best plan takes houses 0 and 3 and skips two houses in a row.
+
+## 165 · Best Stretch of Daily Results
+
+**Dynamic Programming · Easy**
+
+A shop records its net result for each day: `results[i]` is the profit (positive) or loss (negative) of day `i`. Return the largest total of a stretch of one or more consecutive days. The stretch cannot be empty, so if every day was a loss the answer is the smallest loss.
+
+```text
+Example 1
+  input:  results = [-2, 4, -1, 3, -7, 2]
+  output: 6        (days 1 to 3: 4 - 1 + 3)
+
+Example 2
+  input:  results = [-8, -3, -5]
+  output: -3       (day 1 alone)
+```
+
+Constraints: `1 ≤ results.length ≤ 10⁵`, `-10⁴ ≤ results[i] ≤ 10⁴`.
+
+**Approach.** The simple solution tries every start day and extends a running sum to every end day: O(n²). The state that removes the repeated work is `endingHere`, the best total of a stretch that ends on the current day. A stretch ending today is either today alone or today added to the best stretch ending yesterday, so for the day's result `r`, `endingHere = max(r, endingHere + r)`, and the answer is the largest `endingHere` seen. Only yesterday's value is needed, so one variable replaces the table (this is Kadane's algorithm). Starting `endingHere` at 0 makes the first day come out as itself, so one loop covers every day, while `best` starts at the first day so that an all-loss input is handled.
+
+<Solutions n="165" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Starting `best` at 0, which treats the empty stretch as allowed: `[-8, -3, -5]` returns 0 instead of -3.
+
+## 166 · Count the One Bits for Every Number
+
+**Dynamic Programming · Easy**
+
+Given a non-negative integer `n`, return an array `bits` of length `n + 1` where `bits[i]` is the number of 1s in the binary representation of `i`, for every `i` from 0 to `n`.
+
+```text
+Example 1
+  input:  n = 5
+  output: [0, 1, 1, 2, 1, 2]        (0, 1, 10, 11, 100, 101)
+
+Example 2
+  input:  n = 0
+  output: [0]
+```
+
+Constraints: `0 ≤ n ≤ 10⁵`.
+
+**Approach.** The simple solution counts the bits of each number on its own, shifting right until it reaches zero (or calling a built-in popcount where the language has one): O(log n) per number, O(n log n) in total. Every number shares most of its bits with a smaller one: `i >> 1` is `i` with its last binary digit dropped, it is smaller than `i` and so already computed, and the dropped digit is `i & 1`. That gives `bits[i] = bits[i >> 1] + (i & 1)`, filled from 1 to `n`. Here the table can't shrink to a few variables, because `bits[i >> 1]` reaches back halfway, but the table is also the answer.
+
+<Solutions n="166" />
+
+**Complexity.** O(n) time, O(n) space for the output and nothing else.
+
+**Common mistake.** Leaving out the parentheses: in TypeScript and Python `&` binds more loosely than `+`, so `bits[i >> 1] + i & 1` means `(bits[i >> 1] + i) & 1` and `n = 3` gives `[0, 1, 1, 0]`; in Go the same line happens to be correct, because `&` binds as tightly as `*`, which is one more reason to write the parentheses everywhere.
+
+## 167 · Paths Through a Grid
+
+**Dynamic Programming · Easy**
+
+A warehouse robot starts in the top-left cell of a grid with `rows` rows and `cols` columns and must reach the bottom-right cell. Each move goes one cell right or one cell down. Return the number of different paths.
+
+```text
+Example 1
+  input:  rows = 3, cols = 4
+  output: 10
+
+Example 2
+  input:  rows = 2, cols = 2
+  output: 2        (right then down, or down then right)
+```
+
+Constraints: `1 ≤ rows, cols ≤ 100`, and the inputs are such that the answer is at most 2 × 10⁹. No cell's count is larger than the corner's, so every value fits in a 32-bit `int`.
+
+**Approach.** The simple solution recurses: the paths to a cell are the paths to the cell above plus the paths to the cell on its left. Plain recursion recomputes the same cells exponentially many times. As a table, `paths[r][c] = paths[r - 1][c] + paths[r][c - 1]`, with every cell of the first row and the first column equal to 1, is O(rows × cols). Each row reads only the row above, so one array of `cols` counts is enough: going left to right, `row[c]` still holds the value from above when you read it, and `row[c - 1]` already holds the new value on the left, so the update is `row[c] += row[c - 1]`. There is also a formula, the binomial coefficient C(rows + cols − 2, rows − 1), but computing it without overflow needs more care than the loop.
+
+<Solutions n="167" />
+
+**Complexity.** O(rows × cols) time, O(cols) space for the single row.
+
+**Common mistake.** Starting the inner loop at `c = 0`, which reads `row[-1]`: an out-of-range index in most languages, and in Python silently the last cell, so `grid_paths(2, 2)` returns 3 instead of 2.
+
+## 168 · Paint the Houses for Less
+
+**Dynamic Programming · Easy**
+
+A row of houses must each be painted red, green or blue, and `costs[i]` is `[red, green, blue]`, the price of each colour for house `i`. Two neighbouring houses may not have the same colour. Return the lowest total cost of painting every house; with no houses it is 0.
+
+```text
+Example 1
+  input:  costs = [[8, 3, 6], [4, 9, 2], [7, 5, 1]]
+  output: 8        (green 3, red 4, blue 1)
+
+Example 2
+  input:  costs = [[1, 2, 9], [1, 9, 9]]
+  output: 3        (green 2, then red 1; starting with the cheapest, red 1, forces 9 next)
+```
+
+Constraints: `0 ≤ costs.length ≤ 100`, `costs[i].length == 3`, `0 ≤ costs[i][j] ≤ 1000`.
+
+**Approach.** The simple solution tries every valid colouring, 3 × 2ⁿ⁻¹ of them, and picking the cheapest colour for each house in turn fails on Example 2. The state carries the colour: `red[i]` is the cheapest way to paint houses 0 to `i` with house `i` red, and likewise `green[i]` and `blue[i]`. A red house follows a green or a blue one, so `red[i] = costs[i][0] + min(green[i - 1], blue[i - 1])`, and the other two are symmetric; the answer is the smallest of the three after the last house. Each house reads only the one before, so three variables replace the table, but all three must be computed from the old values: C#, Go, Python and TypeScript assign them together as a tuple, and Java and Kotlin compute three temporaries first.
+
+<Solutions n="168" />
+
+**Complexity.** O(n) time, O(1) space for the three running totals.
+
+**Common mistake.** Updating the three totals one after another, so `green` reads the `red` of the current house instead of the previous one: Example 1 returns 14 instead of 8.
+
+## 169 · Region Totals on a Seat Map
+
+**Dynamic Programming · Easy**
+
+SeatLock shows organisers how much a block of seats has earned. Design a class `RegionSums` built from a seat map `grid`, where `grid[r][c]` is the amount paid for the seat in row `r` and column `c` (0 if it is unsold). Its method `sum(r1, c1, r2, c2)` returns the total of the rectangle whose top-left seat is `(r1, c1)` and whose bottom-right seat is `(r2, c2)`, both included. The map does not change after construction, and every call to `sum` must take O(1) time.
+
+```text
+Example 1
+  grid:    [[3, 0, 1, 4],
+            [5, 6, 3, 2],
+            [1, 2, 0, 1],
+            [4, 1, 0, 5]]
+  calls:   sum(1, 1, 2, 2), sum(0, 0, 3, 3), sum(2, 3, 2, 3), sum(0, 1, 3, 2)
+  returns: 11, 38, 1, 13
+
+Example 2
+  grid:    [[7]]
+  calls:   sum(0, 0, 0, 0)
+  returns: 7
+```
+
+Constraints: `1 ≤ rows, cols ≤ 200`, `0 ≤ grid[r][c] ≤ 10⁴`, `0 ≤ r1 ≤ r2 < rows`, `0 ≤ c1 ≤ c2 < cols`, at most `10⁴` calls to `sum`. The whole map totals at most 4 × 10⁸, which fits in 32 bits.
+
+**Approach.** The simple solution loops over the rectangle on every call: O(rows × cols) per query. Instead, build a table `prefix` with one extra row and column of zeros, where `prefix[r][c]` is the total of every seat above row `r` and left of column `c`. Each entry comes from three already computed ones: `prefix[r + 1][c + 1] = grid[r][c] + prefix[r][c + 1] + prefix[r + 1][c] - prefix[r][c]`, subtracting the top-left block that the other two both include. A query is the same inclusion and exclusion read backwards: the big block to `(r2, c2)`, minus the block above the rectangle, minus the block to its left, plus the corner block that was subtracted twice. The extra row and column remove every special case for `r1 = 0` or `c1 = 0`. C# uses a rectangular `int[,]`; the other languages use an array of rows.
+
+<Solutions n="169" />
+
+**Complexity.** O(rows × cols) time and space to build the prefix table; O(1) time per `sum`.
+
+**Common mistake.** Forgetting to add back the corner block `prefix[r1][c1]`, which both subtractions removed: in Example 1, `sum(1, 1, 2, 2)` returns 8 instead of 11.
+
+## 170 · Fewest Coins for an Amount
+
+**Dynamic Programming · Medium**
+
+Given coin values `coins` (distinct and positive, with an unlimited supply of each) and an `amount`, return the smallest number of coins whose values add up to exactly `amount`. Return `-1` if no combination does. An amount of 0 needs 0 coins.
+
+```text
+Example 1
+  input:  coins = [1, 4, 6], amount = 8
+  output: 2        (4 + 4; taking the largest coin first gives 6 + 1 + 1)
+
+Example 2
+  input:  coins = [5, 10], amount = 3
+  output: -1
+```
+
+Constraints: `1 ≤ coins.length ≤ 12`, `1 ≤ coins[i] ≤ 10⁴`, `0 ≤ amount ≤ 10⁴`.
+
+**Approach.** Taking the largest coin that fits fails on Example 1, so every choice has to be considered. The simple solution recurses: try each coin, solve the remaining amount, keep the best. It is exponential because it solves the same remainders over and over. State it as `fewest[a]`, the fewest coins that add up to `a`: the last coin is some `coin ≤ a`, so `fewest[a] = 1 + min(fewest[a - coin])`, with `fewest[0] = 0`. Fill it from 1 to `amount`. Mark an amount nobody can reach with `amount + 1`, a count no real answer can have, since even all ones need only `amount` coins; adding 1 to it is safe, and any value above `amount` at the end means `-1`.
+
+<Solutions n="170" />
+
+**Complexity.** O(amount × coins.length) time, O(amount) space for the table.
+
+**Common mistake.** Using the largest `int` as "unreachable" and then adding 1 to it, which wraps to the most negative value and wins every `min`: with `coins = [2]` and `amount = 3`, the answer is a large negative number instead of -1.
+
+## 171 · Longest Rising Sequence
+
+**Dynamic Programming · Medium**
+
+Given an array `nums`, return the length of its longest strictly rising subsequence: elements taken in their original order, not necessarily next to each other, each one larger than the one before. Equal values do not count as rising. An empty array has length 0.
+
+```text
+Example 1
+  input:  nums = [3, 1, 8, 2, 5, 9, 4]
+  output: 4        (1, 2, 5, 9)
+
+Example 2
+  input:  nums = [7, 7, 7]
+  output: 1
+```
+
+Constraints: `0 ≤ nums.length ≤ 10⁵`, `-10⁹ ≤ nums[i] ≤ 10⁹`.
+
+**Approach.** The classic DP defines `len[i]` as the longest rising sequence that ends at `i`, which is 1 plus the largest `len[j]` with `j < i` and `nums[j] < nums[i]`: O(n²), fine for a few thousand values but too slow for 10⁵. The faster method, sometimes called patience sorting, keeps `tails`, where `tails[k]` is the smallest value that can end a rising sequence of length `k + 1`; this list is always strictly increasing. For each value `x`, binary-search the first tail that is `≥ x`: if there is none, `x` extends the longest sequence and is appended; otherwise it replaces that tail, giving a sequence of that length a lower end that is easier to extend. The answer is the length of `tails`, although `tails` itself need not be a valid subsequence. All six languages implement this O(n log n) method with a hand-written binary search (Python's `bisect_left` would do the same job); Java keeps `tails` in an `int[]` with a size counter to avoid boxing.
+
+<Solutions n="171" />
+
+**Complexity.** O(n log n) time, O(n) space for `tails`.
+
+**Common mistake.** Searching for the first tail strictly greater than `x` instead of greater or equal, which lets equal values extend a sequence: `[7, 7, 7]` returns 3 instead of 1.
+
+## 172 · Can the Text Be Split Into Words?
+
+**Dynamic Programming · Medium**
+
+Given a string `text` of lowercase letters and a list of dictionary `words`, return `true` if `text` can be cut into pieces that are all dictionary words, and `false` otherwise. A word may be used any number of times, and the list may contain duplicates. An empty text needs no words, so it returns `true`.
+
+```text
+Example 1
+  input:  text = "bookseller", words = ["books", "book", "seller"]
+  output: true        (book + seller; starting with "books" leaves "eller")
+
+Example 2
+  input:  text = "trucking", words = ["truck", "king", "in"]
+  output: false       ("truck" leaves "ing", and "king" would need "truc" before it)
+```
+
+Constraints: `0 ≤ text.length ≤ 300`, `0 ≤ words.length ≤ 1000`, `1 ≤ words[i].length ≤ 20`.
+
+**Approach.** The simple solution recurses: try every word that starts the text and recurse on what is left. It is exponential on inputs like `"aaaaaaaaab"` with `["a", "aa"]`, because the same suffix is tried again for every way of reaching it. State it instead: `splits[i]` is whether the first `i` letters can be split, with `splits[0] = true`, and `splits[end]` is true when some earlier `start` has `splits[start]` and `text[start:end]` in the dictionary. Put the words in a hash set, and only try pieces up to the length of the longest word, which bounds the inner loop. The table can't shrink, because `splits[end]` reads up to one word length back.
+
+<Solutions n="172" />
+
+**Complexity.** O(n × L²) time, where `L` is the longest word: at most `L` pieces per position, each costing O(L) to cut and hash. O(n) space for the table, plus the set of words.
+
+**Common mistake.** Taking the first or the longest matching word and never reconsidering it: Example 1 takes `"books"`, gets stuck on `"eller"` and returns `false`.
