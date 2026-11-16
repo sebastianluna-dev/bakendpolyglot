@@ -7,3 +7,305 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+These last ten problems are the closest to a backend developer's daily work: counting requests in a log, paging through a sorted list, decoding a query string, and the small pieces of infrastructure that frameworks usually hide, such as a cache, a rate limiter, a retry loop, an idempotency layer, a worker pool and a hash ring. The algorithms are short. The difficulty is in turning a loose requirement into exact rules before you type, and in passing time, randomness and sleeping in as parameters so that a test can check the result exactly. Expect the interviewer to follow up with "what changes with several threads or several servers?", so each entry says where the single-process version stops.
+
+## 191 · Requests per Endpoint and Status From Access Logs
+
+**Practical Backend Tasks · Easy**
+
+Shelfwise's API writes one line per request to its access log. A line has five fields separated by single spaces: a timestamp, the HTTP method, the path, the status code and the duration in milliseconds, as in `2026-03-02T09:00:01Z GET /books 200 12`. Given the lines, count the requests for each combination of method, path and status, and return one string per combination, `"METHOD PATH STATUS COUNT"`. Order them by count, highest first, and break ties by comparing the `"METHOD PATH STATUS"` part as a plain string, character code by character code. A line that does not split into exactly five non-empty fields is skipped: a blank line, a truncated line, two spaces in a row or a trailing space. Paths are compared exactly as written, so `/members/7` and `/members/8` are different endpoints.
+
+```text
+Example 1
+  input:  lines = ["2026-03-02T09:00:01Z GET /books 200 12",
+                   "2026-03-02T09:00:02Z POST /loans 201 40",
+                   "2026-03-02T09:00:03Z GET /books 200 9",
+                   "2026-03-02T09:00:04Z POST /loans 409 15",
+                   "2026-03-02T09:00:05Z GET /books 200 11",
+                   "2026-03-02T09:00:06Z POST /loans 201 38"]
+  output: ["GET /books 200 3", "POST /loans 201 2", "POST /loans 409 1"]
+
+Example 2
+  input:  lines = ["2026-03-02T09:01:00Z GET /members/7 404 3",
+                   "",
+                   "garbage",
+                   "2026-03-02T09:01:02Z DELETE /holds/9 204 5",
+                   "2026-03-02T09:01:03Z GET /members/7 200 4"]
+  output: ["DELETE /holds/9 204 1", "GET /members/7 200 1", "GET /members/7 404 1"]
+          (two lines skipped; the three ties are ordered by their text)
+```
+
+Constraints: `0 ≤ lines.length ≤ 10⁵`, each line has at most 200 ASCII characters.
+
+**Approach.** The simple solution collects the distinct keys and then scans all the lines once per key to count it: O(n·k) for `k` distinct keys. One pass with a hash map from the key `"METHOD PATH STATUS"` to its count does all the counting in O(n), and sorting the `k` entries with a two-part comparator, count descending and then key ascending, gives the order. Validate before counting: split on a single space and require exactly five fields with none empty, which rejects double and trailing spaces without a special case. Two language details matter: Java's `split(" ")` drops trailing empty strings, so the solution passes a limit of `-1` to keep them, and C#'s default string ordering depends on the culture, so the solution sorts with `StringComparer.Ordinal`.
+
+<Solutions n="191" />
+
+**Complexity.** O(n·L + k log k) time for `n` lines of length up to `L` and `k` distinct keys, O(k) space for the map.
+
+**Common mistake.** Sorting by count alone: the three entries of Example 2 all have a count of 1, so their order is whatever order the map iterates in, which is not the rule (and in Go changes from run to run).
+
+## 192 · Keep the Latest Version of Each Record
+
+**Practical Backend Tasks · Easy**
+
+Parcel and Pulse receives changes to its delivery records from several services, and they arrive out of order. Each change is a revision `(id, version, payload)`: the record's id, a version number that grows with every change to that record, and the new contents. Given a list of revisions, keep only the revision with the highest version for each id, and return the kept revisions sorted by id in ascending order. If the highest version of an id appears more than once (a message delivered twice), keep the one that comes first in the list. An empty list gives an empty result.
+
+```text
+Example 1
+  input:  revisions = [(7, 1, "created"), (3, 2, "in transit"), (7, 3, "delivered"),
+                       (3, 1, "created"), (7, 2, "in transit")]
+  output: [(3, 2, "in transit"), (7, 3, "delivered")]
+
+Example 2
+  input:  revisions = [(5, 4, "first"), (5, 4, "replayed"), (1, 1, "only")]
+  output: [(1, 1, "only"), (5, 4, "first")]      (equal versions: the first one stays)
+```
+
+Constraints: `0 ≤ revisions.length ≤ 10⁵`, `-10⁹ ≤ id ≤ 10⁹`, `1 ≤ version ≤ 10⁹`, `payload.length ≤ 100`.
+
+**Approach.** The simple solution checks, for every revision, whether any other revision with the same id has a higher version: O(n²). Sorting by id and then by version, highest first, and keeping the first revision of each id is O(n log n), but the sort must be stable to respect the tie rule. One pass with a hash map from id to the revision kept so far does the job: replace the kept revision only when the new version is strictly greater, which keeps the first of two equal versions. Then sort the `k` kept revisions by id. The revision is a type with value equality, so the checks can compare whole lists: a `record` in C# and Java, a `data class` in Kotlin, a struct in Go (whose fields are all comparable), a `NamedTuple` in Python and an object type compared with `deepEqual` in TypeScript.
+
+<Solutions n="192" />
+
+**Complexity.** O(n + k log k) time for `n` revisions and `k` distinct ids, O(k) space for the map.
+
+**Common mistake.** Keeping whatever arrives last for each id instead of the highest version: in Example 1, parcel 7 ends up `"in transit"` (version 2), although version 3 already said `"delivered"`.
+
+## 193 · Cursor Pagination Over a Sorted List
+
+**Practical Backend Tasks · Easy**
+
+Shelfwise's catalog endpoint returns books a page at a time, with the cursor pagination of Chapter 12. Here the book ids are an array sorted in strictly increasing order. Write `fetchPage(ids, after, limit)`, which returns a `Page` with two fields: `items`, the ids greater than `after` in order, at most `limit` of them; and `next`, the cursor for the following page. The cursor is the last id of the page when more ids come after it, and none otherwise, so a client never has to ask for an empty page to learn that it is done. `after` is none for the first page, and it need not be one of the ids: if the book it names was deleted between two requests, the page still starts at the first id greater than it.
+
+None is `null` in TypeScript (`number | null`), C# (`int?`), Java (`Integer`) and Kotlin (`Int?`), `None` in Python (`int | None`), and `nil` in Go, where `after` and `next` are `*int`.
+
+```text
+Example 1
+  input:  ids = [3, 8, 15, 21, 30, 42, 57], limit = 3, and after = none, then 15, then 42
+  output: items [3, 8, 15], next 15; items [21, 30, 42], next 42; items [57], next none
+
+Example 2
+  input:  ids = [3, 8, 15, 21, 30, 42, 57], after = 20, limit = 3
+  output: items [21, 30, 42], next 42     (20 is not an id; the page starts after it)
+```
+
+Constraints: `0 ≤ ids.length ≤ 10⁵`, `-10⁹ ≤ ids[i], after ≤ 10⁹`, `1 ≤ limit ≤ 1000`.
+
+**Approach.** The simple solution scans from the start for the first id greater than `after`: O(n) per page, so reading the whole list page by page costs O(n²/limit). Because the ids are sorted, a binary search finds the start in O(log n): it is the loop of problem 100, which finds the first element greater than a value, and it works whether or not `after` is in the array. Then take up to `limit` ids from there, and return a cursor only if the page ended before the array did; with exactly six ids and `after = 15`, the page `[21, 30, 42]` reaches the end, so `next` is none. A database does the same with `WHERE id > :after ORDER BY id LIMIT :limit`, where the index on `id` plays the part of the binary search.
+
+<Solutions n="193" />
+
+**Complexity.** O(log n + limit) time per call, O(limit) space for the page.
+
+**Common mistake.** Looking the cursor up by exact match (`indexOf`, or a binary search that returns "not found") and starting just after its position: with `after = 20`, as in Example 2, there is no such position, and the code either restarts at the first page or fails.
+
+## 194 · Parse a Query String
+
+**Practical Backend Tasks · Easy**
+
+Write `parseQuery(query)`, which turns a URL query string, the part after `?` without the `?` itself, into a map from each key to the list of its values in the order they appear. The rules:
+
+- Pieces are separated by `&`. Empty pieces, from `&&` or a trailing `&`, are skipped.
+- Each piece splits at its first `=`. The key is before it and the value is everything after it, more `=` signs included. A piece with no `=`, such as `flag`, has the value `""`, and so does `key=`.
+- Keys and values are decoded: `+` becomes a space, and `%` followed by two hex digits, in either case, is the byte with that value. The bytes are then read as UTF-8, so `%C3%A9` is `é`. A `%` that is not followed by two hex digits stays as it is.
+- A piece whose decoded key is empty, such as `=5`, is skipped.
+
+The query contains only ASCII characters, and every decoded key and value is valid UTF-8. Write the decoding yourself instead of calling the language's URL decoder.
+
+```text
+Example 1
+  input:  query = "genre=sci-fi&sort=title&genre=history"
+  output: {genre: ["sci-fi", "history"], sort: ["title"]}
+
+Example 2
+  input:  query = "q=war+%26+peace&note=50%25&empty=&flag"
+  output: {q: ["war & peace"], note: ["50%"], empty: [""], flag: [""]}
+```
+
+Constraints: `0 ≤ query.length ≤ 10⁴`.
+
+**Approach.** There is no slow version to improve here; the work is in getting the rules right, in the right order: split on `&` first, then split each piece at its first `=`, and decode the key and the value last. Decode with one loop that appends bytes to a buffer: `+` appends a space, a valid `%XX` appends one byte and skips two characters, and anything else appends its own code. Collect bytes rather than characters, because one character can need several escapes (`€` is `%E2%82%AC`), and turn the buffer into a string once, as UTF-8: `TextDecoder`, `Encoding.UTF8.GetString`, `ByteArrayOutputStream.toString(UTF_8)`, `decodeToString()` and `bytes.decode()`; a Go `string` already holds bytes, so `string(out)` is enough. To split at the first `=` only, C#, Java and Kotlin use `split` with a limit of 2, Go uses `strings.Cut` and Python `partition`; TypeScript uses `indexOf`, because JavaScript's `split("=", 2)` drops the rest of the string instead of keeping it. In an interview, name the built-ins (`URLSearchParams`, `HttpUtility.ParseQueryString`, `url.ParseQuery`, `urllib.parse.parse_qs`) and say that they don't all treat these edge cases the same way: `parse_qs`, for example, drops blank values unless you pass `keep_blank_values=True`.
+
+<Solutions n="194" />
+
+**Complexity.** O(n) time, O(n) space for the map and the byte buffer.
+
+**Common mistake.** Decoding the whole string before splitting it: `q=war+%26+peace` becomes `q=war & peace`, which then splits on the decoded `&` into `q` with the value `"war "` and a key `" peace"` with an empty value.
+
+## 195 · LRU Cache
+
+**Practical Backend Tasks · Medium**
+
+Chapter 25 puts a cache in Redis; this is the in-process version, with a fixed size. Shelfwise keeps the most recently viewed book records in memory. Design `LruCache(capacity)` with two operations, both O(1) on average. `get(key)` returns the value stored for `key`, or `-1` if the key is not in the cache. `put(key, value)` stores the value, replacing the old one if the key is already there. Both calls count as a use of the key. When `put` adds a new key to a cache that already holds `capacity` keys, it first evicts the least recently used key. Values are never negative, so `-1` always means "not cached".
+
+```text
+Example 1
+  LruCache(2)
+  calls:   put(1, 10), put(2, 20), get(1), put(3, 30), get(2), get(3),
+           put(1, 11), put(4, 40), get(3), get(1), get(4)
+  returns: the gets return 10, -1, 30, -1, 11, 40
+           (put(3, 30) evicts 2; put(1, 11) is a use of 1, so put(4, 40) evicts 3)
+
+Example 2
+  LruCache(1)
+  calls:   put(5, 50), get(5), put(6, 60), get(5), get(6)
+  returns: the gets return 50, -1, 60
+```
+
+Constraints: `1 ≤ capacity ≤ 10⁴`, `0 ≤ key, value ≤ 10⁹`, at most `10⁵` calls in total.
+
+**Approach.** The simple solution keeps a map for the values and a list of keys in order of use; every use moves a key to the front, and finding it in the list is O(n). To make that O(1), the map should point at the key's place in the order: a hash map from key to a node, and a doubly linked list of the nodes, most recently used first. With the node in hand, unlinking it is O(1), because its neighbours are its `prev` and `next`, and so are pushing it to the front and evicting the node at the back. One sentinel node, whose `next` is the most recent node and whose `prev` is the least recent, points to itself when the cache is empty and removes every null check; each node also stores its key, so evicting the last node can delete its map entry. Standard libraries have this built in: Java's `LinkedHashMap` in access order with `removeEldestEntry` (usable from Kotlin too), Python's `OrderedDict` with `move_to_end` and `popitem(last=False)`, and a JavaScript `Map`, which iterates in insertion order, so a use is a `delete` followed by a `set`; C# and Go have a linked list (`LinkedList<T>`, `container/list`) to combine with a map. The point of the question is usually the map and the list you write yourself, so name the built-in, ask whether it is allowed, and be ready to write the structure.
+
+<Solutions n="195" />
+
+**Complexity.** O(1) average time per call, O(capacity) space for the map and the nodes.
+
+**Common mistake.** Treating `put` on an existing key as a plain update without moving it to the front: in Example 1, `put(4, 40)` then evicts key 1, which was just written, instead of key 3.
+
+## 196 · Token-Bucket Rate Limiter
+
+**Practical Backend Tasks · Medium**
+
+SeatLock limits how often one client may call its API with a token bucket, one of the rate-limiting algorithms of Chapter 22. Design `TokenBucket(capacity, refillPerSecond)` with one operation, `allow(nowMs)`. The bucket holds at most `capacity` tokens and starts full. Tokens flow back continuously at `refillPerSecond` per second, so half a second adds half that many, and the bucket never holds more than `capacity`. A call that finds at least one whole token takes it and returns `true`; otherwise it takes nothing and returns `false`. Time is passed in rather than read from a clock, so the tests are deterministic: `nowMs` is a time in milliseconds that never decreases from one call to the next, and the refill is counted from time 0.
+
+```text
+Example 1
+  TokenBucket(3, 1)
+  calls:   allow(0) four times, allow(999), allow(1000) twice, allow(5000) four times
+  returns: true, true, true, false, false, true, false, true, true, true, false
+           (at 999 ms only 0.999 of a token is back; four idle seconds refill 3, not 4)
+
+Example 2
+  TokenBucket(2, 4)
+  calls:   allow(100), allow(100), allow(200), allow(350), allow(400), allow(600)
+  returns: true, true, false, true, false, true      (one token every 250 ms)
+```
+
+Constraints: `1 ≤ capacity, refillPerSecond ≤ 10⁴`, `0 ≤ nowMs ≤ 2 × 10⁹`, at most `10⁵` calls.
+
+**Approach.** A timer that adds tokens at a fixed tick needs a background thread and rounds time to the tick. Refill lazily instead: on each call, add what has flowed in since the previous call, `(nowMs - lastMs) × refillPerSecond / 1000` tokens, cap the total at `capacity`, remember `nowMs`, and then try to take a token. Tokens as floating-point numbers work, but sums of fractions such as 0.1 and 0.2 are not exact, and a check like `tokens >= 1` can then fail by a hair. Counting in thousandths of a token keeps everything an integer: a full bucket is `capacity × 1000`, a request costs 1000, and each millisecond adds exactly `refillPerSecond`. That product can pass 2³¹, so it is a 64-bit integer (`long`, `Long`, `int64`); TypeScript numbers are exact up to 2⁵³ and Python integers have no limit. A real service keeps one bucket per client in a map, or in a shared store such as Redis when several instances must share the limit.
+
+<Solutions n="196" />
+
+**Complexity.** O(1) time per call, O(1) space per bucket.
+
+**Common mistake.** Adding the refill without the cap: after the idle gap from 1000 to 5000 ms in Example 1 the bucket holds four tokens, so the fourth call at 5000 returns `true`.
+
+## 197 · Retry With Exponential Backoff and Jitter
+
+**Practical Backend Tasks · Medium**
+
+When Parcel and Pulse calls a carrier's API, a call can fail for a moment and succeed a little later. Write `retry(operation, maxAttempts, baseDelayMs, capMs, sleep, random)`, which calls `operation` up to `maxAttempts` times and returns its first successful result. After each failed attempt except the last, it waits: the k-th wait has a ceiling of `baseDelayMs × 2^(k−1)`, but never more than `capMs`, and lasts `floor(random() × ceiling)` milliseconds, where `random()` returns a number in `[0, 1)`. If the last attempt fails too, its error reaches the caller unchanged. `sleep(ms)` and `random()` are passed in, so the tests can record every delay and fix the random values. A failure is an exception in TypeScript, C#, Java, Kotlin and Python; in Go, `operation` returns `(T, error)`, and so does `Retry`.
+
+```text
+Example 1
+  input:  operation fails twice and then returns "receipt-42",
+          maxAttempts = 5, baseDelayMs = 100, capMs = 1000, random() always 0.5
+  output: "receipt-42", after sleeping [50, 100]
+
+Example 2
+  input:  operation always fails, the k-th time with "timeout k",
+          maxAttempts = 4, baseDelayMs = 100, capMs = 250, random() gives 0.5, 0.25, 0.75
+  output: the error "timeout 4", after sleeping [50, 50, 187]   (ceilings 100, 200, 250)
+```
+
+Constraints: `1 ≤ maxAttempts ≤ 30`, `1 ≤ baseDelayMs ≤ capMs ≤ 10⁶`, `0 ≤ random() < 1`.
+
+**Approach.** The loop is short; the bugs hide in the rules. Keep a `ceiling` that starts at `baseDelayMs` and doubles after every wait, capped at `capMs`; doubling a variable instead of computing `base × 2^k` also avoids overflowing an `int` when `maxAttempts` is large. Make the first `maxAttempts − 1` attempts inside a `try`, sleeping after each failure, and the last one outside it: its error then propagates as it is, there is no sleep after the final failure, and there is no "last error" variable to keep (Go's version has the same shape with `err` checks). Chapter 37 explains why the delays are randomised and what deserves a retry, which is only transient failures of idempotent operations, within a retry budget; a production version would also take a predicate that says which errors to retry. This version uses "full jitter", anywhere between 0 and the ceiling; Chapter 37's example spreads ± 50 % around the delay instead, which changes one line. Real code would wait without blocking a thread, by awaiting a timer in TypeScript, C# or Python's `asyncio`, but a synchronous, injected `sleep` keeps the six versions alike and is what the tests replace anyway.
+
+<Solutions n="197" />
+
+**Complexity.** O(maxAttempts) time, not counting the operation and the waits, and O(1) space.
+
+**Common mistake.** Sleeping after the last failed attempt as well: in Example 2 the code then waits a fourth time before giving up, so the caller waits for nothing and the recorded delays have four entries instead of three.
+
+## 198 · Idempotent Request Handler
+
+**Practical Backend Tasks · Medium**
+
+SeatLock's checkout endpoint takes an idempotency key, so a client whose connection dropped can send the same request again without paying twice (Chapter 24). Design `IdempotentHandler(operation)`, where `operation(body)` performs the checkout and returns an `ApiResponse` with a `status` and a `body` (`APIResponse` in Go). `handle(key, body)` works as follows. The first time a key is seen, it runs the operation, stores the request body and the response under the key, and returns the response. When the key comes again with the same body, it returns the stored response without running the operation. When the key comes again with a different body, it returns the conflict response `(422, "idempotency key reused with a different request")`, exposed as `CONFLICT` (`IdempotentHandler.Conflict` in C#, `Conflict` in Go), and changes nothing. Every response is stored, whatever its status, and keys never expire. Calls arrive one at a time.
+
+```text
+Example 1
+  operation: creates an order and returns (201, "order N"), N counting its own runs
+  calls:     handle("k1", "hold=7"), handle("k1", "hold=7"), handle("k2", "hold=9"),
+             handle("k1", "hold=8")
+  returns:   (201, "order 1"), (201, "order 1"), (201, "order 2"), the conflict response
+             (the operation ran twice)
+
+Example 2
+  operation: returns (409, "seat already sold") for "hold=3"
+  calls:     handle("k3", "hold=3"), handle("k3", "hold=3")
+  returns:   (409, "seat already sold") both times   (the operation ran once)
+```
+
+Constraints: `1 ≤ key.length ≤ 64`, `0 ≤ body.length ≤ 10⁴`, at most `10⁵` calls in total.
+
+**Approach.** Without the handler, a retried checkout runs twice; the fix is a map from each key to what happened the first time. Store the request body with the response, because a key may only be replayed for the request it was created with: a client bug that reuses a key for another hold must get an error, not the first hold's receipt. Chapter 24 stores a hash of the body rather than the body itself, which saves space and is compared the same way. This version is single-threaded on purpose. With concurrent requests, two retries with the same key can both miss the map and both run the operation; the fix is to claim the key atomically before running, with `putIfAbsent` on a concurrent map, an `INSERT` against a primary key as in Chapter 24, or `SET NX` in Redis, and to answer `409` to a request whose key is claimed but whose first attempt is still running.
+
+<Solutions n="198" />
+
+**Complexity.** O(1) average time per call plus the body comparison and the operation itself, O(s) space for the `s` characters of stored bodies and responses.
+
+**Common mistake.** Storing only the response and not the request: `handle("k1", "hold=8")` in Example 1 then returns the receipt for hold 7, and the client believes it bought the seats of hold 8.
+
+## 199 · Bounded Worker Pool With Ordered Results
+
+**Practical Backend Tasks · Hard**
+
+Parcel and Pulse has to call a carrier's tracking API for many parcels, but the carrier accepts only a few calls at a time. Write `mapLimit(items, limit, fn)`, which calls `fn` on every item with at most `limit` calls running at any moment, and returns the results in the order of `items`, whatever order the calls finish in. If there are fewer items than `limit`, they may all run at once; an empty list gives an empty result. In TypeScript and C#, `fn` returns a promise or a task and `mapLimit` is async; in Java, Kotlin, Go and Python, `fn` is an ordinary blocking function, and `mapLimit` returns once every call has finished.
+
+```text
+Example 1
+  input:  items = [40, 20, 30, 20, 25, 20, 30, 20], limit = 3,
+          fn sleeps item milliseconds and returns 10 × item
+  output: [400, 200, 300, 200, 250, 200, 300, 200]   (3 calls running at the peak)
+
+Example 2
+  input:  items = [30, 20], limit = 10, the same fn
+  output: [300, 200]                                 (both calls run at once)
+```
+
+Constraints: `0 ≤ items.length ≤ 10⁴`, `1 ≤ limit ≤ 100`.
+
+**Approach.** Starting every call at once breaks the limit, and running them one after another wastes it. Start `limit` workers instead: each takes the next index nobody has taken, calls `fn` on that item, writes the result into that index of the results array, and repeats until no index is left. Writing by index is what keeps the input order, so the only part that needs care is handing out each index exactly once. The mechanism is each language's natural one, as in its language section of this chapter: TypeScript shares a plain counter, which is safe because nothing else runs between reading it and incrementing it; C# and Java use an atomic counter (`Interlocked.Increment`, `AtomicInteger`) on real threads; Kotlin and Python submit every item to a fixed pool of `limit` threads, whose internal queue does the handing out; and Go sends the indices through a channel to `limit` goroutines. The checks make each call sleep for its item's value in milliseconds while counting the running calls under a lock (a plain variable in TypeScript, which has one thread), and assert both the order of the results and that the peak equals the limit, or the number of items when there are fewer.
+
+<Solutions n="199" />
+
+**Complexity.** O(n) time for the bookkeeping, with a wall-clock time of roughly the total duration divided by `limit` when the calls take similar times; O(n) space for the results, plus the `limit` workers.
+
+**Common mistake.** Collecting results in completion order, for example by appending to a shared list as each call ends: in Example 1 the first result is then 200, from the first call to finish, instead of 400.
+
+## 200 · Consistent Hash Ring
+
+**Practical Backend Tasks · Hard**
+
+A cache cluster in Parcel and Pulse spreads keys across nodes, and adding or removing a node should move as few keys as possible. Design `HashRing(replicas)` with three operations. `addNode(name)` puts `replicas` points for the node on a ring of unsigned 32-bit numbers, at the hashes of `name + "#" + i` for `i` from 0 to `replicas − 1`. `removeNode(name)` removes the node's points. `nodeFor(key)` hashes the key and returns the node of the first point whose hash is at least the key's hash, wrapping round to the first point of the ring when the key's hash is past the last one, or `""` when the ring is empty. Adding a node that is already there, or removing one that isn't, does nothing. If two points have the same hash, the one with the smaller node name comes first.
+
+The hash must give the same numbers in all six languages, so it is fixed. `fnv1a(s)` is 32-bit FNV-1a over the UTF-8 bytes of `s`: start from `2166136261`, and for each byte, XOR it in and then multiply by `16777619`, keeping 32 bits. `mix32(h)` is the 32-bit finalizer of MurmurHash3: `h ^= h >>> 16`, `h *= 0x85ebca6b`, `h ^= h >>> 13`, `h *= 0xc2b2ae35`, `h ^= h >>> 16`, again keeping 32 bits, where `>>>` is a shift that fills with zeros. The ring uses `ringHash(s) = mix32(fnv1a(s))`.
+
+```text
+Example 1
+  fnv1a("a") = 0xe40c292c, fnv1a("foobar") = 0xbf9cf968, ringHash("cache-a#0") = 0x6901e554
+
+Example 2
+  HashRing(3), then addNode("cache-a"), addNode("cache-b"), addNode("cache-c")
+  ring:    2e47d90c c#0, 5199e7e8 a#1, 64420c19 b#2, 6901e554 a#0, 715bdcae b#1,
+           a49dfdc6 a#2, b6f6a818 c#1, df2ce553 c#2, fa6088dd b#0
+  calls:   nodeFor for "book:1" … "book:7", then "book:37" (hash 0xfcfa1e45)
+  returns: cache-b, cache-a, cache-b, cache-c, cache-c, cache-c, cache-c, then
+           cache-c (past fa6088dd, so it wraps round to 2e47d90c)
+  after removeNode("cache-b"): book:1 moves to cache-a, book:3 to cache-c, the rest stay
+```
+
+Constraints: `1 ≤ replicas ≤ 200`, at most 100 nodes, `1 ≤ name.length, key.length ≤ 100`, at most `10⁴` calls in total.
+
+**Approach.** The simple placement, `hash(key) mod n`, moves almost every key when `n` changes. On a ring, a key belongs to the next point clockwise, so a new node only takes over the arcs that end at its points, and a removed node hands its arcs to the points after them; every other key stays where it was, which the checks assert. Keep the points in an array sorted by hash: `nodeFor` is a binary search for the first point with a hash at least the key's (the loop of problem 092), with the index `points.length` wrapping to 0, while `addNode` appends and re-sorts and `removeNode` filters, which is fine because nodes change rarely and lookups happen all the time. Virtual nodes spread each node over many short arcs, which evens out the load, and that is why the hash needs the finalizer: FNV-1a alone gives strings that differ only in their last character, such as `cache-a#0` and `cache-a#1`, hashes close to each other, so each node's points would bunch together. The unsigned arithmetic is what differs most: TypeScript multiplies with `Math.imul` and turns the result unsigned with `>>> 0`; C# and Go use `uint` and `uint32`, which wrap; Java and Kotlin compute in `int`, mask each signed byte with `0xff`, and widen to an unsigned `long` before comparing; Python masks with `0xFFFFFFFF` after every multiplication.
+
+<Solutions n="200" />
+
+**Complexity.** O(log P) time for `nodeFor`, with P the number of points (nodes × replicas), O(P log P) for `addNode` and O(P) for `removeNode`, plus the hashing; O(P) space for the points.
+
+**Common mistake.** Forgetting the wrap-round: `book:37` hashes to `0xfcfa1e45`, past the last point `0xfa6088dd`, so the search returns `points.length` and the code reads past the end of the array instead of returning the node of the first point.
