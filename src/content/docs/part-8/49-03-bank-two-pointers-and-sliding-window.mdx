@@ -7,3 +7,135 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+These problems keep two indices into the input instead of one. Sometimes the two start at opposite ends of a sorted array and move towards each other, sometimes one reads while the other writes so that an array is rewritten in place, and sometimes they are the edges of a window that grows on the right and shrinks on the left as it slides along. The algorithms are short, so the practice is in the details that are easiest to get wrong from memory: the loop condition, the bound at each end, and exactly when each index moves.
+
+## 046 · Is One a Subsequence of the Other?
+
+**Two Pointers and Sliding Window · Easy**
+
+Each Parcel and Pulse hub has a one-letter code. A parcel's plan is the string of hubs it must pass through, in order, and a truck's scans are the string of hubs it actually visited, in order. Return `true` if the truck visited every hub of the plan in the planned order, possibly with other hubs in between, and `false` otherwise. In other words, `plan` must be a subsequence of `scans`: what is left after deleting zero or more letters of `scans` without reordering the rest. An empty plan is always satisfied.
+
+```text
+Example 1
+  input:  plan = "ACE", scans = "ABCDE"
+  output: true
+
+Example 2
+  input:  plan = "AEC", scans = "ABCDE"
+  output: false        (the plan has E before C, the truck reached C first)
+```
+
+Constraints: `0 ≤ plan.length ≤ 100`, `0 ≤ scans.length ≤ 10⁵`, both contain only `A`–`Z`.
+
+**Approach.** The simple solution tries every way of choosing `plan.length` positions in `scans` and checks whether one spells the plan, which is exponential. The choice is never needed: matching each plan letter to the earliest scan where it appears is never worse than matching it later, because an earlier match leaves more of the scans for the letters still to come. So keep one index in each string: `j` walks the scans, and `i` moves forward only when `scans[j]` equals `plan[i]`. The plan is satisfied when `i` reaches its end. If the interviewer asks about many plans checked against the same scans, store the positions of each letter once and find each next match with a binary search.
+
+<Solutions n="046" />
+
+**Complexity.** O(n) time for `n` scans, O(1) space.
+
+**Common mistake.** Checking only that every letter of the plan appears somewhere in the scans, which accepts `"AEC"` for `"ABCDE"` even though the truck reached C before E.
+
+## 047 · Merge Two Sorted Arrays in Place
+
+**Two Pointers and Sliding Window · Easy**
+
+Two arrays of integers are each sorted in ascending order. The first one, `a`, has room for both: its first `m` elements are its values, and the `b.length` slots after them are spare (they hold 0, but their value does not matter). Merge `b` into `a` so that `a` ends up holding all `m + b.length` values in ascending order. Work in place, without a second array; the function returns nothing. Either array may contribute no values.
+
+```text
+Example 1
+  input:  a = [1, 4, 7, 0, 0], m = 3, b = [2, 8]
+  output: a = [1, 2, 4, 7, 8]
+
+Example 2
+  input:  a = [0, 0], m = 0, b = [3, 5]
+  output: a = [3, 5]        (a has no values of its own)
+```
+
+Constraints: `0 ≤ m, b.length ≤ 10⁵`, `a.length = m + b.length`, `-10⁹ ≤ a[i], b[i] ≤ 10⁹`.
+
+**Approach.** The simple solution copies `b` into the spare slots and sorts `a`: O((m + n) log(m + n)), ignoring that both parts are already sorted. A normal merge takes the smaller front element each time, but done in place it would write over values of `a` that have not been read yet. Merging from the back avoids that: compare the last unread values `a[i]` and `b[j]`, put the larger one in the last unfilled slot `k`, and step that index back. `k` is always `i + j + 1`, so a write never lands on an unread value of `a`. Stop when `b` runs out; whatever is left of `a` is already in its place.
+
+<Solutions n="047" />
+
+**Complexity.** O(m + n) time, O(1) space.
+
+**Common mistake.** Stopping the loop when either array runs out (`while (i >= 0 && j >= 0)`): the values left in `b` are never copied, so `[4, 5, 0]` with `m = 2` and `b = [1]` ends as `[4, 4, 5]` instead of `[1, 4, 5]`.
+
+## 048 · Remove Duplicates From a Sorted Array
+
+**Two Pointers and Sliding Window · Easy**
+
+Shelfwise exports the member ids of a day's loans sorted in ascending order, one id per loan, so a member who borrowed three books appears three times. Remove the repeats in place: rearrange the array so that its first `k` elements are the distinct ids in ascending order, and return `k`. What the array holds from position `k` on does not matter, and no second array may be used. An empty array gives `0`.
+
+```text
+Example 1
+  input:  ids = [3, 3, 5, 8, 8, 8, 9]
+  output: 4            (ids now starts with [3, 5, 8, 9])
+
+Example 2
+  input:  ids = [7, 7, 7]
+  output: 1            (ids now starts with [7])
+```
+
+Constraints: `0 ≤ ids.length ≤ 10⁵`, `1 ≤ ids[i] ≤ 10⁹`, `ids` is sorted in ascending order.
+
+**Approach.** Without the sort, a hash set would find the repeats with O(n) extra space; removing each repeat by shifting the rest of the array left works in place but costs O(n²). Because the array is sorted, the copies of an id sit next to each other, so an id is new exactly when it differs from the last id kept. Keep two indices: `read` visits every element, and `write` marks the end of the distinct prefix. When `ids[read]` differs from `ids[write - 1]`, copy it to `ids[write]` and advance `write`; at the end, `write` is the answer. `write` never passes `read`, so nothing unread is overwritten.
+
+<Solutions n="048" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Starting `write` at 1 without checking for an empty array, which returns `1` for `[]`.
+
+## 049 · Push the Zeros to the End
+
+**Two Pointers and Sliding Window · Easy**
+
+A Parcel and Pulse truck's loading plan is an array with one entry per slot, from front to back: a parcel id, or `0` for an empty slot. Before departure, move every empty slot to the back while keeping the parcels in their current order. Rearrange the array in place, without a second array; the function returns nothing.
+
+```text
+Example 1
+  input:  slots = [0, 41, 0, 0, 17, 23]
+  output: slots = [41, 17, 23, 0, 0, 0]
+
+Example 2
+  input:  slots = [5, 0, 3]
+  output: slots = [5, 3, 0]
+```
+
+Constraints: `0 ≤ slots.length ≤ 10⁵`, `0 ≤ slots[i] ≤ 10⁹`.
+
+**Approach.** The simple solution removes each zero and appends it at the end, which shifts the rest of the array every time: O(n²). A second array filled with the parcels and then the zeros is O(n), but the problem asks for no extra array. Use the same reader and writer as in 048: `read` visits every slot, and `write` is where the next parcel goes. When `slots[read]` holds a parcel, swap it with `slots[write]` and advance `write`. Everything between `write` and `read` is a zero, so each swap moves one parcel forward and one zero back without changing the order of the parcels.
+
+<Solutions n="049" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Removing each zero and appending it inside a forward loop over the indices: the element that slides into the removed slot is never looked at, so `[0, 0, 1]` becomes `[0, 1, 0]`.
+
+## 050 · Squares of a Sorted Array
+
+**Two Pointers and Sliding Window · Easy**
+
+Given an array of integers sorted in ascending order, which may include negative numbers, return a new array holding the square of every element, also in ascending order. Equal squares appear as many times as they occur. Do not change the input; an empty array gives an empty array.
+
+```text
+Example 1
+  input:  nums = [-5, -2, 0, 3, 4]
+  output: [0, 4, 9, 16, 25]
+
+Example 2
+  input:  nums = [-3, -3, -1]
+  output: [1, 9, 9]
+```
+
+Constraints: `0 ≤ nums.length ≤ 10⁵`, `-10⁴ ≤ nums[i] ≤ 10⁴`, `nums` is sorted in ascending order.
+
+**Approach.** The simple solution squares every element and sorts the result: O(n log n). The sort throws away what the input already says: squaring keeps the order of the non-negative numbers and reverses the order of the negative ones, so the largest square left is always at one of the two ends. Keep `lo` and `hi` at the ends, compare their absolute values, write the larger square at the back of the result and move that index inward, until the result is filled from back to front. It has to be filled from the back, because the ends hold the largest squares, not the smallest. With values up to 10⁴ in absolute value, every square fits in a 32-bit integer.
+
+<Solutions n="050" />
+
+**Complexity.** O(n) time, O(n) space for the result and O(1) besides it.
+
+**Common mistake.** Comparing the values instead of their absolute values: `-5 > 4` is false, so `[-5, -2, 0, 3, 4]` puts `16` last instead of `25`.

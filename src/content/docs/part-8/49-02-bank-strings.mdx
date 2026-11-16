@@ -400,3 +400,140 @@ Constraints: `0 ≤ words.length ≤ 10⁴`, `0 ≤ words[i].length ≤ 200`, th
 **Complexity.** O(N) time for each function, where N is the total length of all the strings, and O(N) space for the output.
 
 **Common mistake.** Splitting the packed string on `#` in `unpack`: `["door#2"]` packs to `"6#door#2"`, and splitting it gives three pieces instead of one note.
+
+## 041 · Compare Version Strings
+
+**Strings · Medium**
+
+Every Parcel and Pulse handheld scanner reports its firmware version as a string such as `"4.12.0"`: one or more parts made of decimal digits, separated by dots. Given two versions `a` and `b`, return `-1` if `a` is older, `1` if `a` is newer and `0` if they are the same version. Compare the parts from left to right as numbers, so leading zeros do not count (`"1.01"` equals `"1.001"`), and the first part that differs decides. When one version has fewer parts, its missing parts count as `0`, so `"3"` and `"3.0.0"` are the same version.
+
+```text
+Example 1
+  input:  a = "1.2.10", b = "1.2.9"
+  output: 1         (10 > 9, even though "10" sorts before "9" as text)
+
+Example 2
+  input:  a = "3.0.0", b = "3"
+  output: 0         (the missing parts of b count as 0)
+```
+
+Constraints: `1 ≤ a.length, b.length ≤ 500`, only digits and dots, no empty parts (no leading, trailing or repeated dots), every part's value fits in a 32-bit signed integer.
+
+**Approach.** The simple solution splits both strings on `.`, converts every part to an integer and compares the two lists position by position, reading a missing part as 0: O(n + m) time, plus two lists of parts. Comparing the strings as text is not an option, because `"10"` sorts before `"9"`. The lists are not needed either, since each part is compared once and then thrown away. Walk both strings with one index each, read the next part of each into an integer digit by digit (`value × 10 + digit`), compare the two, and step over the dot. An index that has run off the end reads a part of 0, which is exactly the padding rule, and the loop ends when both indices are past the end.
+
+<Solutions n="041" />
+
+**Complexity.** O(n + m) time, O(1) space.
+
+**Common mistake.** Comparing the parts as strings, which says `"1.2.10"` is older than `"1.2.9"` because `"10"` comes before `"9"` character by character.
+
+## 042 · Multiply Numbers Written as Strings
+
+**Strings · Medium**
+
+Two non-negative integers are given as strings of decimal digits, with no leading zeros except for zero itself, which is written `"0"`. Return their product as a string in the same format. The numbers can be far larger than any built-in integer type, and the point of the problem is the arithmetic: do not convert either string to a number or use a big-integer type (Java's and C#'s `BigInteger`, JavaScript's `BigInt`, Python's `int` on the whole string). Converting a single digit is fine.
+
+```text
+Example 1
+  input:  a = "123", b = "45"
+  output: "5535"
+
+Example 2
+  input:  a = "0", b = "9081"
+  output: "0"        (not "0000")
+```
+
+Constraints: `1 ≤ a.length, b.length ≤ 200`, both contain only `0`–`9`.
+
+**Approach.** Long multiplication on paper multiplies `a` by each digit of `b`, shifts each partial product and adds them all up: O(m × n), but it builds `n` intermediate strings and needs a separate string addition, which is a lot of code to get right. The partial products can go straight into one array instead. The product of an `m`-digit and an `n`-digit number has at most `m + n` digits, and digit `i` of `a` times digit `j` of `b` (counting from the left) lands at position `i + j + 1` of that array, with its carry at `i + j`. Walk both strings from the right, add each digit product to what is already at `i + j + 1`, keep the last digit there and add the carry one place to the left; a position may briefly hold more than 9, but it is reduced when its own turn comes. Finally skip the leading zeros, keeping at least one digit so that zero comes out as `"0"`.
+
+<Solutions n="042" />
+
+**Complexity.** O(m × n) time, O(m + n) space for the digit array.
+
+**Common mistake.** Skipping every leading zero of the digit array, which turns `"0"` times `"9081"` into an empty string instead of `"0"`.
+
+## 043 · Say What You See
+
+**Strings · Medium**
+
+Reading a string of digits aloud means going from left to right and, for each run of equal digits, saying how many there are and then which digit: `"3322251"` reads as "two 3s, three 2s, one 5, one 1", written `"23321511"`. The count is written in decimal, so a run of ten 1s becomes `"101"`. Given a digit string `start` and a number of `rounds`, read the string aloud `rounds` times, each time reading the result of the round before, and return the final string. With `0` rounds, return `start` unchanged.
+
+```text
+Example 1
+  input:  start = "1", rounds = 4
+  output: "111221"      (1 → 11 → 21 → 1211 → 111221)
+
+Example 2
+  input:  start = "3322251", rounds = 1
+  output: "23321511"
+```
+
+Constraints: `1 ≤ start.length ≤ 20`, `start` contains only `0`–`9`, `0 ≤ rounds ≤ 25`.
+
+**Approach.** There is no formula for the string after many rounds, so the solution is a simulation, and the work is in writing one round cleanly. A round is a single pass over runs: from position `i`, move `j` forward while `s[j]` equals `s[i]`, write the count `j - i` followed by the digit, and continue from `j`. It is the scan from 032 with the count written before the character instead of after it. Build each new string with a string builder, or a list of pieces joined at the end: in Java, C# and Go, `+=` on a string in a loop copies the whole string on every append, which makes each round quadratic.
+
+<Solutions n="043" />
+
+**Complexity.** O(T) time, where T is the total length of all the strings produced; O(L) space for the current string and the one being built, where L is the longest of them.
+
+**Common mistake.** Writing the count as a single character (`'0' + count`), which works until a run reaches ten: `"1111111111"` then reads as `":1"` instead of `"101"`.
+
+## 044 · Fully Justify Text
+
+**Strings · Hard**
+
+A receipt printer prints lines that are exactly `width` characters long. Given the words of a message in order, return the printed lines. Fill the lines greedily: each line takes as many of the remaining words as fit with one space between neighbours. Then pad every line with spaces to exactly `width` characters.
+
+On every line except the last, spread the spaces between the words as evenly as possible; when they do not divide evenly, the gaps on the left get one space more than the gaps on the right. A line with a single word, and the last line, are left-aligned instead: one space between words and the rest of the width filled with spaces at the end. An empty list of words gives no lines.
+
+```text
+Example 1
+  input:  words = ["Your", "loan", "of", "Dune", "is", "due", "on", "Friday."], width = 16
+  output: ["Your   loan   of",
+           "Dune  is  due on",      (5 spaces for 3 gaps: 2, 2, 1)
+           "Friday.         "]      (the last line is left-aligned)
+
+Example 2
+  input:  words = ["Hold", "expires", "in", "ten", "minutes"], width = 10
+  output: ["Hold      ",            (a single word is left-aligned)
+           "expires in",
+           "ten       ",
+           "minutes   "]
+```
+
+Constraints: `0 ≤ words.length ≤ 300`, `1 ≤ words[i].length ≤ width ≤ 100`, words contain no spaces.
+
+**Approach.** There is no slow solution to improve on here: greedy filling is what the rules ask for, and the difficulty is getting every rule right under pressure. Work one line at a time. From word `i`, extend `j` while the next word still fits, keeping `used`, the length of the words with single spaces between them. The line has `gaps = j - i - 1`; if it is the last line or has no gaps, join its words with single spaces and pad the end. Otherwise the line has `width - (used - gaps)` spaces to share: every gap gets `spaces / gaps` of them (integer division), and the first `spaces % gaps` gaps get one more.
+
+<Solutions n="044" />
+
+**Complexity.** O(L) time, where L is the number of lines times `width`, the size of the output; O(width) extra space for the line being built.
+
+**Common mistake.** Sending a single-word line through the even-spreading branch: it has zero gaps, so `spaces / gaps` divides by zero. Handle a line with one word, and the last line, before computing the gap width.
+
+## 045 · Shortest Palindrome by Prepending
+
+**Strings · Hard**
+
+Given a string `s` of lowercase letters, add as few characters as possible to its front, and only to its front, so that the result reads the same in both directions, and return that palindrome. The shortest answer is unique. A string that is already a palindrome, including the empty string, is returned unchanged.
+
+```text
+Example 1
+  input:  s = "abacd"
+  output: "dcabacd"     (keep the palindrome "aba" at the front, put "dc" before it)
+
+Example 2
+  input:  s = "stats"
+  output: "stats"
+```
+
+Constraints: `0 ≤ s.length ≤ 5 × 10⁴`, `s` contains only `a`–`z`.
+
+**Approach.** Whatever is added must mirror the end of `s`, so the task is to find the longest prefix of `s` that is already a palindrome and put the reverse of the rest in front. The simple solution tries prefix lengths from `n` down and checks each one, which is O(n²) in the worst case. A prefix of `s` is a palindrome exactly when it equals the suffix of the same length of `reverse(s)`, so the question becomes: what is the longest prefix of `s` that is also a suffix of `reverse(s)`? The failure function of the KMP string search answers that in O(n). Build `s + "#" + reverse(s)`, compute for each position the length of the longest proper prefix of that string that also ends there, and read the last value; the `#` matches no letter, so the answer can never be longer than `s`.
+
+<Solutions n="045" />
+
+**Complexity.** O(n) time, O(n) space for the combined string and its failure table.
+
+**Common mistake.** Leaving out the separator: for `"aa"`, the last failure value of `"aaaa"` is 3, longer than `s` itself, so the length of the part to prepend comes out negative and the answer is wrong or the slice throws, depending on the language.
