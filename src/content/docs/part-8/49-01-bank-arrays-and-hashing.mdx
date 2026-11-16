@@ -546,3 +546,146 @@ Constraints: `1 ≤ m, n ≤ 200`, `-10⁹ ≤ grid[r][c] ≤ 10⁹`.
 **Complexity.** O(m × n) time, O(m + n) space for the row and column marks.
 
 **Common mistake.** Zeroing rows and columns during the first scan, so the new zeros trigger more zeroing: `[[0, 1], [1, 1]]` ends as all zeros instead of `[[0, 0], [0, 1]]`.
+
+## 021 · Read a Matrix in a Spiral
+
+**Arrays and Hashing · Medium**
+
+Given a grid of numbers with `m` rows and `n` columns, return all its values in spiral order. Start at the top-left cell, go right along the top row, down the right column, left along the bottom row and up the left column, then repeat on the ring inside, until every cell has been read exactly once. All rows have the same length, and a grid with no rows returns an empty list.
+
+```text
+Example 1
+  input:  grid = [[1, 2, 3],
+                  [8, 9, 4],
+                  [7, 6, 5]]
+  output: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+Example 2
+  input:  grid = [[10, 11, 12, 13],
+                  [20, 21, 22, 23],
+                  [30, 31, 32, 33]]
+  output: [10, 11, 12, 13, 23, 33, 32, 31, 30, 20, 21, 22]
+```
+
+Constraints: `0 ≤ m ≤ 100`, `1 ≤ n ≤ 100` when `m > 0`, `-1000 ≤ grid[r][c] ≤ 1000`.
+
+**Approach.** The simple solution walks cell by cell with a direction, turns right whenever the next cell is outside the grid or already visited, and keeps a second grid of visited flags: O(m·n) time, but O(m·n) extra space for the flags. The flags are only there to say where each side ends, and four numbers say the same thing: the first and last unread row (`top`, `bottom`) and column (`left`, `right`). Read the top row and move `top` down, read the right column and move `right` left, then the bottom row and the left column, and loop while `top ≤ bottom` and `left ≤ right`. The subtle part is that after the first two sides the remaining area can already be empty (a single row or column was left), so check the bounds again before reading the bottom row and before reading the left column.
+
+<Solutions n="021" />
+
+**Complexity.** O(m·n) time, O(1) extra space besides the output list.
+
+**Common mistake.** Leaving out the two checks before the bottom row and the left column, so the last row or column is read twice in the other direction: `[[4, 5, 6]]` returns `[4, 5, 6, 5, 4]`.
+
+## 022 · Rotate a Square Image
+
+**Arrays and Hashing · Medium**
+
+An image is stored as an `n × n` grid of pixel values. Rotate it 90 degrees clockwise **in place**: change the grid you are given, without building a second grid, and return nothing. After the rotation, the first row holds the old first column read from bottom to top, the second row the old second column, and so on. An empty grid stays empty.
+
+```text
+Example 1
+  input:  image = [[1, 2],
+                   [3, 4]]
+  after:  image = [[3, 1],
+                   [4, 2]]
+
+Example 2
+  input:  image = [[11, 12, 13],
+                   [21, 22, 23],
+                   [31, 32, 33]]
+  after:  image = [[31, 21, 11],
+                   [32, 22, 12],
+                   [33, 23, 13]]
+```
+
+Constraints: `0 ≤ n ≤ 200`, `0 ≤ image[r][c] ≤ 255`.
+
+**Approach.** The simple solution builds a new grid with `rotated[c][n - 1 - r] = image[r][c]` and copies it back: O(n²) time and O(n²) extra space, which the rule forbids. A clockwise rotation is the same as two moves that each only swap pairs of cells: transpose the grid (swap `image[i][j]` with `image[j][i]`, mirroring it across the main diagonal), then reverse every row. Neither move needs a second grid. In the transpose, visit only the cells above the diagonal (`j > i`), so each pair is swapped once. The checks compare the grid after the call, since the function returns nothing. Java has no built-in to reverse an `int[]`, so its version reverses each row with two indices.
+
+<Solutions n="022" />
+
+**Complexity.** O(n²) time, O(1) extra space.
+
+**Common mistake.** Running the transpose over every `j` instead of `j > i`, which swaps each pair twice and leaves the grid as it was, so example 1 ends as `[[2, 1], [4, 3]]`: only the row reversal happened.
+
+## 023 · A Set With Random Pick in O(1)
+
+**Arrays and Hashing · Medium**
+
+SeatLock's "any seat" button holds a random free seat. Design `RandomSet`, a set of integers with three operations, each O(1) on average: `add(x)` adds `x` and returns `true`, or returns `false` if `x` is already in the set; `remove(x)` removes `x` and returns `true`, or returns `false` if it is not there; `pick()` returns one of the current elements, each with the same probability. `pick` is only called when the set is not empty.
+
+So that the tests are deterministic, the constructor receives the random source: a function `randomIndex(n)` that returns an integer in `[0, n)`. Each `pick` calls it exactly once, with `n` equal to the current size, and different results must pick different elements. The checks pass a source that returns 0, 1, 2… in turn (modulo `n`), so `n` picks in a row must return every element once.
+
+```text
+Example 1
+  calls:   add(12), add(7), add(12), add(30), remove(7), remove(7), remove(99)
+  returns: true, true, false, true, true, false, false
+
+Example 2
+  set:     {12, 30}, and randomIndex returns 0, then 1
+  calls:   pick(), pick()
+  returns: 12 and 30, one each (which comes first depends on the layout)
+```
+
+Constraints: `-10⁹ ≤ x ≤ 10⁹`, at most `10⁵` calls in total.
+
+**Approach.** A hash set alone gives O(1) `add` and `remove`, but it can't return its k-th element without walking it, so `pick` is O(n). An array alone gives O(1) `pick` but needs O(n) to find and delete an element. Use both: an array `items` of the elements and a map from each element to its index in the array. `add` appends and records the index. `remove` looks up the index `i`, pops the last element, and if that element isn't `x` itself, puts it in slot `i` and updates its map entry; then it deletes `x` from the map. `pick` returns `items[randomIndex(items.length)]`. In production you would pass the language's generator: `Math.floor(Math.random() * n)`, `Random.Shared.Next(n)`, `ThreadLocalRandom.current().nextInt(n)`, `Random.nextInt(n)`, `rand.Intn(n)` or `random.randrange(n)`.
+
+<Solutions n="023" />
+
+**Complexity.** O(1) average time per call, O(n) space for the array and the map.
+
+**Common mistake.** Forgetting to update the map entry of the element that moved into the hole: after `add(12)`, `add(7)`, `add(30)` and `remove(7)`, the map still says 30 is at index 2, so a later `remove(30)` empties the wrong slot.
+
+## 024 · The Smallest Missing Positive
+
+**Arrays and Hashing · Hard**
+
+Shelfwise gives each new member card the smallest positive number that no card uses yet. Given the numbers in use, in any order, possibly with duplicates and with zero or negative values left over from an old import, return the smallest positive integer that is not in the array. Use O(n) time and O(1) extra space; you may reorder the array.
+
+```text
+Example 1
+  input:  nums = [3, 1, -2, 2, 7]
+  output: 4        (1, 2 and 3 are taken)
+
+Example 2
+  input:  nums = [5, 2, 2, 9]
+  output: 1
+```
+
+Constraints: `0 ≤ nums.length ≤ 10⁵`, `-2³¹ ≤ nums[i] ≤ 2³¹ - 1`.
+
+**Approach.** The simple solution puts every value in a hash set and tries 1, 2, 3… until one is missing: O(n) time but O(n) extra space; sorting first avoids the set but costs O(n log n). The key fact is that the answer is between 1 and `n + 1`, because `n` values can fill at most the numbers 1 to `n`. So only values in `[1, n]` matter, and the array itself can be the set: value `v` belongs at index `v - 1`. For each index, keep swapping its value into its own slot until the index holds a value outside `[1, n]` or a value whose slot already holds the same value. Then the first index `i` with `nums[i] != i + 1` gives the answer `i + 1`, and if there is none the answer is `n + 1`. Compute the target index `j` before swapping: in Python, `nums[i], nums[nums[i] - 1] = nums[nums[i] - 1], nums[i]` assigns `nums[i]` first and then uses the new value to find the second slot.
+
+<Solutions n="024" />
+
+**Complexity.** O(n) time, since every swap puts one value in its final slot and so there are at most `n` swaps in total; O(1) extra space.
+
+**Common mistake.** Swapping while `nums[i] != i + 1` instead of while the target slot doesn't already hold the value, which loops forever on a duplicate such as `[1, 1]`.
+
+## 025 · Most Points on One Line
+
+**Arrays and Hashing · Hard**
+
+Parcel and Pulse plots delivery stops as points with integer coordinates `[x, y]`. Return the largest number of stops that lie on one straight line. Two stops can share a location; each one still counts, and a shared location lies on every line through it. An empty list returns 0 and a single stop returns 1.
+
+```text
+Example 1
+  input:  points = [[1, 1], [2, 3], [3, 5], [4, 2], [0, -1]]
+  output: 4        (y = 2x - 1 passes through all but [4, 2])
+
+Example 2
+  input:  points = [[3, 4], [3, 4], [3, -1], [0, 0]]
+  output: 3        (the vertical line x = 3, with the shared location counted twice)
+```
+
+Constraints: `0 ≤ points.length ≤ 300`, `-10⁴ ≤ x, y ≤ 10⁴`.
+
+**Approach.** The simple solution takes every pair of points as a line and counts the points on it with the cross product, `(x₂ - x₁)(y - y₁) == (y₂ - y₁)(x - x₁)`: O(n³). Fix one anchor point `i` instead: the points that share a line with it are the ones in the same direction from it, so group the later points `j > i` by the direction from `i` to `j`, and the biggest group plus `i` and its copies is the best line through `i`. Checking only `j > i` is enough, because every line is counted when its first point is the anchor. The direction has to be an exact key, not a floating-point slope (vertical lines divide by zero, and rounding can merge different slopes): divide `(dx, dy)` by their greatest common divisor and flip both signs so that `dx > 0`, or `dy > 0` when `dx` is 0. The key type is vocabulary: a tuple in C# and Python, a record in Java, a `Pair` in Kotlin, a `[2]int` in Go, and the string `"dx,dy"` in TypeScript, whose `Map` compares arrays by reference. Python has `math.gcd`; the other versions write a small `gcd` function.
+
+<Solutions n="025" />
+
+**Complexity.** O(n² log C) time, where the log factor is the gcd on coordinates up to `C`; O(n) space for the direction map of one anchor.
+
+**Common mistake.** Reducing by the gcd but not fixing the sign, so `(1, -1)` and `(-1, 1)` count as two directions: `[[0, 0], [1, -1], [-1, 1], [2, -2]]` returns 3 instead of 4.

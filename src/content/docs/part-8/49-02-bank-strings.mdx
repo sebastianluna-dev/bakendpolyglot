@@ -7,3 +7,135 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+String problems look the same in every language until you touch a single character. TypeScript and Python hand you one-letter strings, Java and C# a `char` that is a number underneath, Kotlin a `Char` that is not, and Go a byte when you index and a rune when you range. These problems train that vocabulary: walking a string with two indices, testing and lowercasing a character, counting letters in an array of 26, slicing a prefix, and keeping a map between characters.
+
+## 026 · Palindrome, Ignoring Punctuation
+
+**Strings · Easy**
+
+Decide whether a string reads the same forwards and backwards when you keep only its letters and digits and ignore case. Spaces, punctuation and every other character are skipped. A string with no letters or digits, including the empty string, counts as a palindrome. The input is ASCII.
+
+```text
+Example 1
+  input:  text = "Step on no pets!"
+  output: true        ("steponnopets" reversed is the same)
+
+Example 2
+  input:  text = "Pets on no steps"
+  output: false       ("petsonnosteps" reversed is "spetsonnostep")
+```
+
+Constraints: `0 ≤ text.length ≤ 2 × 10⁵`, ASCII characters only.
+
+**Approach.** The simple solution builds a cleaned, lowercased copy and compares it with its reverse: O(n) time, but O(n) extra space and two extra passes. Two indices do the same work in place: `left` starts at the beginning and `right` at the end, each skips characters that aren't letters or digits, and when both stand on one, compare them lowercased; stop at the first mismatch or when they meet. The character test is the vocabulary to know: `/[a-z0-9]/i` in TypeScript, `char.IsLetterOrDigit` in C#, `Character.isLetterOrDigit` in Java, `isLetterOrDigit()` in Kotlin, `unicode.IsLetter` and `unicode.IsDigit` on a rune in Go, and `str.isalnum` in Python. All but the TypeScript regex also accept non-ASCII letters, which makes no difference for ASCII input.
+
+<Solutions n="026" />
+
+**Complexity.** O(n) time, O(1) extra space.
+
+**Common mistake.** Keeping only letters and treating digits as punctuation, so `"1a2"` is reduced to `"a"` and returns `true`.
+
+## 027 · First Letter That Appears Once
+
+**Strings · Easy**
+
+Given a word of lowercase English letters, return the index of the first letter that appears exactly once in the word. If every letter repeats, or the word is empty, return -1.
+
+```text
+Example 1
+  input:  word = "shelfwise"
+  output: 1        ("s" appears twice; "h" is the first letter seen once)
+
+Example 2
+  input:  word = "noon"
+  output: -1
+```
+
+Constraints: `0 ≤ word.length ≤ 10⁵`, letters `a` to `z` only.
+
+**Approach.** The simple solution checks each position against every other position for a copy of its letter: O(n²). The repeated work is counting the same letter again for every position, so count once: one pass fills an array of 26 counters (`ch - 'a'` is the slot), and a second pass walks the word again and returns the first index whose letter has a count of 1. The second pass goes over the word, not over the counters, because "first" means first in the word.
+
+<Solutions n="027" />
+
+**Complexity.** O(n) time, O(1) space (26 counters, whatever the length of the word).
+
+**Common mistake.** Looping over the 26 counters in the second pass, which finds the alphabetically first unique letter: `"pear"` returns 2 (the "a") instead of 0.
+
+## 028 · Longest Shared Prefix
+
+**Strings · Easy**
+
+Shelfwise shelves books by call number, and each shelf label shows the part that all the call numbers on it share. Given a list of strings, return the longest string that is a prefix of every one of them. An empty list, or a list whose strings don't share a first character, returns the empty string.
+
+```text
+Example 1
+  input:  words = ["QA76.73", "QA76.76", "QA76.9"]
+  output: "QA76."
+
+Example 2
+  input:  words = ["parcel", "pulse", "seat"]
+  output: ""
+```
+
+Constraints: `0 ≤ words.length ≤ 200`, `0 ≤ words[i].length ≤ 200`, ASCII characters only.
+
+**Approach.** The simple solution tries each prefix of the first word, longest first, and checks it against every word with a "starts with" call: O(n·m²) for `n` words of length up to `m`, because the checks repeat the same character comparisons for each shorter prefix. Compare column by column instead: for each position `i` of the first word, check that every word has a character at `i` and that it matches; the first word that is too short or differs ends the prefix, and you return the first `i` characters. Each character is compared at most once. Sorting the list and comparing only the first and last words also works, but the sort costs more than the scan.
+
+<Solutions n="028" />
+
+**Complexity.** O(S) time, where S is the total number of characters; O(1) extra space besides the result.
+
+**Common mistake.** Reading `word[i]` without first checking `i == word.length`: `["ab", "a"]` then throws an index error in every language except TypeScript, where `undefined` happens to compare unequal.
+
+## 029 · Roman Numerals to Numbers
+
+**Strings · Easy**
+
+Roman numerals use seven symbols: `I` = 1, `V` = 5, `X` = 10, `L` = 50, `C` = 100, `D` = 500 and `M` = 1000. Symbols are written from largest to smallest and added up, except that a smaller symbol written directly before a larger one is subtracted from it: `IV` is 4, `XC` is 90 and `CM` is 900. Given a valid numeral in uppercase, return its value.
+
+```text
+Example 1
+  input:  roman = "MMXXVI"
+  output: 2026
+
+Example 2
+  input:  roman = "CDXLIV"
+  output: 444        (CD = 400, XL = 40, IV = 4)
+```
+
+Constraints: `1 ≤ roman.length ≤ 15`, the numeral is valid, and its value is between 1 and 3999.
+
+**Approach.** One working solution lists the thirteen tokens from `M`, `CM`, `D`, `CD` down to `I` and, at each position, tries the two-letter token before the one-letter one; it works but takes longer to type and to check. The subtraction rule reduces to one comparison: a symbol counts as negative when the symbol after it is larger, and positive otherwise. So walk the string once, look each symbol up in a map from symbol to value, peek at the next one (0 past the end), and add or subtract. The map is pure vocabulary: a `Map` built from pairs, a `Dictionary` initializer, `Map.of`, `mapOf` with `to`, a map literal and a `dict`.
+
+<Solutions n="029" />
+
+**Complexity.** O(n) time, O(1) space (a map of seven entries).
+
+**Common mistake.** Comparing each symbol with the previous one and subtracting the previous value only once: `"IV"` becomes 1 + 5 − 1 = 5, because the 1 that was already added has to be taken off twice.
+
+## 030 · Letter-for-Letter Mapping
+
+**Strings · Easy**
+
+A substitution cipher replaces each letter with another one. Given two strings `source` and `target` of lowercase letters, decide whether a single substitution turns `source` into `target`: every occurrence of a letter must be replaced by the same letter, and two different letters may not be replaced by the same one. A letter may stay as it is. Strings of different lengths return `false`; two empty strings return `true`.
+
+```text
+Example 1
+  input:  source = "deed", target = "noon"
+  output: true        (d -> n, e -> o)
+
+Example 2
+  input:  source = "bell", target = "cool"
+  output: false       (e and l would both become o)
+```
+
+Constraints: `0 ≤ source.length, target.length ≤ 5 × 10⁴`, letters `a` to `z` only.
+
+**Approach.** The simple solution checks every pair of positions `i < j` and requires that `source[i] == source[j]` exactly when `target[i] == target[j]`: O(n²). Instead, build the substitution while walking both strings once, and keep it in two maps. The forward map, from `source` letter to `target` letter, catches a letter that would be sent to two different letters (`"aa"` and `"ab"`). The backward map catches two letters sent to the same one (`"bell"` and `"cool"`). Reading each map with the current letter as the default (`getOrDefault`, `GetValueOrDefault`, `get` with a default, `??`) means a missing entry never conflicts; Go uses the two-value lookup instead, because a missing key returns the zero value.
+
+<Solutions n="030" />
+
+**Complexity.** O(n) time, O(1) space: each map holds at most 26 entries.
+
+**Common mistake.** Keeping only the forward map, which accepts `"bell"` and `"cool"` because nothing stops both `e` and `l` from mapping to `o`.
