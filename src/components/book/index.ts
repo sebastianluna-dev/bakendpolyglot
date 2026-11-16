@@ -8,3 +8,4 @@ export { default as InterviewLens } from './InterviewLens.astro';
 export { default as Quiz } from './Quiz.astro';
 export { default as Flashcards } from './Flashcards.astro';
 export { default as Figure } from './Figure.astro';
+export { default as Solutions } from './Solutions.astro';

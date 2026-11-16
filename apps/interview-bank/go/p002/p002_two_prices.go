@@ -1,5 +1,5 @@
 // 002 · Two Prices for a Budget
-package bank
+package p002
 
 func TwoPrices(prices []int, budget int) []int {
 	firstIndex := map[int]int{} // price -> earliest index

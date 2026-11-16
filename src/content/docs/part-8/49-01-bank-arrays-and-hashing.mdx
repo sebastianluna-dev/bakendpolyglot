@@ -1,0 +1,36 @@
+---
+title: "Problem Bank: Arrays and Hashing"
+continues: 49
+sidebar:
+  order: 49.01
+  label: "Bank 001–025 · Arrays and Hashing"
+---
+import { Solutions } from '../../../components/book';
+
+Most of these problems need nothing more than a loop, an array and a hash map. They are the first problems to practise in a language you rarely write, because they train the vocabulary every other topic uses: creating and filling an array, looking a key up with a default, counting, and returning a pair.
+
+## 002 · Two Prices for a Budget
+
+**Arrays and Hashing · Easy**
+
+A shop lists item prices in an array. Given a budget, return the positions of two different items whose prices add up to exactly the budget, as `[i, j]` with `i < j`. If several pairs work, return the one whose `j` is smallest, and among those the smallest `i`. If no pair works, return an empty array. Two items may have the same price, but one item cannot be counted twice.
+
+```text
+Example 1
+  input:  prices = [12, 7, 3, 9, 5], budget = 12
+  output: [2, 3]        (3 + 9; 7 + 5 also works but ends later)
+
+Example 2
+  input:  prices = [4, 4, 1], budget = 8
+  output: [0, 1]        (same price, different items)
+```
+
+Constraints: `0 ≤ prices.length ≤ 10⁵`, `1 ≤ prices[i] ≤ 10⁹`, `1 ≤ budget ≤ 2 × 10⁹`.
+
+**Approach.** The simple solution checks every pair, with `j` in the outer loop and `i` in the inner one so that the first pair found is the one the rules ask for: O(n²). The inner loop is only looking for one value, `budget - prices[j]`, among the earlier prices. A hash map from price to the first index where it appeared answers that in O(1), so one pass is enough. Check the map before adding the current price, so an item never pairs with itself, and store only the first index of each price, so the earliest `i` wins.
+
+<Solutions n="002" />
+
+**Complexity.** O(n) time, O(n) space for the map.
+
+**Common mistake.** Storing every index of a price (overwriting the map entry) instead of the first one, which returns `[1, 2]` instead of `[0, 2]` for `[3, 3, 9]` and a budget of 12.

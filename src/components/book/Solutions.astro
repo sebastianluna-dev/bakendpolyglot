@@ -1,0 +1,45 @@
+---
+// The six solutions of one problem in the Chapter 49 bank, read straight from apps/interview-bank,
+// so the book shows exactly the files CI runs. Web: synced tabs. Print: only BANK_PRINT_STACK.
+// Usage in MDX: <Solutions n="002" />
+import { Code } from '@astrojs/starlight/components';
+import FiveStacks from './FiveStacks.astro';
+import Stack from './Stack.astro';
+import { BANK_PRINT_STACK, BANK_STACKS, STACKS } from './stacks';
+
+interface Props { n: string }
+const { n } = Astro.props;
+
+const files = import.meta.glob<string>(
+  '/apps/interview-bank/{typescript,csharp,java,kotlin,go,python}/**/*.{ts,cs,java,kt,go,py}',
+  { query: '?raw', import: 'default', eager: true },
+);
+
+// Where each language keeps problem NNN, and the code-fence language for highlighting.
+const WHERE = {
+  ts: { dir: 'typescript', match: (f: string) => f.startsWith(`p${n}_`), lang: 'ts' },
+  cs: { dir: 'csharp', match: (f: string) => f.startsWith(`p${n}_`), lang: 'csharp' },
+  java: { dir: 'java', match: (f: string) => f.startsWith(`P${n}`), lang: 'java' },
+  kotlin: { dir: 'kotlin', match: (f: string) => f.startsWith(`p${n}_`), lang: 'kotlin' },
+  go: { dir: `go/p${n}`, match: (f: string) => f.endsWith('.go'), lang: 'go' },
+  py: { dir: 'python', match: (f: string) => f.startsWith(`p${n}_`), lang: 'python' },
+} as const;
+
+const solutions = BANK_STACKS.map((id) => {
+  const { dir, match, lang } = WHERE[id];
+  const prefix = `/apps/interview-bank/${dir}/`;
+  const found = Object.keys(files)
+    .filter((path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/') && match(path.slice(prefix.length)))
+    // Go: the solution before its test file
+    .sort((a, b) => Number(a.endsWith('_test.go')) - Number(b.endsWith('_test.go')) || a.localeCompare(b));
+  if (found.length === 0) throw new Error(`Problem ${n}: no ${STACKS[id].name} solution in ${prefix}`);
+  return { id, lang, parts: found.map((path) => ({ title: path.replace('/apps/interview-bank/', ''), code: files[path].trimEnd() })) };
+});
+---
+<FiveStacks title="Six Languages" note={`Problem ${n}`} printOnly={BANK_PRINT_STACK}>
+  {solutions.map((s) => (
+    <Stack id={s.id}>
+      {s.parts.map((p) => <Code code={p.code} lang={s.lang} title={p.title} />)}
+    </Stack>
+  ))}
+</FiveStacks>

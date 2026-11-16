@@ -7,6 +7,8 @@ const s = STACKS[id];
 const name = label ?? s.name;
 ---
 <TabItem label={name}>
+  <div class="bp-stack" data-stack={id}>
   <div class="bp-stack__label"><span class="bp-dot" style={`background:${s.color}`}></span><b>{name}</b>{lib && <i> · {lib}</i>}</div>
   <slot />
+  </div>
 </TabItem>

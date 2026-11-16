@@ -101,6 +101,13 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 .bp-stack__label + * { margin-top: 0 !important; }
 .bp-stacks [role='tabpanel'] { break-inside: avoid; }
 .bp-stack__label { break-after: avoid; }
+/* The problem bank prints one language per problem (FiveStacks printOnly) */
+.bp-stacks[data-print-only='ts'] [role='tabpanel']:not(:has([data-stack='ts'])) { display: none !important; }
+.bp-stacks[data-print-only='cs'] [role='tabpanel']:not(:has([data-stack='cs'])) { display: none !important; }
+.bp-stacks[data-print-only='java'] [role='tabpanel']:not(:has([data-stack='java'])) { display: none !important; }
+.bp-stacks[data-print-only='kotlin'] [role='tabpanel']:not(:has([data-stack='kotlin'])) { display: none !important; }
+.bp-stacks[data-print-only='go'] [role='tabpanel']:not(:has([data-stack='go'])) { display: none !important; }
+.bp-stacks[data-print-only='py'] [role='tabpanel']:not(:has([data-stack='py'])) { display: none !important; }
 
 /* Code blocks: flatten Expressive Code to ink on paper */
 .expressive-code { margin: 0 !important; }
@@ -157,3 +164,7 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 /* Task lists print as empty boxes to tick by hand */
 .bp-body .contains-task-list { list-style: none; padding-left: 0; }
 .bp-body .task-list-item input[type='checkbox'] { appearance: none; -webkit-appearance: none; width: 10px; height: 10px; border: 1.2px solid var(--bp-ink); border-radius: 1px; margin: 0 9px 0 0; vertical-align: -1px; background: transparent; }
+
+/* Pages that continue a chapter (the problem bank): each starts on a new page under a large title */
+.bp-continuation { break-before: page; }
+.bp-continuation__title { font-family: var(--bp-font-display); font-size: 24pt; margin: 0 0 0.6em; }

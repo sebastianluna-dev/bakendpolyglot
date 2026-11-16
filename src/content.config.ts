@@ -12,6 +12,7 @@ export const collections = {
         part: z.string().optional(),
         kicker: z.string().optional(), // one-line subtitle under the chapter title
         appendix: z.string().optional(), // 'B', 'C', … for appendix pages
+        continues: z.number().optional(), // a page that prints inside that chapter, after its body (the problem bank)
       }),
     }),
   }),

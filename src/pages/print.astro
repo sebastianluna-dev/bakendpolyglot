@@ -11,13 +11,18 @@ const pagedUrl = '/vendor/paged.polyfill.js'; // copied from node_modules by the
 type Q = { q: string; options: string[]; answer: number; why: string };
 type Mod = {
   default: any;
-  frontmatter: { title: string; chapter?: number; part?: string; kicker?: string; appendix?: string };
+  frontmatter: { title: string; chapter?: number; part?: string; kicker?: string; appendix?: string; continues?: number; sidebar?: { order?: number } };
   quiz?: Q[];
 };
 const all = Object.values(import.meta.glob<Mod>('../content/docs/**/*.mdx', { eager: true }));
 const mods = all
   .filter((m) => typeof m.frontmatter.chapter === 'number')
   .sort((a, b) => a.frontmatter.chapter! - b.frontmatter.chapter!);
+// Pages with `continues: N` (the problem bank) print inside chapter N, after its body, in sidebar order.
+const continuations = (chapter: number) =>
+  all
+    .filter((m) => m.frontmatter.continues === chapter)
+    .sort((a, b) => (a.frontmatter.sidebar?.order ?? 0) - (b.frontmatter.sidebar?.order ?? 0));
 // Appendices B, C, … are regular pages with `appendix: 'B'`; A (quiz answers) is generated below.
 const appendices = all
   .filter((m) => typeof m.frontmatter.appendix === 'string')
@@ -96,6 +101,15 @@ let lastPart = '';
             {fm.kicker && <p class="bp-opener__kicker">{fm.kicker}</p>}
           </header>
           <div class="bp-body"><Content /></div>
+          {continuations(fm.chapter!).map((c) => {
+            const More = c.default;
+            return (
+              <section class="bp-continuation">
+                <h2 class="bp-continuation__title">{c.frontmatter.title}</h2>
+                <div class="bp-body"><More /></div>
+              </section>
+            );
+          })}
         </article>
       </>
     );

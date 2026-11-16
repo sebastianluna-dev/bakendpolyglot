@@ -1,4 +1,4 @@
-package bank
+package p002
 
 import (
 	"slices"
