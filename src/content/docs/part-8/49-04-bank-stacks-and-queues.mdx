@@ -7,3 +7,137 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+A stack answers "what came last?" and a queue answers "what came first?", and most problems in this topic come down to noticing which of the two is being asked. They also train the vocabulary that differs most between the six languages: C# has `Stack<T>` and `Queue<T>`, Java and Kotlin use an `ArrayDeque` for both (Java's old `Stack` class is best left alone), Go has only slices, Python has a list for a stack and `collections.deque` for a queue, and TypeScript has an array, plus a head index when it is a queue. The design problems add a drill of their own: a small class with fields, a constructor and several methods, written in every language.
+
+## 066 · Balanced Brackets
+
+**Stacks and Queues · Easy**
+
+Before Shelfwise saves a search filter typed by a librarian, it checks the brackets. Given a string, return `true` if its brackets are balanced: every `(`, `[` and `{` is closed later by the matching `)`, `]` or `}`, every closer has an opener, and pairs nest inside each other instead of crossing. All other characters are ignored, so a string with no brackets, including the empty string, is balanced.
+
+```text
+Example 1
+  input:  s = "lookup(ids[0], {limit: 5})"
+  output: true
+
+Example 2
+  input:  s = "([)]"
+  output: false        (the square brackets cross the parentheses)
+```
+
+Constraints: `0 ≤ s.length ≤ 10⁵`.
+
+**Approach.** The simple solution drops the other characters and deletes adjacent pairs such as `()` until none is left, then checks whether anything remains: O(n²). The rule behind "nest instead of crossing" is that a closer must match the most recently opened bracket that is still open, and "most recent first" is what a stack gives. When you read an opener, push the closer it expects (`)` for `(`, and so on), so that a closer only has to compare itself with the top: if the stack is empty or the top is a different closer, return `false`. At the end, the string is balanced only if nothing is left open.
+
+<Solutions n="066" />
+
+**Complexity.** O(n) time, O(n) space for the stack when the string is all openers.
+
+**Common mistake.** Returning `true` when the loop ends without checking that the stack is empty, so `"(("` counts as balanced.
+
+## 067 · A Stack That Knows Its Minimum
+
+**Stacks and Queues · Easy**
+
+Design `MinStack`, a stack of integers with four operations, each O(1): `push(x)` puts `x` on top; `pop()` removes the top value and returns it; `top()` returns the top value without removing it; and `min()` returns the smallest value currently in the stack. `pop`, `top` and `min` are only called when the stack is not empty, and the same value may be pushed more than once.
+
+```text
+Example 1
+  calls:   push(5), push(3), push(7), min(), top(), pop(), min()
+  returns: 3, 7, 7, 3     (from min, top, pop and min; push returns nothing)
+
+Example 2
+  calls:   push(4), push(1), push(1), pop(), min(), pop(), min()
+  returns: 1, 1, 1, 4     (one 1 is still there after the first pop)
+```
+
+Constraints: `-10⁹ ≤ x ≤ 10⁹`, at most `10⁵` calls in total.
+
+**Approach.** The simple solution scans the whole stack inside `min()`: O(n) per call. A single "smallest so far" field makes `min()` O(1), but it breaks on `pop`: once the minimum is popped, the field can't recover the one before it without a scan. The fix is to remember the minimum at every depth. Keep a second stack, `mins`, beside the values: each `push(x)` also pushes the smaller of `x` and the top of `mins` (or `x` itself when the stack is empty), and each `pop` pops both. The top of `mins` is then the minimum of everything still in the stack, and duplicates need no special care because each copy has its own entry.
+
+<Solutions n="067" />
+
+**Complexity.** O(1) time per call, O(n) space for the second stack.
+
+**Common mistake.** Keeping only one `minimum` field: after `push(5)`, `push(3)` and `pop()`, `min()` still returns 3.
+
+## 068 · A Queue Built From Two Stacks
+
+**Stacks and Queues · Easy**
+
+Shelfwise keeps the members waiting for a popular book in a hold queue, first come, first served. Build that queue as `TwoStackQueue`, using two stacks inside and only stack operations on them: push, pop, read the top and check for empty. It has four operations: `enqueue(x)` adds member ID `x` at the back; `dequeue()` removes and returns the ID at the front; `peek()` returns the front ID without removing it; and `isEmpty()` says whether the queue is empty. `dequeue` and `peek` are only called when the queue is not empty, and every operation must take O(1) amortized time.
+
+```text
+Example 1
+  calls:   enqueue(1), enqueue(2), peek(), dequeue(), enqueue(3), dequeue(), dequeue(), isEmpty()
+  returns: 1, 1, 2, 3, true
+
+Example 2
+  calls:   isEmpty(), enqueue(4), enqueue(5), dequeue(), enqueue(6), dequeue(), dequeue()
+  returns: true, 4, 5, 6
+```
+
+Constraints: `1 ≤ x ≤ 10⁹`, at most `10⁵` calls in total.
+
+**Approach.** The simple solution keeps everything in one stack and, on each `dequeue`, moves it all onto a second stack to reach the bottom item, then moves it all back: O(n) per call. Moving it back is the waste. Keep an `inbox` that takes every `enqueue` and an `outbox` that serves `dequeue` and `peek`; pouring the inbox into the outbox reverses it, so the oldest item ends up on top. Pour only when the outbox is empty, because while it still holds items they are older than anything in the inbox and must leave first. Each item is pushed and popped at most twice in its life, which is why the cost is O(1) amortized even though an occasional `dequeue` moves many items at once.
+
+<Solutions n="068" />
+
+**Complexity.** O(1) amortized time per call (a single `dequeue` can take O(n)), O(n) space for the two stacks.
+
+**Common mistake.** Pouring the inbox into the outbox on every `dequeue`, even when the outbox still has items: after `enqueue(1)`, `enqueue(2)`, `dequeue()` and `enqueue(3)`, the next `dequeue()` returns 3 instead of 2.
+
+## 069 · Ledger With Undo and Double
+
+**Stacks and Queues · Easy**
+
+A SeatLock box-office terminal keeps a ledger of amounts, built from a list of commands applied in order. Each command is one of four kinds: an integer such as `"40"` or `"-15"` records that amount; `"D"` records double the last recorded amount; `"+"` records the sum of the last two recorded amounts; and `"U"` removes the last recorded amount, so two `"U"`s in a row remove two amounts.
+
+Return the total of the amounts left in the ledger after the last command; an empty ledger totals 0. The commands are always valid: `"D"` and `"U"` only appear when at least one amount is recorded, and `"+"` only when at least two are.
+
+```text
+Example 1
+  input:  commands = ["5", "-2", "D", "+", "U", "10", "+"]
+  output: 15       (the ledger ends as 5, -2, -4, 10, 6)
+
+Example 2
+  input:  commands = ["7", "U"]
+  output: 0
+```
+
+Constraints: `0 ≤ commands.length ≤ 10⁴`, every recorded amount and every total fits in a 32-bit signed integer.
+
+**Approach.** There is no slow version worth coding; the work is choosing the structure. Every command looks only at the most recent amounts, and `"U"` has to bring back the amount before the one it removes, which a running total plus a "last amount" variable can't do after two undos in a row. A stack of amounts handles all four commands: push the parsed number, push twice the top, push the sum of the top two (leaving both in place), or pop. Sum the stack at the end. Parse with the language's integer parser (`Number`, `int.Parse`, `Integer.parseInt`, `toInt()`, `strconv.Atoi` or `int`); the Go version ignores the error from `strconv.Atoi` because the statement guarantees a valid integer.
+
+<Solutions n="069" />
+
+**Complexity.** O(n) time, O(n) space for the stack.
+
+**Common mistake.** Popping the two amounts for `"+"` and pushing back only their sum: `["2", "3", "+"]` totals 5 instead of 10.
+
+## 070 · Remove Adjacent Pairs
+
+**Stacks and Queues · Easy**
+
+Given a string of lowercase letters, delete any two neighbouring letters that are the same, and keep doing so until no two neighbours are equal. Removing a pair can bring two equal letters together, and they are removed in turn. Return what is left, which may be the empty string; the result is the same whichever pair you remove first.
+
+```text
+Example 1
+  input:  s = "abccbd"
+  output: "ad"     (removing "cc" brings the two b's together)
+
+Example 2
+  input:  s = "aabb"
+  output: ""
+```
+
+Constraints: `0 ≤ s.length ≤ 10⁵`, `s` contains only `a`–`z`.
+
+**Approach.** The simple solution scans for a pair, deletes it and starts again: O(n²), since each deletion copies the string. The new pair a deletion can create is always made of the letter just before it and the letter just after it, that is, the last letter kept so far and the next one read. So read the string once and keep the result as a stack: if the next letter equals the top, pop it, because the two cancel; otherwise push the letter. What remains, from bottom to top, is the answer. A string builder serves as the stack in C#, Java and Kotlin (shorten it by one to pop), a byte slice in Go, and a list or an array joined at the end in Python and TypeScript.
+
+<Solutions n="070" />
+
+**Complexity.** O(n) time, O(n) space for the stack.
+
+**Common mistake.** Removing pairs in a single pass without checking the letters each removal brings together: `"abccbd"` becomes `"abbd"` instead of `"ad"`.
