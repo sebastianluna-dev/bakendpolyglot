@@ -7,3 +7,57 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+A heap answers one question fast: which item is the smallest, or the largest, right now, while items keep arriving and leaving. Push and pop cost O(log n) and a look at the top costs O(1), which is what "the k largest", "the next job to run", merging k sorted lists and Dijkstra's algorithm all need. These problems train the part that differs most across the six languages: TypeScript has no heap, so you write the `MinHeap` class from the TypeScript section; C# stores a separate priority with each element; Java and Kotlin take a comparator; Go makes you implement `heap.Interface` for `container/heap`; and Python's `heapq` works on a plain list and only builds min-heaps, so a max-heap stores negated values. Two moves come back again and again: a min-heap of size k to keep the k largest, and pushing a new entry instead of changing the priority of an old one.
+
+## 141 · The k-th Largest in a Stream
+
+**Heaps and Priority Queues · Easy**
+
+A live scoreboard shows the score that currently holds k-th place. Design a class `KthLargest` whose constructor `KthLargest(k, nums)` starts from the scores in `nums`, and whose method `add(value)` records a new score and returns the k-th largest score recorded so far. Equal scores count separately, so in `[9, 7, 7]` the second largest is 7. `nums` may hold fewer than `k` scores, but there are always at least `k` after each call to `add`.
+
+```text
+Example 1
+  calls:   KthLargest(3, [40, 75, 20, 90]), add(50), add(10), add(80), add(95)
+  returns: 50, 50, 75, 80
+
+Example 2
+  calls:   KthLargest(2, [7]), add(7), add(3), add(9), add(8)
+  returns: 7, 7, 7, 8        (the two 7s are two scores)
+```
+
+Constraints: `1 ≤ k ≤ 10⁴`, `0 ≤ nums.length ≤ 10⁴`, `-10⁴ ≤ value ≤ 10⁴`, at most `10⁴` calls to `add`.
+
+**Approach.** The simple solution keeps every score in a sorted list and reads position `k` from the top, but each insertion shifts O(n) items. Only `k` scores can ever matter: once a score falls below the k-th largest it stays below, because scores are only added. So keep a min-heap of the `k` largest scores; its top is the smallest of them, which is exactly the k-th largest. Each `add` pushes the value and, if the heap now holds more than `k`, pops the smallest; the constructor calls `add` for each initial score. TypeScript uses the `MinHeap` class from the TypeScript section and Go implements `heap.Interface`; once the heap is full, C# uses `EnqueueDequeue`, which pushes and pops in one step.
+
+<Solutions n="141" />
+
+**Complexity.** O(log k) time per `add` and O(n log k) for the constructor; O(k) space for the heap.
+
+**Common mistake.** Popping before pushing when the heap is full, which throws the current k-th largest away even when the new score is smaller: in Example 1, `add(10)` returns 10 instead of 50.
+
+## 142 · Smash the Heaviest Stones
+
+**Heaps and Priority Queues · Easy**
+
+A pile holds stones with weights `stones`. On each turn, take the two heaviest stones, `x` and `y` with `x ≥ y`, and smash them together: if they weigh the same, both are destroyed; otherwise `y` is destroyed and `x` goes back on the pile weighing `x - y`. Repeat until at most one stone is left, and return its weight, or `0` if none is left.
+
+```text
+Example 1
+  input:  stones = [3, 9, 4, 4, 1]
+  output: 1        (9 and 4 leave 5; 5 and 4 leave 1; 3 and 1 leave 2; 2 and 1 leave 1)
+
+Example 2
+  input:  stones = [10, 4, 4, 2]
+  output: 0        (10 and 4 leave 6; 6 and 4 leave 2; 2 and 2 destroy each other)
+```
+
+Constraints: `1 ≤ stones.length ≤ 10⁴`, `1 ≤ stones[i] ≤ 1000`.
+
+**Approach.** The simple solution sorts the pile on every turn to find the two heaviest: O(n log n) per turn and O(n² log n) overall. A turn only needs the two largest stones and adds at most one back, which is what a max-heap does in O(log n). Build the heap, pop twice, push the difference when it is not zero, and stop when fewer than two stones remain. Each language makes its max-heap differently: Java and Kotlin reverse the comparator, C# passes a reversed `Comparer`, TypeScript passes `(a, b) => a > b` to the `MinHeap` class from the TypeScript section, Go's `Less` returns `h[i] > h[j]`, and Python stores negated weights because `heapq` only builds min-heaps.
+
+<Solutions n="142" />
+
+**Complexity.** O(n log n) time: at most `n - 1` turns of O(log n) each, after an O(n) or O(n log n) build; O(n) space for the heap.
+
+**Common mistake.** Leaving the heap in its default min-first order, so each turn smashes the two lightest stones: with the rest of the solution unchanged, `[3, 9, 4, 4, 1]` returns 9 instead of 1.

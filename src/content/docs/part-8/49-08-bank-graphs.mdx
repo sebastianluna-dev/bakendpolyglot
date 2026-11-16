@@ -295,3 +295,222 @@ Constraints: `1 ≤ rows, cols ≤ 200`, `0 ≤ heights[r][c] ≤ 10⁵`.
 **Complexity.** O(rows × cols) time, O(rows × cols) space for the two marker grids and the queue.
 
 **Common mistake.** Keeping the downhill test in the walk from the coast (moving to neighbours that are lower or equal): in example 2, the walk then steps from the edge into the centre cell of height 1, and the centre is wrongly returned.
+
+## 133 · Count Network Segments
+
+**Graphs · Medium**
+
+A Parcel and Pulse depot has `n` network devices numbered `0` to `n - 1`, and `links` lists the cables between them as pairs `[a, b]`; a cable works in both directions. A segment is a group of devices that can all reach one another through cables, and a device with no cables is a segment on its own. Return the number of segments. A cable may be listed twice, in either direction, and may even connect a device to itself.
+
+```text
+Example 1
+  input:  n = 5, links = [[0, 1], [1, 2], [3, 4]]
+  output: 2        ({0, 1, 2} and {3, 4})
+
+Example 2
+  input:  n = 6, links = [[0, 1], [2, 3], [1, 0]]
+  output: 4        ({0, 1}, {2, 3}, {4}, {5}; [1, 0] repeats a cable)
+```
+
+Constraints: `1 ≤ n ≤ 10⁵`, `0 ≤ links.length ≤ 10⁵`, `0 ≤ a, b < n`.
+
+**Approach.** A BFS or DFS from every device not yet seen counts the segments in O(n + e), but it needs the adjacency lists built first and has to start over when a cable is added later. Union-find (a disjoint-set forest) answers the same question one cable at a time: every device starts as the root of its own tree, so there are `n` segments, and a cable whose two ends have different roots merges two trees and lowers the count by one. A cable whose ends already share a root (a repeat, a self-link, or one that closes a loop) changes nothing. Two details keep `find` close to O(1): union by size hangs the smaller tree under the root of the larger one, so trees stay shallow, and path compression shortens paths as they are walked. The solutions use path halving, a one-loop form of path compression that points every node it passes at its grandparent.
+
+<Solutions n="133" />
+
+**Complexity.** O(n + e·α(n)) time, where α is the inverse Ackermann function, below 5 for any input that fits in memory; O(n) space for the parent and size arrays.
+
+**Common mistake.** Lowering the count for every cable instead of only when the two roots differ: three devices wired in a loop, `[[0, 1], [1, 2], [2, 0]]`, give 0 segments instead of 1.
+
+## 134 · Time for a Signal to Reach Every Node
+
+**Graphs · Medium**
+
+Pulse pushes a configuration change through a cluster of `n` servers numbered `0` to `n - 1`. Each link `links[i] = [from, to, ms]` is one-way: a server that has the change passes it to `to`, which receives it `ms` milliseconds later. The change starts at `source` at time 0, and every server forwards it on all its outgoing links as soon as it arrives. Return the time at which the last server receives it, or `-1` if some server never does. Two servers may be joined by several links.
+
+```text
+Example 1
+  input:  n = 4, links = [[0, 1, 4], [0, 2, 1], [2, 1, 2], [1, 3, 1], [2, 3, 6]], source = 0
+  output: 4        (2 at 1 ms, 1 at 3 ms through 2, 3 at 4 ms through 1)
+
+Example 2
+  input:  n = 3, links = [[0, 1, 2], [2, 1, 1]], source = 0
+  output: -1       (no link leads to server 2)
+```
+
+Constraints: `1 ≤ n ≤ 100`, `0 ≤ links.length ≤ 6000`, `0 ≤ ms ≤ 100`, `0 ≤ source < n`.
+
+**Approach.** Each server receives the change at its shortest-path distance from `source`, so the answer is the largest of those distances. Breadth-first search finds shortest paths only when every link costs the same; with weights, the simple fix is Bellman-Ford, which relaxes every link `n - 1` times: O(n·e). Because no weight is negative, Dijkstra's algorithm does better: keep a min-heap of `(time, server)` pairs, always take the smallest, and relax that server's outgoing links. Rather than lowering an entry's priority, which most of these heaps cannot do (see the C# section), a shorter time pushes a new entry, and the stale one is skipped when it comes out (`d > dist[node]`). A distance still infinite at the end means some server is unreachable. TypeScript uses the `MinHeap` class from the TypeScript section, and Go implements `heap.Interface` for `container/heap`.
+
+<Solutions n="134" />
+
+**Complexity.** O(e log e) time, since the heap can hold one entry per link; O(n + e) space for the adjacency lists, the distances and the heap.
+
+**Common mistake.** Marking a server as done when it is pushed, as in breadth-first search, instead of when it comes off the heap: server 1 in Example 1 keeps its first time of 4 ms, the better path through server 2 is ignored, and the answer is 7 instead of 4.
+
+## 135 · Shortest Clear Path in a Grid
+
+**Graphs · Medium**
+
+A warehouse robot crosses a floor plan `grid` of `rows × cols` cells, where `0` is a clear cell and `1` is blocked by shelving. It starts in the top-left cell and must reach the bottom-right one, moving one cell at a time in any of the eight directions, diagonals included, and only onto clear cells. Return the number of cells on the shortest such path, counting both ends, or `-1` if there is none. A blocked start or end cell means there is none.
+
+```text
+Example 1
+  input:  grid = [[0, 0, 0],
+                  [1, 1, 0],
+                  [1, 1, 0]]
+  output: 4        ((0, 0) → (0, 1) → (1, 2) → (2, 2))
+
+Example 2
+  input:  grid = [[0, 1],
+                  [1, 0]]
+  output: 2        (one diagonal step)
+```
+
+Constraints: `1 ≤ rows, cols ≤ 100`, every `grid[r][c]` is `0` or `1`.
+
+**Approach.** Trying every path with depth-first search and keeping the shortest takes exponential time. Every step costs the same, so breadth-first search from the start reaches cells in order of distance, and the first time the target comes off the queue its count is the answer. A `cells` grid stores each cell's count, with 0 meaning not reached yet, so it doubles as the visited mark; set it when a cell is queued, and no cell is queued twice. The eight neighbours are two nested loops over `-1..1`, and the cell itself is skipped without a special case because it has already been reached. Check the start and end cells before the search.
+
+<Solutions n="135" />
+
+**Complexity.** O(rows × cols) time, since each cell is queued at most once and checks eight neighbours; O(rows × cols) space for the counts and the queue.
+
+**Common mistake.** Not checking whether the start cell is blocked: `[[1]]` returns 1 instead of -1, because the start is also the target and comes off the queue before any cell is tested.
+
+## 136 · Exchange Rates From Known Pairs
+
+**Graphs · Medium**
+
+SeatLock sells tickets in several currencies and knows some exchange rates: `pairs[i] = [from, to]` with `rates[i]` means one unit of `from` buys `rates[i]` units of `to`, so one unit of `to` buys `1 / rates[i]` units of `from`. For each query `[x, y]`, return how many units of `y` one unit of `x` buys, derived by chaining known rates, or `-1.0` if it cannot be derived. A currency that appears in no pair cannot be converted, not even to itself; one that appears in some pair converts to itself at `1.0`. The known rates never contradict each other, so every chain gives the same answer up to rounding, and answers are compared with a tolerance of `10⁻⁹`.
+
+```text
+Example 1
+  input:  pairs = [["EUR", "USD"], ["USD", "MXN"]], rates = [1.25, 20.0],
+          queries = [["EUR", "MXN"], ["MXN", "EUR"], ["USD", "USD"], ["EUR", "JPY"], ["JPY", "JPY"]]
+  output: [25.0, 0.04, 1.0, -1.0, -1.0]
+
+Example 2
+  input:  pairs = [["GBP", "EUR"], ["CHF", "SEK"], ["SEK", "NOK"]], rates = [1.2, 12.0, 0.5],
+          queries = [["EUR", "GBP"], ["CHF", "NOK"], ["NOK", "CHF"], ["GBP", "NOK"]]
+  output: [0.8333…, 6.0, 0.1666…, -1.0]        (GBP and NOK are never linked)
+```
+
+Constraints: `1 ≤ pairs.length ≤ 100`, `0 ≤ queries.length ≤ 100`, `0 < rates[i] ≤ 100`, currency codes are 1 to 5 uppercase letters.
+
+**Approach.** Treat currencies as nodes and each pair as two directed edges, `from → to` with weight `rate` and `to → from` with weight `1 / rate`; a conversion is the product of the weights along any path. The simple solution runs a BFS or DFS from `x` for every query, multiplying as it goes: O(q·(V + E)). Those searches repeat each other, so instead run one BFS per connected group and record, for every currency, its group and how many units of it equal one unit of the group's first currency (`value`). Then one unit of `x` buys `value[y] / value[x]` units of `y` when both are in the same group, and `-1.0` otherwise, in O(1) per query. A currency missing from every pair has no group, which handles the unknown cases with one test.
+
+<Solutions n="136" />
+
+**Complexity.** O(V + E + q) time, counting each hash-map operation as O(1); O(V + E) space for the graph, the values and the groups.
+
+**Common mistake.** Returning `1.0` whenever `x == y`, before checking that the currency appears in some pair: `["JPY", "JPY"]` in Example 1 must give `-1.0`.
+
+## 137 · Change One Letter at a Time
+
+**Graphs · Hard**
+
+Given a `start` word, a `target` word and a list `words` of allowed words, build a chain from `start` to `target` in which each word differs from the one before it in exactly one position. Every word after `start` must be in `words`; `start` itself need not be. Return the number of words in the shortest chain, counting both `start` and `target`, or `0` if no chain exists. All words have the same length and only lowercase letters, `start` differs from `target`, and `words` may contain repeats.
+
+```text
+Example 1
+  input:  start = "cold", target = "warm",
+          words = ["cord", "card", "ward", "warm", "worm", "word", "wore"]
+  output: 5        (cold → cord → card → ward → warm)
+
+Example 2
+  input:  start = "lead", target = "gold", words = ["load", "goad"]
+  output: 0        ("gold" is not an allowed word)
+```
+
+Constraints: `1 ≤ start.length ≤ 10`, `0 ≤ words.length ≤ 5000`, `words[i].length = start.length`.
+
+**Approach.** Words are nodes, two words are joined when they differ in exactly one position, and the shortest chain is a shortest path in an unweighted graph, so the tool is breadth-first search. The simple way to find a word's neighbours compares it with every allowed word, O(n·L) per word and O(n²·L) overall. Generating them is cheaper when the list is long: for each position, try every letter from `a` to `z` and keep the candidates found in a hash set of the allowed words. A map from word to chain length doubles as the visited set; a word is recorded when it is queued, so it is queued only once, and the first time `target` comes off the queue its length is the answer. TypeScript and Python build each candidate by slicing the string; the other four change one slot of a character array and copy it into a new string.
+
+<Solutions n="137" />
+
+**Complexity.** O(n·26·L²) time: each of the `n` words is dequeued at most once and builds 26·L candidates of length `L`; O(n·L) space for the set, the map and the queue.
+
+**Common mistake.** Counting changes instead of words by starting `start` at length 0: Example 1 returns 4 instead of 5.
+
+## 138 · Order of an Unknown Alphabet
+
+**Graphs · Hard**
+
+A list of `words` is sorted in the dictionary order of an unknown alphabet: it uses lowercase English letters but ranks them differently. Return a string with every letter that appears in `words`, once each, in an order consistent with the sorting. Several orders may fit, so use this rule: whenever more than one letter could come next, take the one that comes first in the usual a-to-z order. Return `""` if no alphabet fits, either because the comparisons contradict each other or because a word is listed before a shorter word that is its own prefix, such as `"abc"` before `"ab"`.
+
+```text
+Example 1
+  input:  words = ["cab", "cad", "ab", "ba", "bd"]
+  output: "cabd"   (b before d, c before a, a before b)
+
+Example 2
+  input:  words = ["ba", "bc", "ad"]
+  output: "bacd"   (b before a, a before c; d is free, but a smaller letter is always available first)
+
+Example 3
+  input:  words = ["abc", "ab"]
+  output: ""       (a word before its own prefix)
+```
+
+Constraints: `1 ≤ words.length ≤ 100`, `1 ≤ words[i].length ≤ 100`, lowercase letters only.
+
+**Approach.** Trying candidate alphabets is hopeless, with up to 26! orders. Instead, compare each word with the next one: at the first position where they differ, the letter in the first word comes before the letter in the second, and the letters after that position say nothing. Adjacent pairs are enough because the order is transitive. These facts form a directed graph on at most 26 letters, and an alphabet is a topological order of it: Kahn's algorithm repeatedly places a letter that no unplaced letter must precede and lowers the waiting count of the letters after it; if letters remain but none is free, the facts form a cycle. With 26 letters, scanning `a` to `z` for the smallest free letter costs O(26²) in total, so no heap is needed, and a boolean matrix `before[x][y]` keeps a repeated fact from being counted twice. The prefix case needs its own check, because it produces no fact at all.
+
+<Solutions n="138" />
+
+**Complexity.** O(C + 26²) time, where `C` is the total number of characters in `words`; O(26²) space for the matrix.
+
+**Common mistake.** Skipping a pair whose words never differ without comparing their lengths: `["abc", "ab"]` then returns `"abc"` instead of `""`.
+
+## 139 · Cheapest Route With at Most k Stops
+
+**Graphs · Hard**
+
+Parcel and Pulse moves parcels between `n` depots numbered `0` to `n - 1`. Each `legs[i] = [from, to, price]` is a one-way transport leg. Return the cheapest total price to get a parcel from `source` to `target` with at most `k` stops at depots in between, which means at most `k + 1` legs, or `-1` if no such route exists. If `source` equals `target`, the answer is 0.
+
+```text
+Example 1
+  input:  n = 4, legs = [[0, 1, 100], [1, 2, 100], [2, 3, 100], [0, 2, 500], [1, 3, 600]],
+          source = 0, target = 3, k = 1
+  output: 600      (0 → 2 → 3; the 300 route needs two stops)
+
+Example 2
+  input:  the same n and legs, source = 0, target = 3, k = 2
+  output: 300      (0 → 1 → 2 → 3)
+```
+
+Constraints: `1 ≤ n ≤ 100`, `0 ≤ legs.length ≤ n × (n - 1)`, `1 ≤ price ≤ 10⁴`, `0 ≤ k ≤ 100`.
+
+**Approach.** Exploring every route of at most `k + 1` legs with depth-first search takes exponential time. Plain Dijkstra fails too: it keeps only the cheapest way to reach each depot, and that way may use too many legs when a dearer one with fewer legs is the one that reaches `target` within the limit. Bellman-Ford counts legs for free: after round `r`, `cost[v]` is the cheapest price to reach `v` with at most `r` legs, so run exactly `k + 1` rounds, relaxing every leg in each. The essential detail is that each round reads the previous round's costs (`cost`) and writes into a copy (`next`); relaxing in place lets one round chain several legs and breaks the limit.
+
+<Solutions n="139" />
+
+**Complexity.** O((k + 1)·(n + e)) time, since each round copies `n` costs and relaxes `e` legs; O(n) space for the two cost arrays.
+
+**Common mistake.** Relaxing in place without the copy: with legs `[[0, 1, 1], [1, 2, 1], [0, 2, 5]]` and `k = 0`, the round reaches depot 1 and then uses it straight away, returning 2 instead of 5 for the trip from 0 to 2.
+
+## 140 · Cheapest Way to Connect All Sites
+
+**Graphs · Hard**
+
+Pulse is wiring `n` sites, numbered `0` to `n - 1`, into one network. Each `cables[i] = [a, b, cost]` is a cable that could be laid between sites `a` and `b`, and it works both ways. Return the minimum total cost of a set of cables that connects every site to every other, directly or through other sites, or `-1` if even laying every cable leaves some site unreachable. A single site needs no cable, so it costs 0.
+
+```text
+Example 1
+  input:  n = 4, cables = [[0, 1, 3], [1, 2, 1], [2, 3, 4], [0, 2, 2], [1, 3, 5]]
+  output: 7        (1–2, 0–2 and 2–3; 0–1 would close a loop)
+
+Example 2
+  input:  n = 3, cables = [[0, 1, 5]]
+  output: -1       (site 2 has no cable)
+```
+
+Constraints: `1 ≤ n ≤ 10⁴`, `0 ≤ cables.length ≤ 10⁵`, `1 ≤ cost ≤ 10⁴`, `0 ≤ a, b < n`.
+
+**Approach.** The cheapest connecting set never contains a loop, because dropping any cable of a loop keeps everything connected for less, so it is a minimum spanning tree: `n - 1` cables. Trying subsets of cables is exponential. Kruskal's algorithm sorts the cables by cost and takes each one whose two ends are not yet connected; the greedy choice is safe because, however the sites are split into two groups, the cheapest cable joining the groups belongs to some minimum tree. "Not yet connected" is the union-find question of problem 133, with the same union by size and path halving. If fewer than `n - 1` cables were taken, some site was never reached. Prim's algorithm, which grows one tree with a heap, gives the same total; Kruskal is shorter to write when the input is already a list of edges.
+
+<Solutions n="140" />
+
+**Complexity.** O(e log e) time for the sort, plus nearly O(1) per cable for union-find; O(n + e) space for the parent and size arrays and the sorted copy.
+
+**Common mistake.** Returning the total without checking that `n - 1` cables were taken: Example 2 returns 5 instead of -1.
