@@ -7,3 +7,57 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+A recursive function solves a problem by calling itself on a smaller one, and backtracking uses the same idea to build answers one choice at a time: make a choice, recurse, undo it, and try the next. These problems train that shape, a base case that stops and one call per choice, and the small vocabulary that differs between the languages for writing it: a nested function in TypeScript and Python, a local function in C# and Kotlin, a closure assigned to a variable declared first in Go, and in Java, which has no local methods, a static helper that takes the shared buffer and the result list as parameters. The number of answers grows fast, often 2ⁿ or n!, so the constraints keep the inputs small, and when a problem returns many answers its statement says in which order, so the six versions can be compared exactly.
+
+## 151 · Fast Power
+
+**Recursion and Backtracking · Easy**
+
+Given integers `x ≥ 0`, `n ≥ 0` and `m ≥ 1`, return `xⁿ mod m`: the remainder when `xⁿ`, the product of `n` copies of `x`, is divided by `m`, a value from `0` to `m - 1`. Define `x⁰ = 1` for every `x`, including `0⁰`, so the answer for `n = 0` is `1 mod m`, which is `0` when `m = 1`. Use 64-bit integers: the intermediate products are close to 10¹⁸.
+
+```text
+Example 1
+  input:  x = 3, n = 13, m = 100
+  output: 23       (3¹³ = 1594323)
+
+Example 2
+  input:  x = 2, n = 1000000006, m = 1000000007
+  output: 1        (10⁹ multiplications are too slow; about 30 squarings are enough)
+```
+
+Constraints: `0 ≤ x ≤ 10⁹`, `0 ≤ n ≤ 10⁹`, `1 ≤ m ≤ 10⁹ + 7`.
+
+**Approach.** The simple solution multiplies by `x` n times, reducing mod `m` each time: O(n), a billion multiplications for the largest `n`. Squaring halves the work: `xⁿ` is `(x^(n/2))²` when `n` is even and `(x^(n/2))² × x` when it is odd, with `n/2` rounded down, so a function that calls itself once on `n/2` reaches the base case `n = 0` after about log₂ n calls. Reduce mod `m` after every multiplication, and reduce `x` itself first, so both factors are below `m` and each product is below `m²`, about 10¹⁸, which fits in a signed 64-bit integer. The same idea also works as a loop over the bits of `n`, which needs no stack. TypeScript numbers are exact only up to 2⁵³, so its multiplication goes through `BigInt`.
+
+<Solutions n="151" />
+
+**Complexity.** O(log n) time, O(log n) space for the recursion stack (about 30 frames).
+
+**Common mistake.** Calling the function twice for the two halves, `powerMod(x, n / 2, m) * powerMod(x, n / 2, m)`, instead of once and squaring the result: the calls double at every level, so the function does O(n) work again, about two billion calls for example 2.
+
+## 152 · Every Upper- and Lower-Case Spelling
+
+**Recursion and Backtracking · Easy**
+
+A Shelfwise shelf code such as `"b7x"` is made of ASCII letters and digits, and the search box should match it whatever case it was typed in. Return every string that can be made from `code` by writing each letter in upper or lower case, leaving digits as they are. Return them in ascending order of character codes: at the first position where two spellings differ, the one with the upper-case letter comes first.
+
+```text
+Example 1
+  input:  code = "b7x"
+  output: ["B7X", "B7x", "b7X", "b7x"]
+
+Example 2
+  input:  code = "42"
+  output: ["42"]   (no letters, one spelling)
+```
+
+Constraints: `1 ≤ code.length ≤ 12`, `code` contains only `a`–`z`, `A`–`Z` and `0`–`9`.
+
+**Approach.** A code with L letters has 2^L spellings, so the work is at least that; the question is only how to list them cleanly. Counting from 0 to 2^L − 1 and reading the case of each letter from the bits of the counter works, but recursion says it more directly: fill a buffer position by position, and at a letter make two calls, one with the upper-case letter and one with the lower-case letter, each going on to the next position; at a digit make one call; at the end of the string record the buffer as a string. Because upper-case letters have smaller codes than lower-case ones in ASCII, making the upper-case call first produces the spellings already in the required order, so no sort is needed. That matters, because a default string sort is not ordinal everywhere: in C#, `List<string>.Sort()` compares by the current culture unless you pass `StringComparer.Ordinal`, and a culture-aware order can put `"b7x"` first.
+
+<Solutions n="152" />
+
+**Complexity.** O(2^L × n) time and space for the 2^L spellings of length n, plus O(n) for the recursion stack.
+
+**Common mistake.** Making two calls at every position, digits included: the upper- and lower-case forms of a digit are the same character, so `"42"` returns four copies of `"42"` instead of one.

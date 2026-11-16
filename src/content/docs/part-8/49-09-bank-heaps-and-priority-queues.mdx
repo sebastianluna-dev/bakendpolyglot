@@ -61,3 +61,213 @@ Constraints: `1 ≤ stones.length ≤ 10⁴`, `1 ≤ stones[i] ≤ 1000`.
 **Complexity.** O(n log n) time: at most `n - 1` turns of O(log n) each, after an O(n) or O(n log n) build; O(n) space for the heap.
 
 **Common mistake.** Leaving the heap in its default min-first order, so each turn smashes the two lightest stones: with the rest of the solution unchanged, `[3, 9, 4, 4, 1]` returns 9 instead of 1.
+
+## 143 · Medal Ranks
+
+**Heaps and Priority Queues · Easy**
+
+At the end of a Shelfwise summer reading challenge, `scores[i]` is the number of pages member `i` logged, and no two members logged the same number. Return an array of strings where position `i` holds member `i`'s place: `"Gold Medal"` for the highest score, `"Silver Medal"` for the second, `"Bronze Medal"` for the third, and the place number as a string (`"4"`, `"5"`, …) for everyone else. An empty list gives an empty array.
+
+```text
+Example 1
+  input:  scores = [88, 95, 70, 91]
+  output: ["Bronze Medal", "Gold Medal", "4", "Silver Medal"]
+
+Example 2
+  input:  scores = [3, 9, 1, 12, 5, 7]
+  output: ["5", "Silver Medal", "6", "Gold Medal", "4", "Bronze Medal"]
+```
+
+Constraints: `0 ≤ scores.length ≤ 10⁴`, `0 ≤ scores[i] ≤ 10⁶`, all scores distinct.
+
+**Approach.** The simple solution finds each member's place by counting how many scores beat theirs: O(n²). What it needs is the members in order of score, highest first, without losing their original positions. Sorting the indices by score with a descending comparator gives that order in O(n log n), and so does a max-heap of indices keyed by score, popped n times. Every language here uses the heap, because the max-heap is the drill this topic trains; in the room, say that a sort would do the same job in the same time. Pop the members one by one, count the place from 1, and write the medal name or the place number at the popped index. The max-heap is a reversed comparator in C#, Java and Kotlin, a `Less` that uses `>` in Go, a `less` that uses `>` in the `MinHeap` class from the TypeScript section, and a negated score in Python's `(-score, index)` tuples.
+
+<Solutions n="143" />
+
+**Complexity.** O(n log n) time for n pushes and n pops, O(n) space for the heap and the result.
+
+**Common mistake.** Writing the results in the order they come out of the heap instead of at each member's index: `[88, 95, 70, 91]` then gives `["Gold Medal", "Silver Medal", "Bronze Medal", "4"]`, which is the ranking, not each member's place.
+
+## 144 · The k Closest Delivery Points
+
+**Heaps and Priority Queues · Medium**
+
+A Parcel and Pulse truck leaves a depot at the origin `(0, 0)`, and `points[i] = [x, y]` is a delivery address on the same grid. Return the `k` addresses closest to the depot by straight-line distance. Order the result by distance, nearest first; break ties by the smaller `x`, then by the smaller `y`. That order is total, so even with ties the answer is unique. The same address can appear more than once, and each copy counts as its own point. If `k` is 0, return an empty array.
+
+```text
+Example 1
+  input:  points = [[3, 4], [1, -2], [-2, 1], [0, 5], [2, 2]], k = 3
+  output: [[-2, 1], [1, -2], [2, 2]]   (distances² 5, 5, 8; the tie at 5 goes to x = -2)
+
+Example 2
+  input:  points = [[2, 0], [0, 2], [0, -2], [-2, 0]], k = 2
+  output: [[-2, 0], [0, -2]]            (all four tie; smaller x first, then smaller y)
+```
+
+Constraints: `0 ≤ k ≤ points.length ≤ 10⁴`, `-10⁴ ≤ x, y ≤ 10⁴`.
+
+**Approach.** Compare squared distances, `x² + y²`: the order is the same as for the real distance, it stays an exact integer (at most 2 × 10⁸, which fits in 32 bits), and no square root is needed. The simple solution sorts all n points by (distance², x, y) and takes the first `k`: O(n log n). Only `k` points have to be kept, so keep them in a max-heap of size `k` ordered by the same key: push each point, and when the heap holds `k + 1`, pop the top, which is the farthest of them. At the end the heap holds the answer, and popping it fills the result from the back, so it comes out nearest first with no extra sort. The key is a tuple priority in C#, a chained `Comparator` reversed in Java and Kotlin, a struct with a `farther` function in Go, a compare function passed to the `MinHeap` class in TypeScript, and a fully negated `(-d, -x, -y)` tuple in Python.
+
+<Solutions n="144" />
+
+**Complexity.** O(n log k) time, O(k) space for the heap.
+
+**Common mistake.** Ordering the heap by distance alone: with the four tied points of example 2, which two the heap keeps, and in which order they come out, depends on how the heap happens to arrange them, so the result is not guaranteed to be `[[-2, 0], [0, -2]]`.
+
+## 145 · Schedule Tasks With a Cooldown
+
+**Heaps and Priority Queues · Medium**
+
+A Parcel and Pulse worker runs jobs one time unit each. The string `tasks` lists the jobs to run, one uppercase letter per job, where the letter is its type; they may run in any order. Between two jobs of the same type at least `cooldown` other units must pass: if one runs at time `t`, the next of that type can run at time `t + cooldown + 1` at the earliest. In any unit the worker either runs one job or stays idle. Return the smallest number of units needed to run every job.
+
+```text
+Example 1
+  input:  tasks = "AAABBC", cooldown = 2
+  output: 7        (A B C A B idle A)
+
+Example 2
+  input:  tasks = "AABBCD", cooldown = 1
+  output: 6        (A B A B C D: no idle unit is needed)
+```
+
+Constraints: `1 ≤ tasks.length ≤ 10⁴`, `tasks` contains only `A`–`Z`, `0 ≤ cooldown ≤ 100`.
+
+**Approach.** Trying every order is factorial. The greedy rule that works is to run, at each unit, the available type with the most jobs left, because the most frequent type is the one that forces idle units if it falls behind. Simulate it with a max-heap of jobs left per type and a queue of types cooling down. At each unit, pop the top type and run one job; if it has jobs left, queue it with `time + cooldown`, the last unit it must sit out, and at the end of every unit move the front of the queue back into the heap once that unit is reached. Types enter the queue in time order, so its front is always the next to come back, and when the heap is empty the clock jumps straight to that unit instead of idling one unit at a time. There is also a counting formula, `max(tasks.length, (maxCount - 1) × (cooldown + 1) + typesWithMaxCount)`, which is O(n) with no heap; mention it, but it is easy to misremember under pressure and it does not produce the schedule, so every language here simulates. The queue is a `Queue`, `ArrayDeque` or `deque`, a slice in Go, and an array with `shift` in TypeScript, which is cheap here because it never holds more than 26 types; the TypeScript heap is the `MinHeap` class from the TypeScript section.
+
+<Solutions n="145" />
+
+**Complexity.** O(n log 26) = O(n) time, since there are at most 26 types in the heap and the clock jumps over idle stretches; O(1) space for the 26 counts, heap and queue.
+
+**Common mistake.** Queueing a type with `time + cooldown + 1`, the first unit it may run, while still moving it back only at the end of that unit: every type then waits one unit too many, and `"AAAA"` with cooldown 3 returns 16 instead of 13.
+
+## 146 · Rearrange So No Neighbours Match
+
+**Heaps and Priority Queues · Medium**
+
+A Shelfwise display shelf is described by a string `s` of genre codes, one lowercase letter per book. Rearrange the letters so that no two neighbours are the same, and return the result, or `""` if no such arrangement exists. Many arrangements are often valid, so return the one built left to right by this rule: at each position, among the letters different from the one just placed, place the one with the most copies left, and on a tie the one earlier in the alphabet.
+
+```text
+Example 1
+  input:  s = "vvvlo"
+  output: "vlvov"     (after v, l and o tie with one copy each: l comes first)
+
+Example 2
+  input:  s = "aaab"
+  output: ""          (three a's need at least two other letters between them)
+```
+
+Constraints: `1 ≤ s.length ≤ 10⁴`, `s` contains only `a`–`z`.
+
+**Approach.** Trying permutations until one has no equal neighbours is factorial, and it would still have to find the one the rule picks. Follow the rule directly instead: at every position it asks for "the letter with the most copies left, other than the one just placed", which is a max-heap of `(copies left, letter)`, ordered by copies and then by letter, with one letter held out. At each step pop the top, append it, push back the letter held out from the previous step if it still has copies, and hold out the letter just placed with one copy fewer. If the heap runs empty while the held letter still has copies, the result is shorter than `s` and the answer is `""`; that happens exactly when one letter has more than `(n + 1) / 2` copies, rounded down, since this greedy always succeeds when some arrangement exists. With only 26 letters, scanning the counts at each position is also O(n) and worth naming; the heap is the version that scales to any alphabet. C# and Python get the order for free from a negated tuple, `(-copies, letter)`; the other languages write the two-key comparison, TypeScript as the `less` function of its `MinHeap` class.
+
+<Solutions n="146" />
+
+**Complexity.** O(n log 26) = O(n) time, O(n) space for the result (the heap holds at most 26 letters).
+
+**Common mistake.** Pushing the letter back into the heap right after placing it, instead of holding it out for one step: with `"aab"`, `a` still has the most copies and comes straight back out, giving `"aab"`.
+
+## 147 · Single-Worker Job Order
+
+**Heaps and Priority Queues · Medium**
+
+A Parcel and Pulse label printer handles one print job at a time. `jobs[i] = [arrival, duration]` says that job `i` arrives at time `arrival` and takes `duration` time units. Whenever the printer is free, it starts the waiting job with the shortest duration, and on a tie the one with the smaller index; a job that arrives at the moment the printer becomes free is already waiting. If nothing is waiting, the printer stays idle until the next job arrives. A job, once started, runs to the end. Return the indices of the jobs in the order they are printed.
+
+```text
+Example 1
+  input:  jobs = [[1, 3], [2, 1], [3, 2], [4, 1]]
+  output: [0, 1, 3, 2]   (at time 4, jobs 1, 2, 3 wait; 1 and 3 tie on 1 unit, 1 has the smaller index)
+
+Example 2
+  input:  jobs = [[5, 2], [5, 2], [5, 1], [20, 1]]
+  output: [2, 0, 1, 3]   (idle from time 10 until job 3 arrives at 20)
+```
+
+Constraints: `1 ≤ jobs.length ≤ 10⁵`, `1 ≤ arrival, duration ≤ 10⁹`. The clock can pass 2³¹ − 1, so it is a 64-bit integer.
+
+**Approach.** The simple simulation scans every unprinted job each time the printer is free to find the shortest one that has arrived: O(n²). Two orders are involved, and each gets its own structure: sort the job indices by arrival once, so the jobs that arrive next are always at a moving pointer, and keep the waiting jobs in a min-heap ordered by duration, then index. Each time the printer is free, first jump the clock to the next arrival if nothing is waiting, then move every job with `arrival ≤ time` from the sorted order into the heap, then pop the top, add its duration to the clock, and record its index. The tie between jobs that arrive together does not matter in the sort, because they all enter the heap in the same step, and the heap breaks the remaining ties by index (in TypeScript, the `MinHeap` class from the TypeScript section, ordering indices by duration, then index). The clock is a `long` in C#, Java and Kotlin; Go's `int` is 64 bits on the platforms the bank runs on, and Python's integers and TypeScript's numbers (exact up to 2⁵³) hold it as they are.
+
+<Solutions n="147" />
+
+**Complexity.** O(n log n) time for the sort and the heap, O(n) space for the sorted indices, the heap and the result.
+
+**Common mistake.** Popping from the heap without first jumping the clock when nothing is waiting: in example 2 the heap is empty at time 10 and job 3 has not been moved in yet, so there is nothing to pop, although the printer should idle until 20 and then print job 3.
+
+## 148 · How Far With Bricks and Ladders
+
+**Heaps and Priority Queues · Medium**
+
+A Parcel and Pulse warehouse robot moves along a row of loading platforms, from platform 0 towards the last one. `heights[i]` is the height of platform `i`. Stepping to a platform of the same height or lower costs nothing. Stepping up by `d` costs either `d` bricks or one ladder; the robot starts with `bricks` bricks and `ladders` ladders, and each brick or ladder is used up once spent. Return the index of the furthest platform the robot can reach if it spends them as well as possible.
+
+```text
+Example 1
+  input:  heights = [3, 8, 6, 10, 11, 15, 7], bricks = 4, ladders = 1
+  output: 3        (ladder on the climb of 5, bricks on the 4; the next climb of 1 is one brick too many)
+
+Example 2
+  input:  heights = [10, 12, 13, 25, 26], bricks = 4, ladders = 1
+  output: 4        (ladder for the climb of 12, bricks for 2 + 1 + 1)
+```
+
+Constraints: `1 ≤ heights.length ≤ 10⁵`, `1 ≤ heights[i] ≤ 10⁶`, `0 ≤ bricks ≤ 10⁹`, `0 ≤ ladders ≤ heights.length`.
+
+**Approach.** Trying every way to assign ladders to climbs is exponential, and a binary search on the answer that sorts the climbs each time is O(n log² n). The right split is clear in hindsight: over the climbs made so far, ladders should cover the largest ones and bricks the rest. Keep the climbs covered by ladders in a min-heap: push each new climb, and when the heap holds more climbs than there are ladders, pop the smallest and pay for it with bricks. The moment the bricks go negative, the step from platform `i` to `i + 1` cannot be paid for, so the answer is `i`; if the loop finishes, the robot reaches the last platform. TypeScript uses the `MinHeap` class from the TypeScript section; in Kotlin, parameters are read-only, so the bricks left go into a local `var`.
+
+<Solutions n="148" />
+
+**Complexity.** O(n log L) time, where L is the number of ladders (the heap never holds more than L + 1 climbs), and O(L) space for the heap.
+
+**Common mistake.** Spending a ladder on each climb as it comes and switching to bricks only when the ladders run out: in example 2 the ladder goes on the climb of 2, the climb of 12 then needs bricks, and the robot stops at platform 2 instead of reaching platform 4.
+
+## 149 · Running Median
+
+**Heaps and Priority Queues · Hard**
+
+A Parcel and Pulse dashboard shows the median delivery time while deliveries are still coming in. Design `RunningMedian` with two operations. `addNum(num)` records one integer, and `findMedian()` returns the median of all integers recorded so far as a double: the middle value when there is an odd number of them, and the mean of the two middle values when there is an even number (`AddNum` and `FindMedian` in C# and Go, `add_num` and `find_median` in Python). `findMedian()` is only called after at least one `addNum`.
+
+```text
+Example 1
+  calls:   addNum(5), findMedian(), addNum(15), findMedian(), addNum(1), findMedian(),
+           addNum(3), findMedian()
+  returns: 5.0, 10.0, 5.0, 4.0   (the last is the mean of 3 and 5)
+
+Example 2
+  calls:   addNum(-2), findMedian(), addNum(-2), findMedian(), addNum(7), findMedian(),
+           addNum(8), findMedian()
+  returns: -2.0, -2.0, -2.0, 2.5
+```
+
+Constraints: `num` is any 32-bit signed integer, `-2³¹ ≤ num ≤ 2³¹ − 1`; at most `10⁵` calls in total.
+
+**Approach.** The simple solution keeps a sorted list and inserts each number in place, O(n) per `addNum` for the shifting, then reads the middle in O(1). The median only needs the largest value of the smaller half and the smallest value of the larger half, and two heaps keep exactly those on top: a max-heap `low` for the smaller half and a min-heap `high` for the larger half, with `low` holding the same number of values as `high` or one more. To add, push the number into `low`, move `low`'s top into `high` (so every value in `low` stays at most every value in `high`), and if `high` is now bigger, move its top back. The median is then `low`'s top when the sizes differ, or the mean of the two tops; convert to a double before adding, because two values near 2³¹ overflow a 32-bit sum. TypeScript builds both from its `MinHeap` class, with `>` as the `less` of `low`; Go and Python store `low` negated in a min-heap instead of writing a second heap type.
+
+<Solutions n="149" />
+
+**Complexity.** O(log n) time per `addNum`, O(1) per `findMedian`, O(n) space for the two heaps.
+
+**Common mistake.** Dividing the sum of the two middle values as integers: after `addNum(-2)`, `addNum(-2)`, `addNum(7)` and `addNum(8)`, the median is 2.5, but `(-2 + 7) / 2` in integer arithmetic gives 2.
+
+## 150 · Merge k Sorted Lists
+
+**Heaps and Priority Queues · Hard**
+
+You get an array of `k` singly linked lists, each sorted in non-decreasing order, as in problem 082 but with any number of them. Merge them into one sorted list by relinking their nodes, without creating new ones, and return its head. Any of the lists may be empty, and so may the array; then return an empty list. Equal values may come from different lists in any order, since the checks compare the values of the merged list.
+
+```text
+Example 1
+  input:  lists = [[1, 4, 7], [2, 5], [0, 6, 9]]
+  output: [0, 1, 2, 4, 5, 6, 7, 9]
+
+Example 2
+  input:  lists = [[], [3], []]
+  output: [3]
+```
+
+Constraints: `0 ≤ k ≤ 10⁴`, at most `10⁵` nodes in total, `-10⁹ ≤ val ≤ 10⁹`.
+
+**Approach.** The lists use the `ListNode` type and helpers of problems 081–090 rather than plain arrays, because the merge is then the dummy-and-tail loop of problem 082 and the only new part is the heap. The simple solutions collect every value and sort, O(N log N) for N nodes, or merge the lists into the result one at a time, O(k × N). Every step of a merge only needs the smallest of the k front nodes, so keep the fronts in a min-heap ordered by value: pop the smallest, link it after the tail, and push its successor if it has one. Each node enters and leaves the heap once, and the heap never holds more than k nodes. Merging the lists in pairs, round after round, is the other O(N log k) answer and needs no heap. TypeScript uses the `MinHeap` class from the TypeScript section, ordering nodes by `val`. In Python, a heap of `(val, node)` tuples compares the nodes when two values tie, and `ListNode` has no `<`, so the tuple carries the list's index in the middle as a tie-breaker.
+
+<Solutions n="150" />
+
+**Complexity.** O(N log k) time for N nodes in total, O(k) space for the heap.
+
+**Common mistake.** In Python, pushing `(node.val, node)` with no tie-breaker: `[[2, 2], [2], [1, 2]]` has equal values in different lists, and the push raises `TypeError: '<' not supported between instances of 'ListNode' and 'ListNode'`.
