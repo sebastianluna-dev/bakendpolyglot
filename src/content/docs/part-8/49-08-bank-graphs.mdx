@@ -7,3 +7,291 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+A graph problem arrives in one of two forms: a list of edges that you turn into an adjacency list, or a grid in which each cell's neighbours are the four cells around it. Nearly all of them are solved by the same two walks, breadth-first with a queue or depth-first with recursion, each with a marker for what has been seen. These problems train writing that walk from memory in each language: the queue (an array with a head index in TypeScript, `Queue` in C#, `ArrayDeque` in Java and Kotlin, a slice in Go, `collections.deque` in Python), the loop over four directions with its bounds check, and the moment a node is marked as seen. The later ones add walks that start from many cells at once, orders in which a node waits for everything it depends on, and shortest paths with weights.
+
+## 123 · Is There a Route?
+
+**Graphs · Easy**
+
+Parcel and Pulse runs `n` depots numbered `0` to `n - 1`, joined by two-way roads. Each road is a pair `[a, b]`, and a truck can drive it in either direction. Given the roads, a `source` depot and a `target` depot, return `true` if a truck can get from `source` to `target` using any number of roads, and `false` otherwise. A depot can always reach itself, even with no roads. A road may be listed more than once, in either order.
+
+```text
+Example 1
+  input:  n = 6, roads = [[0, 1], [1, 3], [3, 2], [4, 5]], source = 0, target = 2
+  output: true         (0 → 1 → 3 → 2)
+
+Example 2
+  input:  n = 6, roads = [[0, 1], [1, 3], [3, 2], [4, 5]], source = 0, target = 5
+  output: false        (5 is only joined to 4)
+```
+
+Constraints: `1 ≤ n ≤ 2 × 10⁵`, `0 ≤ roads.length ≤ 2 × 10⁵`, `0 ≤ a, b, source, target < n`.
+
+**Approach.** Scanning the road list again and again for roads that leave the depots reached so far works, but each scan is O(E) and there can be one per depot: O(n × E). Build an adjacency list once, adding each road in both directions, so that the neighbours of a depot cost nothing to find. Then walk breadth-first from `source` with a queue and a `seen` array, and return `true` when `target` comes off the queue. Mark a depot as seen when it is queued, not when it is dequeued, so no depot enters the queue twice. If the queue empties first, `target` is in another group of depots.
+
+<Solutions n="123" />
+
+**Complexity.** O(n + E) time, O(n + E) space for the adjacency list, the `seen` array and the queue.
+
+**Common mistake.** Adding each road in one direction only: with roads `[[1, 0]]`, source `0` and target `1`, the walk never leaves depot 0 and returns `false`.
+
+## 124 · Flood Fill
+
+**Graphs · Easy**
+
+An image is a grid of integers, one colour per pixel. Given a starting pixel `(row, col)` and a new `color`, repaint the starting pixel and every pixel joined to it through a chain of pixels of the same original colour, moving up, down, left or right (never diagonally). Change the image in place and return it. If the starting pixel already has the new colour, the image is returned unchanged.
+
+```text
+Example 1
+  input:  image = [[1, 1, 0],
+                   [0, 1, 0],
+                   [1, 0, 1]], row = 0, col = 0, color = 3
+  output: [[3, 3, 0],
+           [0, 3, 0],
+           [1, 0, 1]]      (the 1s in the bottom corners touch the centre only diagonally)
+
+Example 2
+  input:  image = [[4, 4], [4, 4]], row = 1, col = 1, color = 4
+  output: [[4, 4], [4, 4]]
+```
+
+Constraints: `1 ≤ rows, cols ≤ 50`, `0 ≤ image[r][c], color ≤ 2¹⁶`, `(row, col)` is inside the grid.
+
+**Approach.** Repeatedly sweeping the whole image and repainting any pixel of the old colour next to a repainted one works, but each sweep may grow the region by one pixel: O((rows × cols)²). A breadth-first walk from the starting pixel visits each pixel of the region once. Remember the old colour, paint the start, and queue it; for each pixel taken off the queue, paint and queue the in-bounds neighbours that still have the old colour. The paint itself is the visited marker, since a repainted pixel no longer matches, which is why the case where the new colour equals the old one must return straight away.
+
+<Solutions n="124" />
+
+**Complexity.** O(rows × cols) time, O(rows × cols) space for the queue in the worst case.
+
+**Common mistake.** Leaving out the early return when the new colour equals the old one: for `[[4, 4], [4, 4]]` and colour `4`, painting no longer marks anything as visited, so the same pixels are queued forever.
+
+## 125 · Find the Trusted Judge
+
+**Graphs · Easy**
+
+A book club of `n` members, numbered `1` to `n`, needs a judge for its annual prize, and the club has collected who trusts whom. Each pair `[a, b]` means member `a` trusts member `b`. The trusted judge is the member who trusts nobody and whom every other member trusts. Return the judge's number, or `-1` if no member fits. Nobody trusts themselves, and no pair appears twice. With a single member and no pairs, that member is the judge.
+
+```text
+Example 1
+  input:  n = 4, trust = [[1, 3], [2, 3], [4, 3], [4, 1]]
+  output: 3
+
+Example 2
+  input:  n = 3, trust = [[1, 3], [2, 3], [3, 1]]
+  output: -1          (everyone else trusts 3, but 3 trusts 1)
+```
+
+Constraints: `1 ≤ n ≤ 1000`, `0 ≤ trust.length ≤ 10⁴`, `1 ≤ a, b ≤ n`, `a ≠ b`.
+
+**Approach.** The simple solution tries each member as the judge and scans every pair to check both rules: O(n × T). Seen as a graph, the pairs are directed edges, and the judge is the member with `n - 1` edges coming in and none going out. One pass computes a score for everyone: add one to `b` and subtract one from `a` for each pair. A member can be trusted by at most `n - 1` others, so a score of `n - 1` means trusted by all of them and trusting nobody: exactly the two rules. That argument needs the guarantee that no pair repeats, since a repeated pair would count one member's trust twice.
+
+<Solutions n="125" />
+
+**Complexity.** O(n + T) time, O(n) space for the scores.
+
+**Common mistake.** Counting only who is trusted and forgetting that the judge trusts nobody: in example 2, member 3 is trusted by both others, so the code returns `3` instead of `-1`.
+
+## 126 · Total Importance of a Team
+
+**Graphs · Easy**
+
+Each employee record has an `id`, an `importance` score and the list of `reports`: the ids of the people who report to them directly. Every employee has at most one manager, and nobody reports to themselves through any chain. Given the records, in any order, and one `employeeId`, return the total importance of that employee's team: their own importance plus that of everyone below them, directly or through other managers. The id is always in the list. Scores may be negative.
+
+The examples write each record as `[id, importance, reports]`.
+
+```text
+Example 1
+  input:  employees = [[1, 5, [2, 3]], [2, 3, [4]], [3, 3, []], [4, 1, []]], employeeId = 1
+  output: 12           (5 + 3 + 3 + 1)
+
+Example 2
+  input:  employees = [[1, 5, [2, 3]], [2, 3, [4]], [3, 3, []], [4, 1, []]], employeeId = 2
+  output: 4            (2 and 4; 1 is the manager, not part of the team)
+```
+
+Constraints: `1 ≤ employees.length ≤ 500`, ids are distinct, `-100 ≤ importance ≤ 100`.
+
+**Approach.** The reports form a tree rooted at the given employee, and the answer is the sum over that tree. Walking it by searching the list for each id costs O(n) per lookup and O(n²) in all, so first put the records in a hash map from id to record. Then a depth-first walk is one short recursive function: an employee's total is their importance plus the totals of their direct reports. The recursion goes as deep as the chain of managers, at most 500 levels here, below Python's default recursion limit of 1000. In Go, the recursive closure is declared with `var` first so that it can refer to itself.
+
+<Solutions n="126" />
+
+**Complexity.** O(n) time, O(n) space for the map and the recursion stack.
+
+**Common mistake.** Adding only the direct reports instead of recursing into them: for employee 1 in example 1, that sums `5 + 3 + 3 = 11` and misses employee 4, who reports to 2.
+
+## 127 · Perimeter of an Island
+
+**Graphs · Easy**
+
+A map is a grid of `0`s (water) and `1`s (land), and it holds exactly one island: all the land cells are joined to each other up, down, left or right. Return the length of the island's coastline, counted as the number of land-cell sides that touch water or the edge of the grid. A lake of water inside the island counts too, because its shore is also land touching water.
+
+```text
+Example 1
+  input:  grid = [[0, 1, 0],
+                  [1, 1, 1],
+                  [0, 1, 0]]
+  output: 12
+
+Example 2
+  input:  grid = [[1, 1],
+                  [1, 1]]
+  output: 8
+```
+
+Constraints: `1 ≤ rows, cols ≤ 100`, every cell is `0` or `1`, there is exactly one island.
+
+**Approach.** A walk from one land cell that counts, for every cell it reaches, the neighbours that are water or off the grid gives the right answer in O(rows × cols), but the walk itself is not needed: the count depends only on each land cell and its four neighbours. Every land cell brings four sides, and each pair of land cells that touch hides two of them, one from each cell. So scan the grid once, add 4 for each land cell, and subtract 2 when the cell above or the cell to the left is land. Looking only up and left counts each touching pair exactly once.
+
+<Solutions n="127" />
+
+**Complexity.** O(rows × cols) time, O(1) space.
+
+**Common mistake.** Subtracting 1 instead of 2 for each touching pair found by looking up and left: `[[1, 1]]` gives `7` instead of `6`, because the shared side is lost by both cells.
+
+## 128 · Count the Islands
+
+**Graphs · Medium**
+
+A map is a grid of `0`s (water) and `1`s (land). Two land cells belong to the same island when they touch up, down, left or right; cells that touch only at a corner do not. Return the number of islands. The grid must not be changed, and a grid with no land has `0` islands.
+
+```text
+Example 1
+  input:  grid = [[1, 1, 0, 0, 1],
+                  [1, 0, 0, 1, 1],
+                  [0, 0, 1, 0, 0],
+                  [1, 0, 0, 0, 1]]
+  output: 5
+
+Example 2
+  input:  grid = [[1, 0, 1],
+                  [0, 1, 0],
+                  [1, 0, 1]]
+  output: 5            (corners do not join cells)
+```
+
+Constraints: `1 ≤ rows, cols ≤ 300`, every cell is `0` or `1`.
+
+**Approach.** One way without a graph walk gives every land cell a label and sweeps the grid repeatedly, letting each cell take the smallest label among itself and its land neighbours until nothing changes; the number of distinct labels is the answer, but a long winding island can need one sweep per cell, O((rows × cols)²). A walk does the joining directly. Scan the grid; a land cell not yet visited is the first cell of a new island, so add one to the count and walk breadth-first from it, marking every cell of that island as visited. The scan then skips those cells, so each island is counted once and each cell is handled a constant number of times. Keep the marks in a separate `seen` grid, since the grid itself must not change, and mark a cell when it is queued.
+
+<Solutions n="128" />
+
+**Complexity.** O(rows × cols) time, O(rows × cols) space for the `seen` grid and the queue.
+
+**Common mistake.** Looping over eight directions instead of four, which joins cells that touch only at a corner: example 2 returns `1` instead of `5`.
+
+## 129 · Clone a Graph
+
+**Graphs · Medium**
+
+Each node of a connected undirected graph has an integer value and a list of neighbours; an edge between two nodes appears in both of their lists. Given one node of the graph, or nothing for an empty graph, return the matching node of a deep copy: new nodes with the same values, whose neighbour lists point to the corresponding new nodes in the same order. No node of the copy may be a node of the original. There are no self-loops or repeated edges.
+
+The examples and the checks describe a graph as an adjacency list: node `i` has value `i` and the neighbours listed at position `i`, and the given node is node `0`. The checks rebuild that list from the copy and confirm that the copy shares no node with the original.
+
+```text
+Example 1
+  input:  [[1, 3], [0, 2], [1, 3], [0, 2]]
+  output: [[1, 3], [0, 2], [1, 3], [0, 2]]   (a square: 0-1-2-3-0, made of new nodes)
+
+Example 2
+  input:  [[]]
+  output: [[]]                               (one node, no edges)
+```
+
+Constraints: `0 ≤ n ≤ 100` nodes, values are distinct, the graph is connected.
+
+**Approach.** Copying a node and then copying its neighbours recursively without any record never stops, because every edge leads back: node 0 copies node 1, which copies node 0 again. What is missing is a way to ask "has this node been copied, and which copy is it?", and a hash map from each original node to its copy answers both. Walk the graph breadth-first from the given node: when a neighbour is not in the map yet, create its copy and queue the original; in every case, append the neighbour's copy to the current copy's list. Each original node is queued once, and each edge is looked at once from each end. The map is keyed by node identity, the default for a class that defines no equality of its own in all six languages.
+
+<Solutions n="129" />
+
+**Complexity.** O(n + E) time, O(n) space for the map and the queue.
+
+**Common mistake.** Creating a new copy every time a node is met as a neighbour instead of looking in the map first: in the square, node 2 is reached from both 1 and 3, gets two different copies, and the copied graph is no longer a square.
+
+## 130 · Service Startup Order
+
+**Graphs · Medium**
+
+A deployment has `n` services numbered `0` to `n - 1`. Each dependency `[service, needs]` says that `service` can start only after `needs` has started. Return the order in which to start all of them, following one rule: at each step, start the smallest-numbered service whose dependencies have all started. If no order can start every service, because some services wait on each other in a cycle, return an empty list. A dependency may be listed more than once, and a service that needs itself can never start.
+
+```text
+Example 1
+  input:  n = 5, dependencies = [[0, 3], [2, 4], [1, 0]]
+  output: [3, 0, 1, 4, 2]   (after 3 starts, 0 is ready and is smaller than 4)
+
+Example 2
+  input:  n = 3, dependencies = [[0, 1], [1, 2], [2, 0]]
+  output: []                (0 waits for 1, 1 for 2, 2 for 0)
+```
+
+Constraints: `1 ≤ n ≤ 10⁴`, `0 ≤ dependencies.length ≤ 5 × 10⁴`, `0 ≤ service, needs < n`.
+
+**Approach.** The simple solution scans all services at every step for the smallest one whose dependencies have all started, checking each dependency: O(n × (n + D)). Kahn's algorithm keeps that information up to date instead. Count for each service how many of its dependencies have not started yet, and list for each service the ones that depend on it. A service is ready when its count is zero; starting it lowers the count of each dependent, and any that reach zero become ready. Because the rule asks for the smallest ready service, keep the ready ones in a min-heap rather than a plain queue, which would start them in the order they became ready (`[3, 4, 0, 2, 1]` in example 1). If the heap empties before all `n` services have started, the rest are in a cycle or wait on one, and the answer is empty. TypeScript has no heap, so it uses the `MinHeap` class from the TypeScript section; Go uses `container/heap` with a small `minHeap` type.
+
+<Solutions n="130" />
+
+**Complexity.** O(n log n + D) time, O(n + D) space for the counts, the dependents lists and the heap.
+
+**Common mistake.** Returning the order built so far when the heap empties early: for `n = 4` and `[[1, 0], [2, 3], [3, 2]]`, that returns `[0, 1]` instead of an empty list.
+
+## 131 · Minutes Until the Outage Spreads
+
+**Graphs · Medium**
+
+A server room is a grid of slots: `0` is an empty slot, `1` a healthy server and `2` a failed one. Every minute, each healthy server directly above, below, left or right of a failed server fails too, all at the same time. Return the number of minutes until no healthy server is left, or `-1` if some healthy server never fails. If there are no healthy servers to begin with, the answer is `0`. The function may overwrite the grid.
+
+```text
+Example 1
+  input:  grid = [[1, 1, 0, 2],
+                  [0, 1, 1, 1],
+                  [0, 0, 0, 1]]
+  output: 5
+
+Example 2
+  input:  grid = [[1, 1, 0, 2],
+                  [0, 1, 1, 1],
+                  [1, 0, 0, 1]]
+  output: -1           (the server at row 2, column 0 has no neighbours)
+```
+
+Constraints: `1 ≤ rows, cols ≤ 100`, every cell is `0`, `1` or `2`.
+
+**Approach.** Simulating minute by minute, scanning the whole grid each time for healthy servers next to failed ones, costs O(rows × cols) per minute and up to O(rows × cols) minutes. Only the servers that failed in the last minute can cause new failures, so a breadth-first walk does the same work once per cell. Put every failed server in the queue at the start, all together, and count the healthy ones. Then process the queue one level at a time: each level is one minute, and each healthy neighbour it reaches fails, is counted down and joins the next level. Stop when the queue is empty or nothing healthy is left, and return `-1` if the count is not zero. Running a separate walk from each failed server and taking the worst result would be wrong, because the failures spread from all of them at once.
+
+<Solutions n="131" />
+
+**Complexity.** O(rows × cols) time, O(rows × cols) space for the queue.
+
+**Common mistake.** Adding a minute for the last level even when it causes no failure, by looping until the queue is empty instead of stopping when no healthy server is left: `[[2, 1]]` gives `2` instead of `1`.
+
+## 132 · Water That Reaches Both Coasts
+
+**Graphs · Medium**
+
+An island is mapped as a grid of heights. The north-west coast runs along the top row and the left column, and the south-east coast along the bottom row and the right column. Rain that falls on a cell flows to any neighbour above, below, left or right whose height is lower or equal, and a cell on the edge of the grid drains straight into the coast it touches. Return every cell from which rain can reach both coasts, as `[row, column]` pairs sorted by row and then by column.
+
+```text
+Example 1
+  input:  heights = [[1, 2, 2, 3],
+                     [3, 2, 3, 4],
+                     [2, 4, 5, 3],
+                     [6, 7, 1, 4]]
+  output: [[0, 3], [1, 3], [2, 2], [3, 0], [3, 1]]
+
+Example 2
+  input:  heights = [[5, 5, 5],
+                     [5, 1, 5],
+                     [5, 5, 5]]
+  output: [[0, 0], [0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1], [2, 2]]
+          (all but the centre: water there cannot climb out)
+```
+
+Constraints: `1 ≤ rows, cols ≤ 200`, `0 ≤ heights[r][c] ≤ 10⁵`.
+
+**Approach.** The simple solution walks downhill from every cell and checks whether that walk touches both coasts: O(rows × cols) per cell, O((rows × cols)²) in all. The walks repeat each other, because many cells drain along the same paths. Turn the question around: start from the coast and walk uphill, moving to a neighbour whose height is greater or equal, since water from that neighbour could flow down to the current cell. One breadth-first walk from all the north-west edge cells at once marks every cell that drains to that coast, and a second from the south-east edge cells does the same for the other. The answer is the cells marked by both, and scanning the grid row by row to collect them returns them already sorted.
+
+<Solutions n="132" />
+
+**Complexity.** O(rows × cols) time, O(rows × cols) space for the two marker grids and the queue.
+
+**Common mistake.** Keeping the downhill test in the walk from the coast (moving to neighbours that are lower or equal): in example 2, the walk then steps from the edge into the centre cell of height 1, and the centre is wrongly returned.
