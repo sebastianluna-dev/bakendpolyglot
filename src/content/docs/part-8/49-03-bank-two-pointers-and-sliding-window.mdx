@@ -139,3 +139,263 @@ Constraints: `0 ≤ nums.length ≤ 10⁵`, `-10⁴ ≤ nums[i] ≤ 10⁴`, `num
 **Complexity.** O(n) time, O(n) space for the result and O(1) besides it.
 
 **Common mistake.** Comparing the values instead of their absolute values: `-5 > 4` is false, so `[-5, -2, 0, 3, 4]` puts `16` last instead of `25`.
+
+## 051 · Best Average Over k Days
+
+**Two Pointers and Sliding Window · Easy**
+
+A venue on SeatLock records one net balance per day: ticket sales minus refunds, so a day can be negative. Given the daily balances and a number of days `k`, return the highest average balance over any `k` consecutive days, as a floating-point number. The checks compare the result with the expected value to within 10⁻⁹. `k` is always at least 1 and never more than the number of days, so there is always at least one stretch.
+
+```text
+Example 1
+  input:  balances = [4, -2, 7, 5, -1, 6], k = 4
+  output: 4.25        ([7, 5, -1, 6] sums to 17, and 17 / 4 = 4.25)
+
+Example 2
+  input:  balances = [-3, -1, -4], k = 2
+  output: -2.0        (every stretch is negative; [-3, -1] is the least bad)
+```
+
+Constraints: `1 ≤ k ≤ balances.length ≤ 10⁵`, `-10⁴ ≤ balances[i] ≤ 10⁴`.
+
+**Approach.** The simple solution adds up every stretch of `k` days from scratch: O(n·k). Two neighbouring stretches share `k - 1` days, so that sum is mostly repeated work. Keep a window instead: sum the first `k` days, then for each later day add the day entering the window and subtract the day leaving it, which is O(1) per step. Track the best sum as an integer, start it at the first window's sum (not at 0, since every balance may be negative), and divide by `k` once at the end. Comparing sums instead of averages keeps every comparison exact and leaves a single floating-point operation.
+
+<Solutions n="051" />
+
+**Complexity.** O(n) time, O(1) space (one running sum and the best one).
+
+**Common mistake.** Dividing two integers: `best / k` in C#, Java, Kotlin or Go (and `best // k` in Python) truncates, so Example 1 returns 4 instead of 4.25; convert to a floating-point type before dividing.
+
+## 052 · Compare Strings With Backspaces
+
+**Two Pointers and Sliding Window · Easy**
+
+A SeatLock kiosk records every key a customer presses as a string, where `#` is the backspace key: it deletes the closest character before it that has not already been deleted, and does nothing when the text is empty. Given two keystroke strings, return `true` if they produce the same final text and `false` otherwise. Two empty results are equal.
+
+```text
+Example 1
+  input:  a = "A1#2", b = "A2"
+  output: true         (the "1" is deleted, so both give "A2")
+
+Example 2
+  input:  a = "B7##C", b = "C#B"
+  output: false        ("C" against "B")
+```
+
+Constraints: `0 ≤ a.length, b.length ≤ 10⁵`, characters are letters, digits and `#`.
+
+**Approach.** The simple solution builds each final text with a stack (push a character, pop on `#` if the stack is not empty) and compares the results: O(n + m) time but O(n + m) extra space. To avoid building anything, read both strings from the end, because a `#` only affects what is to its left. A helper, `lastKept`, walks left from an index, counting the backspaces it passes and skipping one character for each, and stops at the first character that survives. Compare the surviving characters of the two strings pair by pair, moving both pointers left after each match. If one string runs out of survivors and the other does not, the texts differ.
+
+<Solutions n="052" />
+
+**Complexity.** O(n + m) time, since each pointer only moves left, and O(1) space.
+
+**Common mistake.** Looping only while both indices are in range and then returning `true`, which says `"a"` and `"ba"` are the same: the leftover `"b"` is never looked at.
+
+## 053 · Three Readings That Sum to Zero
+
+**Two Pointers and Sliding Window · Medium**
+
+Given a list of integer sensor readings, return every distinct triplet of values, taken from three different positions, whose sum is 0. Write each triplet in ascending order, and return the list of triplets in ascending order (by first value, then second, then third). Triplets with the same values count once, even when several choices of positions produce them. If there are none, return an empty list. The input list must not be changed.
+
+```text
+Example 1
+  input:  readings = [-4, 1, 3, 0, -1, 2, -1]
+  output: [[-4, 1, 3], [-1, -1, 2], [-1, 0, 1]]
+
+Example 2
+  input:  readings = [0, 0, 0, 0]
+  output: [[0, 0, 0]]        (four positions give it four ways; it counts once)
+```
+
+Constraints: `0 ≤ readings.length ≤ 3000`, `-10⁵ ≤ readings[i] ≤ 10⁵`.
+
+**Approach.** The simple solution tries every triple of positions and puts sorted triplets into a set to remove duplicates: O(n³). Sort a copy of the readings first. Then, for each first value `s[i]`, the other two must add up to `-s[i]` among the values after it, and on sorted input that is a two-pointer search: start `lo` just after `i` and `hi` at the end, move `lo` right when the sum is too small and `hi` left when it is too big. Duplicates are skipped in two places: a first value equal to the previous one would find the same triplets, and after a match `lo` moves past every copy of the value it just used. Sorting also produces the required order for free, because the first value grows with `i` and, for a fixed `i`, `lo` only moves right.
+
+<Solutions n="053" />
+
+**Complexity.** O(n²) time (an O(n) two-pointer pass for each first value, plus O(n log n) for the sort), O(n) space for the sorted copy, not counting the output.
+
+**Common mistake.** Skipping a repeated first value by looking ahead (`s[i] == s[i + 1]`) instead of back (`s[i] == s[i - 1]`), which skips the first `-1` in Example 1 and loses `[-1, -1, 2]`.
+
+## 054 · The Widest Water Tank
+
+**Two Pointers and Sliding Window · Medium**
+
+A row of vertical boards stands one metre apart, and `heights[i]` is the height of board `i`. Pick two boards as the end walls of a tank. Water fills it up to the height of the shorter wall across the distance between them, so in this flat, side-on view the tank holds `(j - i) × min(heights[i], heights[j])`. The boards in between do not matter. Return the largest amount any tank can hold; with fewer than two boards, return 0.
+
+```text
+Example 1
+  input:  heights = [2, 6, 3, 1, 5, 2]
+  output: 15        (boards 1 and 4: 3 apart, water up to height 5)
+
+Example 2
+  input:  heights = [4, 4]
+  output: 4
+```
+
+Constraints: `0 ≤ heights.length ≤ 10⁵`, `0 ≤ heights[i] ≤ 10⁴`.
+
+**Approach.** The simple solution tries every pair of boards: O(n²). Start instead with the widest tank, the two end boards, and move inward. The shorter of the two walls sets the water level, and any other tank that keeps that wall is narrower and can be no taller than it, so none of them can beat the current one. That wall can be discarded: move its pointer one step inward. Each step discards one board, so the loop ends after `n - 1` steps, having looked at every tank that could be the best. When the two walls are equal, moving either one is safe.
+
+<Solutions n="054" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Moving the pointer at the taller wall, which keeps the wall that limits the water: Example 1 returns 10 instead of 15.
+
+## 055 · Longest Stretch Without a Repeat
+
+**Two Pointers and Sliding Window · Medium**
+
+Given a string, return the length of the longest stretch of consecutive characters in which no character appears twice. Characters are compared exactly, so `"A"` and `"a"` are different, and spaces and punctuation count as characters too. An empty string gives 0.
+
+```text
+Example 1
+  input:  s = "shelfwise"
+  output: 7        ("shelfwi"; the next character is a second "s")
+
+Example 2
+  input:  s = "aaaa"
+  output: 1
+```
+
+Constraints: `0 ≤ s.length ≤ 10⁵`, printable ASCII characters only.
+
+**Approach.** The simple solution starts at every position and extends to the right with a set until a character repeats: O(n²). Keep one window, from `start` to the current index `i`, that never contains a repeat. When `s[i]` is already inside the window, no valid window can contain both copies, so `start` jumps to just after the earlier copy. A hash map from each character to the index where it was last seen makes that jump O(1). The stored index may be older than the window, from before `start` last moved, so jump only when it is at or after `start`.
+
+<Solutions n="055" />
+
+**Complexity.** O(n) time, O(k) space for the map, where k is the number of distinct characters (at most 95 printable ASCII characters).
+
+**Common mistake.** Setting `start = prev + 1` without checking that `prev` is inside the window, which moves `start` backwards: `"abba"` returns 3 instead of 2.
+
+## 056 · Longest Run After k Replacements
+
+**Two Pointers and Sliding Window · Medium**
+
+Given a string of uppercase letters and a number `k`, you may replace at most `k` characters, each with any uppercase letter. Return the length of the longest stretch of identical letters you can produce. An empty string gives 0, and `k` may be larger than the string.
+
+```text
+Example 1
+  input:  s = "ABAACBA", k = 1
+  output: 4        (replace the "B" in "ABAA")
+
+Example 2
+  input:  s = "XYXY", k = 2
+  output: 4        (replace both "Y"s, or both "X"s)
+```
+
+Constraints: `0 ≤ s.length ≤ 10⁵`, `0 ≤ k ≤ 10⁵`, letters `A` to `Z` only.
+
+**Approach.** The simple solution starts at every position and extends to the right with 26 counters, stopping when the stretch needs too many replacements: O(n²). The key fact is that a stretch can be turned into one letter exactly when its length minus the count of its most common letter is at most `k`. Keep a window with 26 counters: add the letter on the right, and while the window needs more than `k` replacements, remove the letter on the left. Removing letters never makes the window need more replacements, so shrinking until it is valid is safe. Finding the most common count scans 26 counters, a constant. A known refinement keeps a running maximum that is never decreased, which makes each step O(1), but it is harder to justify out loud and the scan is fast enough.
+
+<Solutions n="056" />
+
+**Complexity.** O(26 · n) = O(n) time, O(1) space (26 counters).
+
+**Common mistake.** Counting replacements against the letter just added instead of the most common one in the window: `"AAAB"` with `k = 1` returns 3 instead of 4.
+
+## 057 · Contains a Scrambled Copy
+
+**Two Pointers and Sliding Window · Medium**
+
+Given a non-empty `pattern` and a `text`, both lowercase letters, return `true` if the text contains a stretch of consecutive letters that is a rearrangement of the pattern: the same letters, each the same number of times, in any order. Return `false` otherwise, including when the pattern is longer than the text.
+
+```text
+Example 1
+  input:  pattern = "loan", text = "renewalnoted"
+  output: true        ("alno" uses the same four letters)
+
+Example 2
+  input:  pattern = "seat", text = "stage"
+  output: false       (all four letters are there, but never side by side)
+```
+
+Constraints: `1 ≤ pattern.length ≤ 10⁴`, `0 ≤ text.length ≤ 10⁵`, letters `a` to `z` only.
+
+**Approach.** The simple solution sorts every stretch of the text with the pattern's length and compares it with the sorted pattern: O(n · m log m). Two neighbouring stretches differ by one letter coming in on the right and one leaving on the left, so keep 26 counters for the window and update two of them per step. Compare the window's counters with the pattern's after building the first window and after every slide; comparing two arrays of 26 is a constant. The comparison is where the languages differ most: Go compares two arrays with `==`, Java uses `Arrays.equals`, Kotlin `contentEquals`, C# `SequenceEqual` and Python `==` on lists, while TypeScript has no array equality and uses `every`.
+
+<Solutions n="057" />
+
+**Complexity.** O(m + 26 · n) = O(n + m) time, O(1) space (two arrays of 26 counters).
+
+**Common mistake.** Comparing only inside the sliding loop and never checking the first window, which misses a match that starts at index 0: `"ab"` in `"ab"` returns `false`.
+
+## 058 · Shortest Stretch Reaching a Total
+
+**Two Pointers and Sliding Window · Medium**
+
+At a Parcel and Pulse depot, parcels come down a conveyor in a fixed order, each with a positive weight in kilograms. A truck needs at least `target` kilograms from consecutive parcels. Return the length of the shortest stretch of consecutive parcels whose total weight is at least the target, or 0 if no stretch reaches it.
+
+```text
+Example 1
+  input:  weights = [3, 1, 4, 1, 5, 9, 2], target = 15
+  output: 3        ([1, 5, 9] or [5, 9, 2]; no two parcels reach 15)
+
+Example 2
+  input:  weights = [2, 2, 2], target = 7
+  output: 0        (all three together weigh only 6)
+```
+
+Constraints: `0 ≤ weights.length ≤ 10⁵`, `1 ≤ weights[i] ≤ 10⁴`, `1 ≤ target ≤ 10⁹`.
+
+**Approach.** The simple solution starts at every parcel and adds parcels until the total reaches the target: O(n²). Because every weight is positive, adding a parcel on the right always raises the total and dropping one from the left always lowers it, which is what makes a sliding window work. Add each parcel on the right; then, while the total still reaches the target, record the window's length and drop the parcel on the left, since a shorter window with the same right end might also reach it. Start the best length at `n + 1`, which no real stretch can have, and return 0 if it never changes. With negative weights the window no longer works, because adding a parcel could lower the total (018 meets the same limit and uses prefix sums instead).
+
+<Solutions n="058" />
+
+**Complexity.** O(n) time, since each parcel enters and leaves the window once, and O(1) space.
+
+**Common mistake.** Shrinking with `if` instead of `while`, so the window drops at most one parcel per step: `[1, 6, 1, 1, 7]` with a target of 7 returns 2 instead of 1.
+
+## 059 · Sort Three Colours in One Pass
+
+**Two Pointers and Sliding Window · Medium**
+
+Every book returned to a Shelfwise branch gets a coloured sticker, stored as a number: 0 for green, 1 for yellow and 2 for red. Given the stickers as an array, rearrange it in place so that all the 0s come first, then the 1s, then the 2s. Use a single pass and O(1) extra space: no library sort, and no counting pass followed by a rewrite. The function returns nothing; the array itself is the result.
+
+```text
+Example 1
+  input:  stickers = [2, 0, 1, 2, 1, 0]
+  output: [0, 0, 1, 1, 2, 2]
+
+Example 2
+  input:  stickers = [1, 1, 1]
+  output: [1, 1, 1]
+```
+
+Constraints: `0 ≤ stickers.length ≤ 10⁵`, each `stickers[i]` is 0, 1 or 2.
+
+**Approach.** A library sort is O(n log n), and counting the three values and rewriting the array is O(n) but takes two passes. One pass is enough with three pointers that split the array into four regions: 0s before `low`, 1s from `low` to `mid - 1`, values not yet looked at from `mid` to `high`, and 2s after `high`. Look at `stickers[mid]`. A 0 is swapped to `low` and both pointers advance, because the value swapped back from `low` is a 1 that was already looked at. A 1 just advances `mid`. A 2 is swapped to `high` and `high` moves left, but `mid` stays, because the value swapped in has not been looked at yet. The loop ends when the unknown region is empty. The checks call the function and then compare the array it changed.
+
+<Solutions n="059" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Advancing `mid` after swapping a 2, which skips the value that came from the end: `[1, 2, 0]` ends as `[1, 0, 2]`.
+
+## 060 · Two Kinds of Fruit
+
+**Two Pointers and Sliding Window · Medium**
+
+A market stall sets out its crates in a row, and `crates[i]` is the kind of fruit in crate `i`, as a number. A buyer will take every crate in one stretch of consecutive crates, but wants at most two kinds of fruit. Return the length of the longest such stretch. One kind is within the limit, and an empty row gives 0.
+
+```text
+Example 1
+  input:  crates = [3, 3, 7, 3, 9, 9, 7]
+  output: 4        ([3, 3, 7, 3]; adding the 9 would make three kinds)
+
+Example 2
+  input:  crates = [5, 5, 5]
+  output: 3        (one kind only)
+```
+
+Constraints: `0 ≤ crates.length ≤ 10⁵`, `0 ≤ crates[i] ≤ 10⁵`.
+
+**Approach.** The simple solution starts at every crate and extends to the right until a third kind appears: O(n²). This is the window from 055 with a different rule for "valid": at most two kinds inside. Keep a hash map from kind to how many crates of it are in the window. Add the crate on the right; while the map holds more than two kinds, remove the crate on the left, and delete its kind from the map when its count reaches 0, so the map's size is always the number of kinds in the window. Record the window's length after each step.
+
+<Solutions n="060" />
+
+**Complexity.** O(n) time, since each crate enters and leaves the window once, and O(1) space: the map never holds more than three kinds.
+
+**Common mistake.** Decrementing a count without deleting the kind at 0, so the map's size never drops back to 2: on `[1, 2, 3]` the shrinking loop runs past the end of the array.
