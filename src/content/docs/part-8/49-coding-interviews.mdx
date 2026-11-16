@@ -1818,3 +1818,1727 @@ for ((prices, budget, want) in cases) {
 ```
 
 A wrong answer now prints, for example, `twoPrices([1, 2], 10) = [0, 0], want []`. A data class would read better than `Triple`, but its generated `equals` compares array properties by reference. It is the shape the TypeScript, C# and Go sections use. A real project would write `@Test` functions with `assertEquals` from `kotlin.test` or JUnit 5, run by Gradle (Chapter 17); both are separate dependencies, so in the round one file with `check` is enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
+
+## Go
+
+Go has the fewest features of the six languages, its strength and its trap in a live round. There is little to remember, but much of what the others put in a library you write by hand: there is no set and no deque, and `container/heap` wants five methods before it does anything. The traps are quiet. `append` may or may not share memory with the slice you passed in, a missing map key returns zero, map order changes from run to run, and `s[i]` is a byte. In return, arrays and structs work as map keys, `int` is 64 bits on the machines you will use, and goroutines and channels are part of the language.
+
+Everything here is Go 1.24, the version in the bank's `go.mod`. The bank keeps one package per problem (`go/p002/`, `package p002`) with an exported function and a `_test.go` file, run with `go test ./p002/`; a shared editor usually wants `package main` and `func main()`. Either way, an unused import or variable is a compile error, so delete what you stop using. Chapter 7 covers the language and the runtime; this section covers only what you type in the round.
+
+### Syntax by heart
+
+These are the structures the problem bank uses, with the costs you will name in step 6.
+
+| Structure | Write it as | Operations to know |
+| --- | --- | --- |
+| List | `a := []int{}`, or `make([]int, 0, n)` | `a = append(a, x)`, `a[i]`, `a[len(a)-1]`, `len(a)`: O(1), `append` amortized. `slices.Contains`, `slices.Index`, `slices.Insert`: O(n) |
+| Map | `m := map[string]int{}` | `m[k]`, `v, ok := m[k]`, `m[k] = v`, `delete(m, k)`, `len(m)`: O(1) average. A missing key reads as zero. Order is random |
+| Set | `map[int]bool` or `map[int]struct{}` | `s[x] = true`, `if s[x]`, `delete(s, x)`: O(1) average |
+| Stack | a slice | `append` to push, `a[len(a)-1]` to peek, `a = a[:len(a)-1]` to pop: O(1) |
+| Queue | a slice | `append` to enqueue, `q[0]` then `q = q[1:]` to dequeue: O(1) |
+| Deque | a slice, or `container/list` | A slice pops from both ends; `list.List` also pushes at the front: O(1) |
+| Heap | `container/heap` over your own slice type | `heap.Push`, `heap.Pop`: O(log n). `h[0]` peeks. `heap.Init`: O(n) |
+| Grid | `make([][]int, rows)`, then `make([]int, cols)` per row | `g[r][c]`; `len(g)` rows, `len(g[0])` columns. Zeroed |
+| Pair | an array, `[2]int`, or a struct | Compared with `==` by value, so both work as map keys |
+
+`make([]int, n)` gives n zeros; `make([]int, 0, n)` gives an empty slice with room for n. `len` counts elements and `cap` the array underneath. The everyday moves:
+
+```go
+copies := []int{}
+copies = append(copies, 4)
+copies = append(copies, 9)
+last := copies[len(copies)-1]   // 9, without removing it
+copies = copies[:len(copies)-1] // pop from the end: O(1)
+
+loansPerMember := map[string]int{}
+loansPerMember["ana"]++        // a missing key reads as 0, so counting needs no default
+n, ok := loansPerMember["zoe"] // 0, false: the two-value form tells "missing" from "zero"
+delete(loansPerMember, "ana")  // no error if the key is not there
+
+byAuthor := map[string][]string{}
+byAuthor["Herbert"] = append(byAuthor["Herbert"], "Dune") // a missing key is a nil slice, and append accepts it
+
+seen := map[int]bool{3: true, 1: true}
+seen[7] = true
+isNew := !seen[5] // true: a missing key reads as false
+
+present := map[int]struct{}{} // a set that stores nothing per key
+present[7] = struct{}{}
+_, has := present[7] // true
+
+stack := []byte{}
+stack = append(stack, '(')
+top := stack[len(stack)-1] // '(' without removing it; on an empty stack this panics
+stack = stack[:len(stack)-1]
+
+queue := []int{1}
+queue = append(queue, 2) // in at the back
+first := queue[0]        // 1, out at the front
+queue = queue[1:]
+
+grid := make([][]int, 3) // 3 nil rows
+for r := range grid {
+	grid[r] = make([]int, 4) // each row its own zeroed array
+}
+```
+
+The zero on a missing key is a gift for counting and a trap when zero is a real value: use comma-ok to tell them apart. Writing to a nil map panics, and `var m map[string]int` declares one, so create maps with a literal or `make`. For sets, `map[int]bool` reads better and `map[int]struct{}` stores nothing per key; pick one.
+
+The bug Go is known for comes from the slice header (Chapter 7). Slicing makes a new header over the same array, and `append` writes into that array whenever there is spare capacity:
+
+```go
+base := make([]int, 3, 10) // [0 0 0], room for 10
+a := append(base, 1)
+b := append(base, 2) // writes into the same array as a
+fmt.Println(a, b)    // [0 0 0 2] [0 0 0 2]
+sub := base[:2]      // a view, not a copy
+sub[0] = 7           // base[0] is 7 too
+```
+
+In a round it shows up in backtracking. Saving `path` itself saves a header over an array the next step overwrites; with `[1, 2, 3]` the result holds `[2]` twice and no `[3]`. Save a copy:
+
+```go
+func subsets(nums []int) [][]int {
+	var res [][]int
+	var path []int
+	var walk func(i int)
+	walk = func(i int) {
+		if i == len(nums) {
+			res = append(res, slices.Clone(path)) // a copy: path's array is about to be reused
+			return
+		}
+		walk(i + 1)                  // without nums[i]
+		path = append(path, nums[i]) // with it
+		walk(i + 1)
+		path = path[:len(path)-1] // undo
+	}
+	walk(0)
+	return res
+}
+```
+
+For breadth-first search, `q = q[1:]` is the whole queue. It is O(1) but frees nothing at once: dequeued slots stay in the array until a later `append` outgrows it and copies only the live part. At interview sizes that is fine; say so if asked about memory.
+
+```go
+func bfsOrder(graph map[int][]int, start int) []int {
+	order := []int{}
+	seen := map[int]bool{start: true}
+	queue := []int{start}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		order = append(order, node)
+		for _, next := range graph[node] { // a node with no entry gives a nil slice: zero iterations
+			if !seen[next] {
+				seen[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+	return order
+}
+```
+
+The same two reslices give a sliding-window deque: push at the back, drop from the front with `d = d[1:]` and from the back with `d = d[:len(d)-1]`. Pushing at the front of a slice is O(n); when you need it, `container/list` is a doubly linked list whose values are `any`:
+
+```go
+d := list.New()
+d.PushBack(5)
+d.PushFront(2)
+front := d.Front().Value.(int) // 2: Value is any, so assert the type back
+d.Remove(d.Back())             // O(1) at both ends; Front and Back are nil when empty
+```
+
+Composite keys need no work, because arrays and structs compare by value:
+
+```go
+type cell struct{ r, c int }
+
+visited := map[cell]bool{{0, 1}: true} // the key type can be left out inside a map literal
+visited[cell{2, 3}] = true
+found := visited[cell{0, 1}] // true: structs compare field by field
+
+dist := map[[2]int]int{{0, 0}: 0} // an array works too
+dist[[2]int{1, 0}] = 1
+p := [2]int{1, 0}
+q := p                    // arrays and structs copy on assignment
+q[0] = 9                  // p is still [1 0]
+same := p == [2]int{1, 0} // true: == compares the contents
+```
+
+<FromTS title="Keys without strings">
+The TypeScript section turns a grid cell into the string `"r,c"`. In Go, `map[[2]int]bool` or a map keyed by a small struct just works, and the compiler checks the key's type. Slices, maps and functions are not comparable, so `map[[]int]bool` does not compile: use the array.
+</FromTS>
+
+### Strings and characters
+
+A string is an immutable sequence of bytes, usually UTF-8. `s[i]` is a `byte` and `len(s)` counts bytes, while `range` decodes the string into `rune` values, Unicode code points. The bank uses ASCII unless a problem says otherwise; ask when the input could be any text.
+
+```go
+s := "Shelfwise"
+first := s[0]                             // 83: a byte, the code of 'S'
+part := s[1:4]                            // "hel", end index excluded
+pos := int(s[1] - 'a')                    // 7: byte minus byte is a byte
+letter := string(rune('a' + pos))         // "h"
+digit := int('7' - '0')                   // 7
+words := strings.Fields("  two   words ") // [two words]
+fields := strings.Split("a,b,,", ",")     // [a b  ]: 4 fields, the empty ones kept
+padded := fmt.Sprintf("%03d", 7)          // "007"
+text := strconv.Itoa(42)                  // "42"
+n, err := strconv.Atoi("12a")             // 0 and an error
+runes := []rune("stressed")
+slices.Reverse(runes)
+reversed := string(runes) // "desserts"
+```
+
+```go
+for i, r := range "née" {
+	fmt.Println(i, string(r)) // 0 n, then 1 é, then 3 e: the index jumps over é's two bytes
+}
+// len("née") is 4: it counts bytes
+```
+
+`s[0] = 'J'` does not compile; convert to `[]byte(s)`, change it, and convert back with `string(b)`. Build long strings with `strings.Builder` (`WriteString`, `WriteByte`, then `String()`). `strconv.Atoi` rejects surrounding spaces and out-of-range values as well as junk. Letter counts go in a fixed array, and since arrays compare with `==`, an anagram check is one comparison and grouping anagrams is a `map[[26]int][]string`:
+
+```go
+func letterCounts(word string) [26]int {
+	var counts [26]int // an array, zeroed
+	for i := 0; i < len(word); i++ {
+		counts[word[i]-'a']++
+	}
+	return counts
+}
+```
+
+For character classes, `c >= '0' && c <= '9'` is the ASCII test; `unicode.IsDigit` and `unicode.IsLetter` take a `rune` and accept any Unicode digit or letter.
+
+<Pitfall title="string(n) is not a number">
+`string(n)` with an `int` compiles and returns the character with that code: `string(65)` is `"A"`, not `"65"`. `go vet` flags it, but a shared editor will not run vet. Use `strconv.Itoa`.
+</Pitfall>
+
+### Sorting with a comparator
+
+The `slices` functions take a comparison that returns a negative number, zero or a positive one; the older `sort.Slice` takes two indices and a `bool` "less". Mixing up the shapes at least fails to compile.
+
+```go
+nums := []int{10, 9, 1}
+slices.Sort(nums) // [1 9 10], in place
+
+slices.SortFunc(nums, func(a, b int) int { return cmp.Compare(b, a) }) // [10 9 1]
+
+sort.Slice(nums, func(i, j int) bool { return nums[i] < nums[j] }) // [1 9 10]: indices and a less
+
+stock := map[string]int{"emma": 2, "dune": 5}
+titles := slices.Sorted(maps.Keys(stock)) // [dune emma], Go 1.23 and later
+```
+
+Prefer `cmp.Compare` to `a - b`, which can still overflow. Chain keys with `cmp.Or`, which returns its first non-zero argument:
+
+```go
+type loan struct {
+	member string
+	due    int
+}
+```
+
+```go
+slices.SortFunc(loans, func(a, b loan) int {
+	return cmp.Or(cmp.Compare(a.due, b.due), strings.Compare(a.member, b.member))
+}) // bob, ana, eve: by due, then by name
+slices.SortStableFunc(loans, func(a, b loan) int {
+	return cmp.Compare(b.due, a.due)
+}) // ana, eve, bob: latest first, ties keep their order
+```
+
+Strings compare byte by byte, so `<` gives ordinal order: `["b", "a", "B", "A"]` sorts to `A B a b`. `slices.SortFunc` and `sort.Slice` are not guaranteed stable, and as in C#, small inputs can keep ties in order while larger ones do not. When ties must keep their order, use `slices.SortStableFunc` or `sort.SliceStable`.
+
+### Iteration
+
+```go
+for i, t := range titles { // index and value; write _ for the one you don't need
+	fmt.Println(i, t)
+}
+for i := range titles { // one variable is the index, not the value
+	fmt.Println(titles[i])
+}
+for i := range 3 { // 0, 1, 2: range over an int, Go 1.22 and later
+	fmt.Println(i)
+}
+for i := len(titles) - 1; i >= 0; i-- { // backwards
+	fmt.Println(titles[i])
+}
+for title, count := range stock { // a map, in a different order on every run
+	fmt.Println(title, count)
+}
+for _, title := range slices.Sorted(maps.Keys(stock)) { // a map, in key order
+	fmt.Println(title, stock[title])
+}
+for _, d := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} { // the four neighbours
+	nr, nc := r+d[0], c+d[1]
+	if nr >= 0 && nr < len(grid) && nc >= 0 && nc < len(grid[0]) {
+		fmt.Println(grid[nr][nc])
+	}
+}
+```
+
+`for cond { }` is the while loop. The range variable is a copy, so `b.title = "?"` inside `for _, b := range books` changes nothing; write `books[i].title`. Map order is unspecified and the runtime varies it on purpose, so sort the keys whenever the answer depends on order. Deleting entries during a map range is safe. Since Go 1.22 each iteration has its own loop variables, so a goroutine that captures `i` sees that iteration's value.
+
+### Numbers
+
+`int` is 32 or 64 bits by platform, and 64 on any machine you are likely to interview on, so `math.MaxInt` is about 9.2 × 10¹⁸. Overflow still wraps silently, with no checked mode:
+
+```go
+a, b := 3_000_000_000, 4_000_000_000
+fmt.Println(a * b) // -6446744073709551616: past math.MaxInt, it wraps without a word
+
+var x, y int32 = 50_000, 50_000
+fmt.Println(x * y)               // -1794967296: int32 wraps near 2.1 × 10⁹
+fmt.Println(int64(x) * int64(y)) // 2500000000
+
+big := math.MaxInt
+fmt.Println(big+1 == math.MinInt) // true
+```
+
+Constant expressions are checked, so `x := math.MaxInt + 1` does not compile. Types never mix implicitly: `int` with `float64` or `int64` is a compile error until you convert one side. Beyond 64 bits there is `math/big`.
+
+| You want | Write | Note |
+| --- | --- | --- |
+| Integer division toward zero | `a / b` | `-7 / 2` is `-3`, and `7 / 2` is `3` |
+| A real quotient | `float64(a) / float64(b)` | `3.5` |
+| Division rounding down | `floorDiv(a, b)` below | `-4` for `-7` and `2`, like Python's `//`; not built in |
+| Remainder | `a % b` | Takes the sign of `a`: `-7 % 3` is `-1` |
+| Always-positive modulo | `((a % m) + m) % m` | `2` for `-7` and `3` |
+| Smaller and larger | `min(a, b)`, `max(a, b, c)` | Built in since Go 1.21 |
+| Sentinels | `math.MaxInt`, `math.MinInt` | Never add to a sentinel |
+| Absolute value | write it | `math.Abs` is for `float64` |
+
+```go
+func floorDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q-- // truncation went up; step down
+	}
+	return q
+}
+```
+
+### Errors
+
+Errors are values (Chapter 7): return `error` last, check it at once, and wrap it with `%w` to add context:
+
+```go
+var ErrNotFound = errors.New("not found")
+
+var shelf = map[int]string{1: "Dune, copy 1"}
+
+func findCopy(id int) (string, error) {
+	title, ok := shelf[id]
+	if !ok {
+		return "", fmt.Errorf("copy %d: %w", id, ErrNotFound) // %w keeps ErrNotFound in the chain
+	}
+	return title, nil
+}
+
+func main() {
+	_, err := findCopy(2)
+	fmt.Println(err)                         // copy 2: not found
+	fmt.Println(errors.Is(err, ErrNotFound)) // true: Is looks through every %w
+	fmt.Println(err == ErrNotFound)          // false: the wrapper is a different value
+
+	_, err = strconv.Atoi("12a")
+	var numErr *strconv.NumError
+	if errors.As(err, &numErr) { // As finds an error of a given type and fills the variable
+		fmt.Println(numErr.Func, numErr.Num) // Atoi 12a
+	}
+}
+```
+
+`%v` instead of `%w` prints the same message but cuts the chain, so `errors.Is` returns `false`. `panic` is for bugs: an index out of range or a nil map write panics on its own, which is right for a broken invariant. Most algorithm functions return no error; the bank returns an empty slice or `-1`, and for "may be missing", a second `bool`, the comma-ok shape of a map read.
+
+### Concurrency basics
+
+Goroutines run in parallel on real threads (Chapter 7), so the TypeScript `mapLimit` with its unguarded `next++` would be a data race. The short Go version starts a goroutine per item and lets a buffered channel admit `limit` at a time:
+
+```go
+func mapLimit[T, R any](items []T, limit int, fn func(T) R) []R {
+	results := make([]R, len(items))
+	gate := make(chan struct{}, limit) // a buffered channel as a semaphore: limit slots
+	var wg sync.WaitGroup
+	for i, item := range items {
+		wg.Add(1)
+		go func() { // i and item are new variables in every iteration (Go 1.22)
+			defer wg.Done()
+			gate <- struct{}{}        // take a slot; blocks while all limit are taken
+			defer func() { <-gate }() // give it back
+			results[i] = fn(item)     // each goroutine writes only its own slot
+		}()
+	}
+	wg.Wait()
+	return results
+}
+```
+
+The worker pool is the closest match to the TypeScript version, with a channel in place of the shared counter:
+
+```go
+func mapLimitPool[T, R any](items []T, limit int, fn func(T) R) []R {
+	results := make([]R, len(items))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(limit, len(items)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs { // each index is received by exactly one worker
+				results[i] = fn(items[i])
+			}
+		}()
+	}
+	for i := range items {
+		jobs <- i
+	}
+	close(jobs) // ends every worker's range loop
+	wg.Wait()
+	return results
+}
+```
+
+Both keep results in input order. Call `wg.Add(1)` before the `go` statement, or `Wait` can return before the goroutine starts; the `wg.Go` method that does both arrives in Go 1.25. For other shared state, `sync/atomic` handles one number and `sync.Mutex` anything bigger:
+
+```go
+var total atomic.Int64
+var wg sync.WaitGroup
+for range 8 {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100_000 {
+			total.Add(1) // total++ on a plain int here loses updates
+		}
+	}()
+}
+wg.Wait()
+fmt.Println(total.Load()) // 800000
+
+var mu sync.Mutex
+loansPerMember := map[string]int{}
+mu.Lock()
+loansPerMember["ana"]++ // anything bigger than one number goes under a mutex
+mu.Unlock()
+```
+
+With a plain `int`, the loop prints a different wrong number each run, and `go run -race` or `go test -race` reports `WARNING: DATA RACE` with both lines. The detector sees only races that actually happen while it runs.
+
+<InterviewLens>
+"Many goroutines write to `results` with no lock. Is that a race?" No: each goroutine writes a different element, and `wg.Wait()` returns only after every `Done`, so all the writes are visible afterwards. Then say what would be one: a shared `next++`, an `append` to one shared slice, or writes to one map, which can crash the program with "concurrent map writes".
+</InterviewLens>
+
+### The heap
+
+`container/heap` is a set of functions over any type that implements `heap.Interface`: `Len`, `Less` and `Swap` from `sort.Interface`, plus `Push` and `Pop`. You write the five methods on a slice type, then call `heap.Push` and `heap.Pop`, which use them to keep the order. Learn this version from the package documentation:
+
+```go
+type IntHeap []int
+
+func (h IntHeap) Len() int           { return len(h) }
+func (h IntHeap) Less(i, j int) bool { return h[i] < h[j] } // > for a max-heap
+func (h IntHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *IntHeap) Push(x any)        { *h = append(*h, x.(int)) }
+func (h *IntHeap) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
+}
+```
+
+`Push` and `Pop` take pointer receivers because they change the length. Your `Pop` removes the last element because `heap.Pop` has already swapped the root there.
+
+```go
+h := &IntHeap{14, 3, 7}
+heap.Init(h) // O(n): arrange an existing slice as a heap
+heap.Push(h, 1)
+smallest := (*h)[0] // 1: the root is the minimum
+for h.Len() > 0 {
+	fmt.Print(heap.Pop(h), " ") // 1 3 7 14
+}
+```
+
+<Pitfall title="h.Push is not heap.Push">
+Calling your own method, `h.Push(x)`, compiles and appends without restoring the order, and `h.Pop()` returns whatever is last: push 5, 1 and 3 that way and it returns 3. Always call `heap.Push(h, x)` and `heap.Pop(h)`.
+</Pitfall>
+
+For "the k largest", keep a min-heap of size k:
+
+```go
+func kthLargest(nums []int, k int) int {
+	h := &IntHeap{} // a min-heap of the k largest so far
+	for _, x := range nums {
+		heap.Push(h, x)
+		if h.Len() > k {
+			heap.Pop(h) // drop the smallest
+		}
+	}
+	return (*h)[0]
+}
+```
+
+For pairs, write the same five methods on a slice of structs. Dijkstra's algorithm then uses lazy deletion, as in the C# and Java sections:
+
+```go
+type entry struct{ dist, node int }
+
+type entryHeap []entry
+
+func (h entryHeap) Len() int           { return len(h) }
+func (h entryHeap) Less(i, j int) bool { return h[i].dist < h[j].dist }
+func (h entryHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *entryHeap) Push(x any)        { *h = append(*h, x.(entry)) }
+func (h *entryHeap) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
+}
+```
+
+```go
+type edge struct{ to, cost int }
+
+func shortestFrom(graph [][]edge, source int) []int {
+	dist := make([]int, len(graph))
+	for i := range dist {
+		dist[i] = math.MaxInt
+	}
+	dist[source] = 0
+	h := &entryHeap{{0, source}}
+	for h.Len() > 0 {
+		e := heap.Pop(h).(entry) // Pop returns any: assert the type back
+		if e.dist > dist[e.node] {
+			continue // stale: a shorter path was found after this was queued
+		}
+		for _, ed := range graph[e.node] {
+			if nd := e.dist + ed.cost; nd < dist[ed.to] {
+				dist[ed.to] = nd
+				heap.Push(h, entry{nd, ed.to}) // queue it again instead of updating the old entry
+			}
+		}
+	}
+	return dist
+}
+```
+
+Say O(E log E). Unreachable nodes keep `math.MaxInt`, which is never added to.
+
+**There is no decrease-key by value, only by index.** `heap.Fix(h, i)` repairs the order after you change the element at index `i`, in O(log n). The catch is knowing `i`, since `Swap` keeps moving elements: each item must carry its index, and `Swap` and `Push` must update it.
+
+```go
+type item struct {
+	node, dist int
+	index      int // where the item sits in the heap right now
+}
+
+type itemHeap []*item
+
+func (h itemHeap) Len() int           { return len(h) }
+func (h itemHeap) Less(i, j int) bool { return h[i].dist < h[j].dist }
+func (h itemHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index, h[j].index = i, j // keep every index current
+}
+func (h *itemHeap) Push(x any) {
+	it := x.(*item)
+	it.index = len(*h)
+	*h = append(*h, it)
+}
+func (h *itemHeap) Pop() any {
+	old := *h
+	it := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return it
+}
+```
+
+```go
+byNode := map[int]*item{}
+for node, d := range []int{9, 4, 7} {
+	byNode[node] = &item{node: node, dist: d}
+	heap.Push(h, byNode[node])
+}
+byNode[0].dist = 1           // decrease-key: change the priority...
+heap.Fix(h, byNode[0].index) // ...then repair the heap from that index, O(log n)
+first := heap.Pop(h).(*item) // node 0, distance 1
+```
+
+In a round, mention `heap.Fix` and write lazy deletion.
+
+### Standard-library tools that save time
+
+| Tool | What it saves |
+| --- | --- |
+| `slices.Contains`, `slices.Index`, `slices.Max`, `slices.Min` | Linear scans in one call; `Max` and `Min` panic on an empty slice |
+| `slices.Clone`, `slices.Equal`, `slices.Reverse` | Copying an input, comparing (`==` on slices does not compile), reversing in place |
+| `slices.BinarySearch(a, x)` | Returns the insertion index and whether `x` was found |
+| `slices.Sorted(maps.Keys(m))`, `slices.Collect(maps.Values(m))` | A map's keys in order, or its values as a slice (Go 1.23 and later) |
+| `maps.Clone(m)`, `clear(m)` | Copying or emptying a map |
+| `sort.Search(n, f)` | The smallest index where `f` turns true: binary search on the answer |
+| `bits.OnesCount(uint(x))`, `strconv.FormatInt(x, 2)` | Counting bits, and a binary string |
+| `fmt.Printf("%+v", x)` | Printing structs with field names; maps print with sorted keys |
+
+### Mistakes when coming from the other languages
+
+**From TypeScript.** `for x := range nums` gives indices: write `for _, x := range nums`. A missing key gives `0`, not `undefined`. `7 / 2` is `3`. There is no ternary and no `while`. Assigning a struct or array copies it. Map order is random, not insertion order.
+
+**From C#.** Errors are returned, not thrown. A missing key does not throw. `m[k].x = 5` does not compile when the map holds structs: read, change and store back. `pts[0].x = 5` works on a slice, but `range` hands you a copy. Use `int32` when a problem insists on 32-bit behaviour.
+
+**From Java.** `==` on strings compares the text. There is no boxing and no `null` from `map[string]int`. One built-in, `len`, measures strings, slices and maps. A slice is your stack and queue. `slices.SortFunc` is not stable where `Collections.sort` is.
+
+**From Kotlin.** `0 until n` is `range n`. There is no `?:` and no null `int`: the zero value and comma-ok take their place. Nothing is read-only: a callee can change a slice you pass. Struct assignment copies, so there is no `copy()` to call.
+
+**From Python.** `a[-1]` fails to compile with a constant and panics with a variable. Slicing shares the array instead of copying it. `/` truncates toward zero and `%` keeps the sign of the left operand. There is no `in`: use a map or `slices.Contains`. `len(s)` counts bytes.
+
+### Writing and running a quick test
+
+The bank's tests are table-driven. Here is problem 002's with a name added to each row, so `t.Run` reports each as a subtest, plus a check for the `findCopy` error:
+
+```go
+func TestTwoPrices(t *testing.T) {
+	cases := []struct {
+		name   string
+		prices []int
+		budget int
+		want   []int
+	}{
+		{"earliest second index", []int{12, 7, 3, 9, 5}, 12, []int{2, 3}},
+		{"same price, two items", []int{4, 4, 1}, 8, []int{0, 1}},
+		{"no pair", []int{1, 2}, 10, []int{}},
+		{"empty", []int{}, 5, []int{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := TwoPrices(c.prices, c.budget)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("TwoPrices(%v, %d) = %v, want %v", c.prices, c.budget, got, c.want)
+			}
+		})
+	}
+}
+
+func TestFindCopy(t *testing.T) {
+	if _, err := findCopy(2); !errors.Is(err, ErrNotFound) {
+		t.Errorf("findCopy(2) error = %v, want ErrNotFound", err)
+	}
+}
+```
+
+The file is `p002_two_prices_test.go` in `package p002`, importing `errors`, `slices` and `testing`. From `apps/interview-bank/go`, `go test ./p002/` prints `ok` or each failure, such as:
+
+```text
+--- FAIL: TestTwoPrices (0.00s)
+    --- FAIL: TestTwoPrices/same_price,_two_items (0.00s)
+        p002_two_prices_test.go:25: TwoPrices([4 4 1], 8) = [1 0], want [0 1]
+```
+
+`t.Errorf` records the failure and carries on, so every bad row shows in one run; `t.Fatalf` stops the test. Spaces in subtest names become underscores, and `go test -run 'TestTwoPrices/no_pair' -v ./p002/` runs one row. `slices.Equal` treats nil and empty slices as equal; `reflect.DeepEqual` does not, so a function returning `nil` would fail a `want` of `[]int{}`. Add `-race` when the code starts goroutines. If the editor runs only `package main`, loop over the same table in `main`; if it runs nothing, trace each row by hand, as in step 5.
+
+## Python
+
+Python is the language in which interview code is shortest, which is why the print edition shows every bank solution in it. The standard library has almost everything a round needs: a heap, a deque, a counter, binary search, memoisation and integers that never overflow. The danger is that Python's mistakes are silent. A grid built with `*` shares one row, a default argument keeps its value between calls, `-7 // 2` is `-4`, and `if i:` treats a found index of `0` as missing. Each runs without an error and gives a wrong answer.
+
+Everything here runs on Python 3.12 with `python3 file.py`, standard library only, the way the files in `apps/interview-bank` do. The type hints follow the bank's style (`list[int]`, `int | None`); Python does not check them at run time. Chapter 8 covers the language; this section covers only what you type in the round.
+
+### Syntax by heart
+
+These are the structures the problem bank uses, with the costs you will name in step 6.
+
+| Structure | Write it as | Operations to know |
+| --- | --- | --- |
+| List | `a: list[int] = []` | `append`, `pop()`, `a[i]`, `a[-1]`, `len(a)`: O(1), `append` amortized. `pop(0)`, `insert(0, x)`, `x in a`, `index`, `remove(x)`: O(n). A slice `a[i:j]` is a copy: O(j − i) |
+| Dict | `d: dict[str, int] = {}` | `d[k]` (raises `KeyError` if missing), `d.get(k)`, `d.get(k, 0)`, `setdefault`, `k in d`, `del d[k]`, `len(d)`: O(1) average. Keeps insertion order, guaranteed since 3.7 |
+| Set | `s: set[int] = set()` | `add`, `x in s`, `discard`, `remove`: O(1) average. `{}` is an empty dict, not a set |
+| Stack | a list | `append`, `pop()`, `a[-1]` to peek |
+| Queue | `deque()` from `collections` | `append` at the back, `popleft` at the front: O(1) |
+| Deque | `deque()` | `append`, `appendleft`, `pop`, `popleft`: O(1). `d[i]` is O(1) at the ends and O(n) toward the middle |
+| Heap | a plain list plus `heapq` | `heappush`, `heappop`: O(log n). `h[0]` peeks in O(1). `heapify` is O(n). Smallest first |
+| Grid | `[[0] * cols for _ in range(rows)]` | `g[r][c]`; `len(g)` rows, `len(g[0])` columns |
+| Pair | a tuple, `(r, c)` | Unpack with `r, c = cell`. Hashable and equal by value, so it works as a key, and it sorts element by element |
+
+The everyday moves:
+
+```python
+from collections import Counter, defaultdict, deque
+
+copies: list[int] = [4, 9, 2]
+top = copies[-1]                     # 2, without removing it; negative indices count from the end
+last = copies.pop()                  # 2; pop() on an empty list raises IndexError
+first_two = copies[:2]               # [4, 9], a new list: slices copy
+backwards = copies[::-1]             # [9, 4], a reversed copy
+
+loans_per_member: dict[str, int] = {}
+loans_per_member["ana"] = loans_per_member.get("ana", 0) + 1   # count with a default
+
+by_author: dict[str, list[str]] = {}
+by_author.setdefault("Le Guin", []).append("Earthsea")         # group without an if
+grouped: defaultdict[str, list[str]] = defaultdict(list)
+grouped["Herbert"].append("Dune")    # a missing key is created as list() on first use
+
+seen = {3, 1, 3}                     # {1, 3}
+seen.add(7)
+
+visited = {(0, 1)}                   # a tuple hashes by value
+found = (0, 1) in visited            # True
+
+queue = deque([1, 2])
+queue.append(3)                      # in at the back
+front = queue.popleft()              # 1, in O(1); list.pop(0) moves every other element
+queue.appendleft(0)                  # deque([0, 2, 3])
+recent = deque(maxlen=3)             # keeps the last three: appending a fourth drops the oldest
+
+grid = [[0] * 4 for _ in range(3)]   # 3 rows of 4 zeros; grid[r][c]
+```
+
+`setdefault` evaluates its default on every call, even when the key exists, so keep it cheap. `defaultdict` calls its factory only for a missing key, but even reading one inserts it, so test membership with `in`. For counting, `Counter` is shorter than either:
+
+```python
+votes = Counter(["dune", "emma", "dune", "ulysses", "emma"])
+dune = votes["dune"]                 # 2
+zoe = votes["zoe"]                   # 0, and nothing is inserted
+top_two = votes.most_common(2)       # [('dune', 2), ('emma', 2)]: ties in first-seen order
+same = Counter("listen") == Counter("silent")   # True: the one-line anagram check
+```
+
+`most_common` orders equal counts by when each element was first seen, which is often the tie-break a problem asks for; say so when you rely on it. A key must be hashable, and a list is not: `{[0, 1]}` raises `TypeError: unhashable type: 'list'`. Convert with `tuple(cells)`, or `frozenset(s)` for a set.
+
+<FromTS title="Composite keys without strings">
+In TypeScript a grid cell becomes `"r,c"` before it goes in a `Set`. In Python, tuples hash and compare by value, so `visited = {(r, c)}` just works, and `==` compares lists and dicts by content: `[[1, 2]] == [[1, 2]]` is `True`.
+</FromTS>
+
+Breadth-first search uses a `deque`. `set.add` returns `None`, so checking and inserting take two lines:
+
+```python
+def bfs_order(graph: dict[int, list[int]], start: int) -> list[int]:
+    order: list[int] = []
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        node = queue.popleft()
+        order.append(node)
+        for nxt in graph.get(node, []):
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append(nxt)
+    return order
+```
+
+The loop variable is `nxt` because `next` is a built-in function.
+
+<Pitfall title="One row, shared by the whole grid">
+`[[0] * 4] * 3` holds the same inner list three times, so `grid[0][0] = 1` changes the first cell of every row. `*` copies references; the inner `[0] * 4` is safe only because integers are immutable. Build rows in a comprehension, and copy a grid with `[row[:] for row in grid]`.
+</Pitfall>
+
+### Strings and characters
+
+There is no `char` type: `s[i]` is a string of length one. Strings are immutable, and `len(s)` counts code points, not UTF-16 units or bytes.
+
+```python
+s = "Shelfwise"
+first = s[0]                         # 'S'
+last_ch = s[-1]                      # 'e'
+part = s[1:4]                        # 'hel', end index excluded
+pos = ord(s[1]) - ord("a")           # 7: the letter's position in the alphabet
+letter = chr(ord("a") + 7)           # 'h'
+digit = int("7")                     # 7; ord("7") - ord("0") also works
+words = "  two   words ".split()     # ['two', 'words']: any run of whitespace
+fields = "a,b,,".split(",")          # ['a', 'b', '', '']: empty fields kept
+padded = "7".zfill(3)                # '007'
+reversed_s = "stressed"[::-1]        # 'desserts'
+joined = ", ".join(map(str, [1, 2, 3]))   # '1, 2, 3'; join takes strings only
+sorted_key = "".join(sorted("listen"))    # 'eilnst'
+```
+
+`split()` with no argument splits on runs of whitespace and drops empty strings at both ends; `split(" ")` splits on each single space, so the same input gives `['', '', 'two', '', '', 'words', '']`. `s[0] = "x"` raises `TypeError`. To build a string, append pieces to a list and `"".join` them at the end: repeated `+=` can cost quadratic time, and CPython's optimization of it is not guaranteed.
+
+For letter counts, `counts = [0] * 26` with `counts[ord(ch) - ord("a")] += 1` is the standard move, and two count lists compare with `==`. `<` compares strings by code point, so `"B" < "a"`, and `sorted` gives the ordinal order most problems mean.
+
+The `str.is...` methods follow Unicode, not ASCII. `"é".isalpha()` is `True`, and so are `"٣".isdigit()` (an Arabic-Indic three) and `"²".isdigit()`, although `int("²")` raises `ValueError`. `isalnum`, `isspace` and the rest are just as broad. When the problem means ASCII, write `"0" <= ch <= "9"` or `ch.isascii() and ch.isalnum()`.
+
+### Sorting with a comparator
+
+`list.sort()` sorts in place and returns `None`; `sorted(x)` takes any iterable and returns a new list. Instead of a comparator, both take a `key` function that maps each element to the value to sort by:
+
+```python
+from dataclasses import dataclass
+from functools import cmp_to_key
+
+
+@dataclass
+class Loan:
+    member: str
+    due: int
+
+
+nums = [10, 9, 1]
+nums.sort()                                   # [1, 9, 10], in place
+desc = sorted(nums, reverse=True)             # [10, 9, 1], a new list
+words = sorted(["b", "a", "B", "A"])          # ['A', 'B', 'a', 'b']: by code point
+by_length = sorted(["ccc", "a", "bb"], key=len)   # ['a', 'bb', 'ccc']
+
+loans = [Loan("cy", 3), Loan("ana", 7), Loan("bo", 3)]
+loans.sort(key=lambda loan: loan.due)                            # stable: cy stays before bo
+ordered = sorted(loans, key=lambda loan: (loan.due, loan.member))      # bo, cy, ana
+latest_first = sorted(loans, key=lambda loan: (-loan.due, loan.member))  # ana, bo, cy
+```
+
+A tuple key sorts by its first element, then the second. Negating a number reverses one key, but a string cannot be negated; for "due ascending, member descending", sort by the secondary key first, then by the primary one, and let stability do the rest.
+
+```python
+by_member_desc = sorted(loans, key=lambda loan: loan.member, reverse=True)
+by_member_desc.sort(key=lambda loan: loan.due)    # cy, bo, ana: ties keep the earlier order
+```
+
+The sort is guaranteed stable, even with `reverse=True`. When the order really comes from comparing two elements, as in "arrange numbers to form the largest number", wrap a comparator in `functools.cmp_to_key`:
+
+```python
+def largest_number(nums: list[int]) -> str:
+    def compare(a: str, b: str) -> int:
+        if a + b > b + a:
+            return -1                        # a goes first
+        if a + b < b + a:
+            return 1
+        return 0
+
+    digits = sorted(map(str, nums), key=cmp_to_key(compare))
+    return "".join(digits).lstrip("0") or "0"
+
+
+assert largest_number([3, 30, 34, 5, 9]) == "9534330"
+assert largest_number([0, 0]) == "0"
+```
+
+<Pitfall title="A sort that returns None">
+`nums = nums.sort()` sorts the list, then replaces it with `None`; the error appears lines later as `'NoneType' object is not subscriptable`. `sorted(nums)` alone on a line builds a sorted copy and throws it away. Write `nums.sort()` or `nums = sorted(nums)`.
+</Pitfall>
+
+### Iteration
+
+```python
+titles = ["Dune", "Emma", "Ulysses"]
+stock = {"Dune": 2, "Emma": 0}
+
+for i in range(len(titles)): ...               # indices 0 to 2
+for t in titles: ...                           # values
+for i, t in enumerate(titles): ...             # index and value; enumerate(titles, 1) starts at 1
+for i in range(len(titles) - 1, -1, -1): ...   # backwards: 2, 1, 0
+for t in reversed(titles): ...                 # values backwards, without a copy
+for title, count in stock.items(): ...         # a dict, in insertion order
+for t, n in zip(titles, [2, 0, 5]): ...        # two lists in step; stops at the shorter
+for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)): ...   # the four neighbours of a cell
+for i in range(0, 10, 3): ...                  # 0, 3, 6, 9
+```
+
+`range` stops before its end, so counting down to index 0 needs a stop of `-1`. `zip(a, b, strict=True)` raises `ValueError` when the lengths differ instead of dropping the tail. A few `itertools` functions replace index arithmetic:
+
+```python
+from itertools import chain, groupby, islice, pairwise
+
+steps = list(pairwise([1, 4, 9]))              # [(1, 4), (4, 9)]: neighbours
+both = list(chain([1, 2], [3]))                # [1, 2, 3]
+head = list(islice(range(100), 3))             # [0, 1, 2]: the first three of any iterator
+runs = [(k, len(list(g))) for k, g in groupby("aaabcc")]   # [('a', 3), ('b', 1), ('c', 2)]
+```
+
+`groupby` groups consecutive equal elements only, so sort first. There are no labelled breaks: put nested loops in a function and `return`. Adding a key to a dict inside its own loop raises `RuntimeError`; removing from a list inside its own loop silently skips elements (removing every even value from `[2, 4, 6]` that way leaves `[4]`). Loop over a copy, `list(d)` or `a[:]`, or build a new list.
+
+### Numbers
+
+`int` has no fixed size, so `50_000 * 50_000` is `2500000000`, `2 ** 100` is exact and `(lo + hi) // 2` is a safe midpoint. The overflow bugs of the other five languages do not exist. Division is where Python differs:
+
+| You want | Write | Note |
+| --- | --- | --- |
+| Integer division rounding down | `a // b` | `-7 // 2` is `-4`. C#, Java, Kotlin and Go truncate their integer `/` toward zero and give `-3`, as TypeScript's `Math.trunc(-7 / 2)` does |
+| Remainder | `a % b` | Takes the sign of `b`: `-7 % 3` is `2`, `7 % -3` is `-2`. The other five give `-1` for `-7 % 3` |
+| Both at once | `divmod(a, b)` | `divmod(-7, 2)` is `(-4, 1)`, always with `a == q * b + r` |
+| Ceiling division | `-(-a // b)` | `-(-7 // 2)` is `4`, with no float involved |
+| A real quotient | `a / b` | Always a `float`: `6 / 3` is `2.0` |
+| Sentinels | `math.inf`, `-math.inf` | Compare with any `int`; `int(math.inf)` raises `OverflowError` |
+| Rounding | `round(x)` | Rounds halves to even: `round(2.5)` is `2`. `int(-2.7)` truncates to `-2` |
+| Bits | `1 << k`, `x >> 1`, `x & 1`, `x ^ y`, `x.bit_count()` | Negative numbers act as infinite two's complement: `~5` is `-6`; mask with `& 0xFFFFFFFF` for 32-bit answers |
+
+Python's `%` is the always-positive modulo the other sections had to build, so `(i + k) % n` is safe for a negative `k` here and only here. When a problem wants truncating division, as expression evaluators do, write `q = abs(a) // abs(b)` and negate `q` if exactly one operand is negative. `int(a / b)` also truncates, but through a `float`, which holds integers exactly only up to 2⁵³. Floats are IEEE doubles, as everywhere: `0.1 + 0.2 == 0.3` is `False`, so compare with `math.isclose`.
+
+`int(" 42 ")` is `42`, `int("12a")` raises `ValueError`, and `int("ff", 16)` is `255`. `int` also accepts underscores and non-ASCII digits (`int("1_000")`, `int("٣")`), so when a problem defines a valid number, as 038 does, parse by hand. Since Python 3.11, converting between `int` and `str` in base 10 raises `ValueError` past 4,300 digits: `str(10 ** 4300)` fails, and so does printing `math.factorial(2000)`. `sys.set_int_max_str_digits(0)` removes the limit.
+
+### Errors
+
+Raise `Exception` or a subclass. A custom exception takes two lines, and `ValueError` is the standard type for a bad argument:
+
+```python
+class NotFoundError(Exception):
+    pass
+
+
+shelf = {1: "Dune, copy 1"}
+
+
+def find_copy(copy_id: int) -> str:
+    copy = shelf.get(copy_id)
+    if copy is None:
+        raise NotFoundError(f"copy {copy_id} not found")
+    return copy
+
+
+def find_copy_or_none(copy_id: int) -> str | None:
+    try:
+        return find_copy(copy_id)
+    except NotFoundError:
+        return None          # anything else keeps propagating
+
+
+def loan_days(days: int) -> int:
+    if not 1 <= days <= 30:
+        raise ValueError(f"days must be 1 to 30, was {days}")
+    return days
+```
+
+Never write a bare `except:`; it also catches `KeyboardInterrupt`. Inside `except`, a bare `raise` re-raises with the original traceback, and `raise NotFoundError(...) from e` chains the cause. Python style leans toward EAFP, "easier to ask forgiveness than permission": try the operation and catch the failure, as `find_copy_or_none` does. LBYL, "look before you leap", tests first: `if k in d`. For a dict, `d.get(k)` is shorter than either.
+
+Know what the library raises: `IndexError` for a bad list index, `pop` on an empty list, `heappop` on an empty heap and `popleft` on an empty deque; `KeyError` for `d[k]` and `set.remove`; `ValueError` for `list.index` or `list.remove` of a missing value, a bad `int(...)` and `max([])`, which `max(a, default=0)` avoids.
+
+In the bank, a function returns an empty value (`[]`, `-1`, `None`) when there is no answer, unless the problem says to raise. Declare it, `-> int | None`, and test it with `is None`: in problem 002, `if i:` would treat a match at index 0 as no match.
+
+### Concurrency basics
+
+In standard CPython the GIL lets one thread run Python bytecode at a time (Chapter 8). Threads still help with I/O, because waiting releases the lock, but CPU-bound Python code gets no faster with more threads. Python 3.13 added an optional free-threaded build without the GIL; it is a separate build, not the default, so assume the standard one. The GIL does not make your code thread-safe either: `total += 1` is a read, an add and a write, and another thread can run in between, so shared state still needs a `threading.Lock`.
+
+`asyncio` is the closest thing to Node: one event loop, with tasks taking turns at every `await`. `gather` runs awaitables concurrently and returns their results in the order you passed them:
+
+```python
+import asyncio
+
+
+async def load_book(book_id: int) -> str:
+    await asyncio.sleep(0.1)                  # stands in for a network call
+    return f"book {book_id}"
+
+
+async def main() -> None:
+    titles = await asyncio.gather(*(load_book(i) for i in [7, 3, 9]))
+    print(titles)                             # ['book 7', 'book 3', 'book 9'], in about 0.1 s
+
+
+asyncio.run(main())
+```
+
+With `return_exceptions=True`, `gather` returns failures as values in their slots, like `Promise.allSettled`. The `mapLimit` from the TypeScript section becomes a semaphore that admits `limit` coroutines at a time:
+
+```python
+from collections.abc import Awaitable, Callable
+
+
+async def map_limit[T, R](items: list[T], limit: int, fn: Callable[[T], Awaitable[R]]) -> list[R]:
+    gate = asyncio.Semaphore(limit)
+
+    async def run(item: T) -> R:
+        async with gate:                      # at most `limit` coroutines get past here
+            return await fn(item)
+
+    return await asyncio.gather(*(run(item) for item in items))
+```
+
+`[T, R]` after the name is the type-parameter syntax added in 3.12, and `gather` keeps the results in input order. For blocking calls, use a thread pool, whose size is the limit:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
+
+def map_limit_threads[T, R](items: list[T], limit: int, fn: Callable[[T], R]) -> list[R]:
+    with ThreadPoolExecutor(max_workers=limit) as pool:
+        return list(pool.map(fn, items))      # input order; a task's exception is raised here
+
+
+total = 0
+lock = threading.Lock()
+
+
+def add_many() -> None:
+    global total
+    for _ in range(100_000):
+        with lock:                            # without it, updates can be lost
+            total += 1
+
+
+with ThreadPoolExecutor(max_workers=8) as pool:
+    for _ in range(8):
+        pool.submit(add_many)
+# leaving the with block waits for every task: total is 800000
+```
+
+`pool.map` yields results in input order whatever order they finish in, and re-raises a task's exception when its result is read.
+
+<InterviewLens>
+"Would more threads make this CPU-bound loop faster?" Not in standard CPython: the GIL runs one thread's bytecode at a time. Name the alternatives: `ProcessPoolExecutor`, with the same `map` and `submit` but picklable functions and arguments, native code such as NumPy, or the free-threaded build. Then say where threads and `asyncio` do help: calls that wait on the network or the disk.
+</InterviewLens>
+
+### The heap
+
+`heapq` is a set of functions that keep a plain list in min-heap order. There is no heap class, no max-heap and no comparator:
+
+```python
+import heapq
+
+heap: list[int] = []
+for x in [14, 3, 7]:
+    heapq.heappush(heap, x)
+smallest = heap[0]                     # 3, without removing it
+popped = heapq.heappop(heap)           # 3; IndexError on an empty heap
+
+nums = [5, 1, 8, 3]
+heapq.heapify(nums)                    # in place, O(n)
+
+max_heap = [-x for x in [5, 1, 8]]     # negate for a max-heap
+heapq.heapify(max_heap)
+largest = -max_heap[0]                 # 8
+
+by_due: list[tuple[int, int, str]] = []
+for seq, (due, title) in enumerate([(14, "Dune"), (3, "Emma"), (3, "Ulysses")]):
+    heapq.heappush(by_due, (due, seq, title))   # (priority, tie-break, item)
+while by_due:
+    due, _, title = heapq.heappop(by_due)
+    print(due, title)                  # 3 Emma, then 3 Ulysses, then 14 Dune
+```
+
+Tuples compare element by element, so a heap of `(priority, item)` compares the items whenever two priorities tie. For numbers or strings that is a harmless extra key; for dicts it raises `TypeError: '<' not supported between instances of 'dict' and 'dict'`. A sequence number in the middle prevents that and makes ties come out first in, first out. The list is in heap order, not sorted order: after `heapify`, `nums` is `[1, 3, 8, 5]`.
+
+For "the k largest", keep a min-heap of size k. `heappushpop(heap, x)` pushes and then pops in one step, cheaper than the two calls; `heapreplace` pops first and then pushes, so it can return an element larger than `x`, and it raises `IndexError` on an empty heap.
+
+```python
+def kth_largest(nums: list[int], k: int) -> int:
+    heap = nums[:k]
+    heapq.heapify(heap)                # a min-heap of the k largest so far
+    for x in nums[k:]:
+        heapq.heappushpop(heap, x)     # add x, then drop the smallest
+    return heap[0]
+```
+
+For a one-off answer, `heapq.nlargest(k, nums)` and `nsmallest` do the same, and take a `key`.
+
+**There is no decrease-key.** For Dijkstra's algorithm, use lazy deletion as in the C# section: push the node again with the new distance, and skip stale entries.
+
+```python
+import math
+
+
+def shortest_from(graph: list[list[tuple[int, int]]], source: int) -> list[float]:
+    dist = [math.inf] * len(graph)     # graph[u] holds (to, cost) pairs
+    dist[source] = 0
+    heap = [(0, source)]               # (distance, node)
+    while heap:
+        d, node = heapq.heappop(heap)
+        if d > dist[node]:
+            continue                   # stale: a shorter path was found after this was queued
+        for nxt, cost in graph[node]:
+            if d + cost < dist[nxt]:
+                dist[nxt] = d + cost
+                heapq.heappush(heap, (d + cost, nxt))   # queue it again instead of updating
+    return dist
+```
+
+Say O(E log E), since the heap can hold one entry per edge. Unreachable nodes keep `math.inf`.
+
+### Standard-library tools that save time
+
+| Tool | What it saves |
+| --- | --- |
+| `bisect_left(a, x)`, `bisect_right`, `insort` | Binary search on a sorted list, returning the insertion point; `key=` since 3.10 |
+| `accumulate(a, initial=0)` from `itertools` | A prefix-sum sequence of length n + 1 |
+| `combinations(a, k)`, `permutations(a)`, `product(a, repeat=k)` | Brute-force enumeration, as tuples |
+| `@functools.cache`, `@lru_cache(maxsize=None)` | Memoised recursion for top-down DP; arguments must be hashable |
+| `math.gcd`, `math.lcm`, `math.isqrt`, `math.comb`, `math.prod` | Number theory and counting without overflow or floats |
+| `Counter`, `defaultdict`, `deque`, `OrderedDict.move_to_end` | Counting, grouping, queues, and an LRU cache in a few lines |
+| `sum`, `min`, `max(a, key=f, default=0)`, `any`, `all` | Folds in one call, with no import |
+| `list(dict.fromkeys(a))`, `sorted(set(a))` | Removing duplicates in first-seen or sorted order |
+| `bin(x)`, `int("1101", 2)`, `x.bit_count()` | Binary strings and counting bits |
+
+`@cache` turns a recursive definition into a DP solution, with two catches. The recursion limit is 1,000 frames by default. `sys.setrecursionlimit(10 ** 6)` lets plain recursion go deeper, but a function wrapped in `@cache` passes through C code at every level and, on Python 3.12, can still crash on a separate, lower limit of the C stack that depends on the platform and version. For deep inputs, write the bottom-up loop. And a module-level cache keeps its entries between test cases, which is wrong once the function reads anything besides its arguments; define the cached helper inside the solution function, so it starts empty on every call.
+
+### Mistakes when coming from the other languages
+
+Each of these runs and gives a wrong answer, or fails far from its cause.
+
+<Pitfall title="A default list shared by every call">
+`def visit(node, seen=[])` creates the list once, when the function is defined, and every call that omits `seen` shares it, so the second test sees the first test's nodes. Default to `None` and create the list inside: `if seen is None: seen = []`.
+</Pitfall>
+
+**From every language.** Built-in names are not reserved: after `max = 0`, the call `max(a, b)` raises `TypeError: 'int' object is not callable`. The usual victims are `max`, `min`, `sum`, `list`, `dict`, `str`, `id` and `next`. In a nested function, assigning to an outer variable (`count += 1` in a DFS helper) raises `UnboundLocalError` unless you declare it `nonlocal`. And recursion stops at 1,000 frames, which a depth-first search on a path of 10⁴ nodes reaches; use an explicit stack.
+
+**From TypeScript.** Empty containers are falsy: `[]`, `set()`, `""` and an empty dict, along with `0` and `None`. In JavaScript `[]` is truthy, so `if (items)` and `if items:` mean different things. `a[len(a)]` raises `IndexError` and `d[k]` raises `KeyError` instead of returning `undefined`. `x in a` checks values, not indices. There is no `++`: `i++` is a syntax error, and `++i` is two unary pluses that change nothing. The ternary is `a if cond else b`.
+
+**From C#, Java and Kotlin.** `7 / 2` is `3.5`; integer division is `//`, and it rounds down, so `-7 // 2` is `-4`. `is` checks identity: it looks right in small tests because CPython caches small integers, as Java caches boxed ones, but `1000 is int("1000")` is `False`. Use `==` for values and `is` only for `None`. Closures capture variables, not values: `[lambda: i for i in range(3)]` gives three functions that all return `2`. `list.sort()` returns `None`, where Kotlin's `sorted()` returns a list.
+
+**From Go.** A missing key raises instead of giving a zero value; use `d.get(k, 0)` or `defaultdict(int)`. Assignment never copies: `b = a` shares the list, as a slice shares its array, and there is no array type that copies; write `a[:]`, or `[row[:] for row in grid]` for a grid. Multiple return values feel familiar: `q, r = divmod(a, b)` returns and unpacks a tuple, and `for i, x in enumerate(a)` is `for i, x := range a`.
+
+### Writing and running a quick test
+
+Every Python file in the bank ends with its checks under `if __name__ == "__main__":`, which runs them when the file is executed, not when it is imported. For 002, plus a check that `find_copy` raises:
+
+```python
+if __name__ == "__main__":
+    assert two_prices([12, 7, 3, 9, 5], 12) == [2, 3]
+    assert two_prices([4, 4, 1], 8) == [0, 1]
+    assert two_prices([1, 2], 10) == []
+    try:
+        find_copy(2)
+    except NotFoundError:
+        pass
+    else:
+        raise AssertionError("expected NotFoundError")
+    print("002 ok")
+```
+
+`python3 p002_two_prices.py` runs the file. A failing `assert` raises `AssertionError`, and the traceback gives the line. No helper is needed, because `==` compares lists, dicts and tuples by content. Two warnings. `python3 -O` removes every `assert`, so a failing check passes in silence, as Java's `assert` does without `-ea`; the bank never runs with `-O`. And `assert (got == want, "message")` asserts a non-empty tuple, which is always true: Python prints a `SyntaxWarning`, but the check never fails. Write the message after a comma, without parentheses.
+
+To see which case failed, loop over a table with a message:
+
+```python
+cases = [
+    ([12, 7, 3, 9, 5], 12, [2, 3]),
+    ([4, 4, 1], 8, [0, 1]),
+    ([1, 2], 10, []),
+    ([], 5, []),
+]
+for prices, budget, want in cases:
+    got = two_prices(prices, budget)
+    assert got == want, f"two_prices({prices}, {budget}) = {got}, want {want}"
+```
+
+A wrong answer now prints, for example, `AssertionError: two_prices([1, 2], 10) = [0, 0], want []`. It is the shape the other sections use, with less ceremony. A real project would use pytest, where a plain `assert` in a `test_` function reports both values and `@pytest.mark.parametrize` turns the table into one test per row (Chapters 8 and 17); `unittest` is the built-in alternative. In the round, the file and its asserts are enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
+
+## The backend round
+
+Many backend loops include a practical round, instead of an algorithm problem or alongside one. It usually takes one of three forms: build a small endpoint, write a query against a schema you are given, or review a pull request with planted problems. Some rounds combine them and end with "what would you change before this goes to production?" Ask the recruiter which to expect, whether there is a starter project, and whether the code will run against a real database.
+
+The six steps still apply. What changes is what each one is about:
+
+| Step | In an algorithm round | In the backend round |
+| --- | --- | --- |
+| 1. Restate | Inputs, outputs, types | The operation as a contract: method, path, body, success response |
+| 2. Ask about edge cases | Empty input, duplicates, limits | Errors: which failures exist, which status code each one gets, what the error body looks like |
+| 3. Simple solution first | The brute force | The happy path end to end, with a fake store, before any hardening |
+| 4. Improve | A better data structure | Harden: validation, every error case, concurrency, the constraint in the database |
+| 5. Trace | Run an example by hand | Walk one request through each branch, or list the tests that would |
+| 6. State the complexity | Time and space | Queries per request, which index each one uses, what happens when two requests race |
+
+Step 2 is the easiest to skip and the one that matters most here: "What should happen if the copy is already on loan?" shows that you think about the contract, not only the code. Step 3 protects you as before: a working endpoint with two error cases missing beats a perfect validation layer and no endpoint.
+
+### A small endpoint
+
+Here is a task as an interviewer might phrase it, using Shelfwise from Chapter 18:
+
+> Members borrow copies of books. Add `POST /loans`, which lends a copy to a member. A copy can only be on loan to one member at a time, and a member can have at most five open loans. Loans are due in 21 days.
+
+**Restate and ask.** "So the client sends a copy id and a member id, and I create a loan and return it with 201." Then the questions, each of which settles a branch of the code:
+
+- *Is there an error format already?* In Shelfwise, yes: Problem Details (Chapter 12), with a `type` URL ending in a stable code such as `copy-on-loan`.
+- *400 or 422 for a bad body?* Shelfwise uses 400 `invalid-body` when the body is not JSON at all, and 422 `validation`, with an `errors` member listing each field, when it is JSON with wrong values (Chapter 13).
+- *If both the copy and the member are missing, which error?* Either 404 will do; check the copy first.
+- *Authentication?* Out of scope for this round, which is normal. Say where it would go (Chapters 19 and 21) and move on.
+
+**Write the contract down.** Just as you wrote examples at the top of the editor in the algorithm round, write the responses. This list is your plan, your checklist and, later, your test cases:
+
+```text
+POST /loans  {"copyId": 1, "memberId": 10}
+201                 Location: /loans/{id}, body: the loan
+400 invalid-body    the body is not JSON
+422 validation      copyId or memberId missing, not an integer, or below 1
+404 not-found       no such copy, or no such member
+409 loan-limit      the member already has 5 open loans
+409 copy-on-loan    the copy already has an open loan
+```
+
+**Simple first, behind an interface.** Put storage behind four operations, so the handler needs no database and a fake can test it. The fourth is the important one. In Postgres, `insertLoan` is a plain `INSERT`: if the copy is already out, the partial unique index rejects it, and the store reports that as "no loan" (Chapter 18 showed that translation in every stack). The handler never checks whether the copy is free. The database decides, which also covers two librarians lending the same copy in the same second.
+
+Each tab assumes a `Loan` type that matches the contract. In a real codebase the rules would live in a service, as in Shelfwise; in an interview, keeping them in the handler is fine if you say so.
+
+<FiveStacks title="Six Languages" note="POST /loans: validation, two 404s, two 409s, Problem Details">
+<Stack id="ts" lib="Express 5">
+```ts
+import express, { type ErrorRequestHandler, type Response } from "express";
+import type { Loan } from "./types.ts";
+
+const LOAN_DAYS = 21;
+const MAX_LOANS = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface LoanStore {
+  copyExists(copyId: number): Promise<boolean>;
+  memberExists(memberId: number): Promise<boolean>;
+  countOpenLoans(memberId: number): Promise<number>;
+  insertLoan(copyId: number, memberId: number, dueAt: Date): Promise<Loan | null>; // null: on loan
+}
+
+function problem(res: Response, status: number, code: string, title: string, detail: string, extra = {}) {
+  res
+    .status(status)
+    .type("application/problem+json")
+    .json({ type: `https://shelfwise.dev/problems/${code}`, title, status, detail, ...extra });
+}
+
+const isId = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 1;
+
+export function loansApp(store: LoanStore) {
+  const app = express();
+  app.use(express.json());
+
+  app.post("/loans", async (req, res) => {
+    const { copyId, memberId } = req.body ?? {};
+    const errors: Record<string, string[]> = {};
+    if (!isId(copyId)) errors.copyId = ["must be a positive integer"];
+    if (!isId(memberId)) errors.memberId = ["must be a positive integer"];
+    if (Object.keys(errors).length > 0) {
+      return problem(res, 422, "validation", "Request is invalid", "One or more fields are invalid.", { errors });
+    }
+
+    if (!(await store.copyExists(copyId))) {
+      return problem(res, 404, "not-found", "Resource not found", `Copy ${copyId} does not exist.`);
+    }
+    if (!(await store.memberExists(memberId))) {
+      return problem(res, 404, "not-found", "Resource not found", `Member ${memberId} does not exist.`);
+    }
+    if ((await store.countOpenLoans(memberId)) >= MAX_LOANS) {
+      return problem(res, 409, "loan-limit", "Loan limit reached", `Member ${memberId} has ${MAX_LOANS} open loans.`);
+    }
+
+    const loan = await store.insertLoan(copyId, memberId, new Date(Date.now() + LOAN_DAYS * DAY_MS));
+    if (loan === null) {
+      return problem(res, 409, "copy-on-loan", "Copy is already on loan", `Copy ${copyId} has an open loan.`);
+    }
+    res.status(201).location(`/loans/${loan.id}`).json(loan);
+  });
+
+  // express.json() rejects malformed JSON before the handler runs; turn that into a 400.
+  const badJson: ErrorRequestHandler = (err, _req, res, next) => {
+    if (err.type !== "entity.parse.failed") return next(err);
+    problem(res, 400, "invalid-body", "Malformed JSON", "The request body is not valid JSON.");
+  };
+  app.use(badJson);
+  return app;
+}
+```
+</Stack>
+<Stack id="cs" lib="ASP.NET Core Minimal API">
+```csharp
+const int LoanDays = 21, MaxLoans = 5;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<ILoanStore, PgLoanStore>(); // the Postgres adapter, not shown
+builder.Services.AddProblemDetails();
+var app = builder.Build();
+app.UseStatusCodePages(); // with AddProblemDetails, the framework's own 400s get a problem body
+
+app.MapPost("/loans", async (LoanRequest req, ILoanStore store, CancellationToken ct) =>
+{
+    var copyId = req.CopyId ?? 0;
+    var memberId = req.MemberId ?? 0;
+    var errors = new Dictionary<string, string[]>();
+    if (copyId < 1) errors["copyId"] = ["must be a positive integer"];
+    if (memberId < 1) errors["memberId"] = ["must be a positive integer"];
+    if (errors.Count > 0)
+        return Results.ValidationProblem(errors, "One or more fields are invalid.", statusCode: 422,
+            title: "Request is invalid", type: "https://shelfwise.dev/problems/validation");
+
+    if (!await store.CopyExists(copyId, ct))
+        return Problem(404, "not-found", "Resource not found", $"Copy {copyId} does not exist.");
+    if (!await store.MemberExists(memberId, ct))
+        return Problem(404, "not-found", "Resource not found", $"Member {memberId} does not exist.");
+    if (await store.CountOpenLoans(memberId, ct) >= MaxLoans)
+        return Problem(409, "loan-limit", "Loan limit reached", $"Member {memberId} has {MaxLoans} open loans.");
+
+    var loan = await store.InsertLoan(copyId, memberId, DateTimeOffset.UtcNow.AddDays(LoanDays), ct);
+    if (loan is null)
+        return Problem(409, "copy-on-loan", "Copy is already on loan", $"Copy {copyId} has an open loan.");
+    return Results.Created($"/loans/{loan.Id}", loan);
+});
+
+app.Run();
+
+static IResult Problem(int status, string code, string title, string detail) =>
+    Results.Problem(detail, statusCode: status, title: title, type: $"https://shelfwise.dev/problems/{code}");
+
+record LoanRequest(long? CopyId, long? MemberId);
+
+interface ILoanStore
+{
+    Task<bool> CopyExists(long copyId, CancellationToken ct);
+    Task<bool> MemberExists(long memberId, CancellationToken ct);
+    Task<int> CountOpenLoans(long memberId, CancellationToken ct);
+    Task<Loan?> InsertLoan(long copyId, long memberId, DateTimeOffset dueAt, CancellationToken ct); // null: on loan
+}
+```
+</Stack>
+<Stack id="java" lib="Spring Boot">
+```java
+record LoanRequest(Long copyId, Long memberId) {}
+
+interface LoanStore {
+    boolean copyExists(long copyId);
+    boolean memberExists(long memberId);
+    int countOpenLoans(long memberId);
+    Optional<Loan> insertLoan(long copyId, long memberId, Instant dueAt); // empty: already on loan
+}
+
+@RestController
+class LoansController {
+    private static final int LOAN_DAYS = 21, MAX_LOANS = 5;
+    private final LoanStore store;
+
+    LoansController(LoanStore store) {
+        this.store = store;
+    }
+
+    @PostMapping("/loans")
+    ResponseEntity<?> lend(@RequestBody LoanRequest req) {
+        long copyId = req.copyId() == null ? 0 : req.copyId();
+        long memberId = req.memberId() == null ? 0 : req.memberId();
+        var errors = new LinkedHashMap<String, List<String>>();
+        if (copyId < 1) errors.put("copyId", List.of("must be a positive integer"));
+        if (memberId < 1) errors.put("memberId", List.of("must be a positive integer"));
+        if (!errors.isEmpty()) {
+            var res = problem(422, "validation", "Request is invalid", "One or more fields are invalid.");
+            res.getBody().setProperty("errors", errors);
+            return res;
+        }
+
+        if (!store.copyExists(copyId))
+            return problem(404, "not-found", "Resource not found", "Copy " + copyId + " does not exist.");
+        if (!store.memberExists(memberId))
+            return problem(404, "not-found", "Resource not found", "Member " + memberId + " does not exist.");
+        if (store.countOpenLoans(memberId) >= MAX_LOANS)
+            return problem(409, "loan-limit", "Loan limit reached",
+                    "Member " + memberId + " has " + MAX_LOANS + " open loans.");
+
+        var loan = store.insertLoan(copyId, memberId, Instant.now().plus(LOAN_DAYS, ChronoUnit.DAYS));
+        if (loan.isEmpty())
+            return problem(409, "copy-on-loan", "Copy is already on loan", "Copy " + copyId + " has an open loan.");
+        return ResponseEntity.created(URI.create("/loans/" + loan.get().id())).body(loan.get());
+    }
+
+    static ResponseEntity<ProblemDetail> problem(int status, String code, String title, String detail) {
+        var p = ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(status), detail);
+        p.setType(URI.create("https://shelfwise.dev/problems/" + code));
+        p.setTitle(title);
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(p);
+    }
+}
+```
+</Stack>
+<Stack id="kotlin" lib="Spring Boot">
+```kotlin
+const val LOAN_DAYS = 21L
+const val MAX_LOANS = 5
+
+data class LoanRequest(val copyId: Long? = null, val memberId: Long? = null)
+
+interface LoanStore {
+    fun copyExists(copyId: Long): Boolean
+    fun memberExists(memberId: Long): Boolean
+    fun countOpenLoans(memberId: Long): Int
+    fun insertLoan(copyId: Long, memberId: Long, dueAt: Instant): Loan? // null: already on loan
+}
+
+@RestController
+class LoansController(private val store: LoanStore) {
+    @PostMapping("/loans")
+    fun lend(@RequestBody req: LoanRequest): ResponseEntity<*> {
+        val copyId = req.copyId ?: 0L
+        val memberId = req.memberId ?: 0L
+        val errors = buildMap {
+            if (copyId < 1) put("copyId", listOf("must be a positive integer"))
+            if (memberId < 1) put("memberId", listOf("must be a positive integer"))
+        }
+        if (errors.isNotEmpty()) {
+            return problem(422, "validation", "Request is invalid", "One or more fields are invalid.", errors)
+        }
+
+        if (!store.copyExists(copyId)) {
+            return problem(404, "not-found", "Resource not found", "Copy $copyId does not exist.")
+        }
+        if (!store.memberExists(memberId)) {
+            return problem(404, "not-found", "Resource not found", "Member $memberId does not exist.")
+        }
+        if (store.countOpenLoans(memberId) >= MAX_LOANS) {
+            return problem(409, "loan-limit", "Loan limit reached", "Member $memberId has $MAX_LOANS open loans.")
+        }
+
+        val loan = store.insertLoan(copyId, memberId, Instant.now().plus(LOAN_DAYS, ChronoUnit.DAYS))
+            ?: return problem(409, "copy-on-loan", "Copy is already on loan", "Copy $copyId has an open loan.")
+        return ResponseEntity.created(URI.create("/loans/${loan.id}")).body(loan)
+    }
+
+    private fun problem(
+        status: Int, code: String, title: String, detail: String, errors: Map<String, List<String>>? = null,
+    ) =
+        ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(
+            ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(status), detail).apply {
+                type = URI.create("https://shelfwise.dev/problems/$code")
+                this.title = title
+                if (errors != null) setProperty("errors", errors)
+            },
+        )
+}
+```
+</Stack>
+<Stack id="go" lib="net/http">
+```go
+const (
+	loanDays = 21
+	maxLoans = 5
+)
+
+var ErrCopyOnLoan = errors.New("copy already on loan")
+
+type LoanStore interface {
+	CopyExists(ctx context.Context, copyID int64) (bool, error)
+	MemberExists(ctx context.Context, memberID int64) (bool, error)
+	CountOpenLoans(ctx context.Context, memberID int64) (int, error)
+	InsertLoan(ctx context.Context, copyID, memberID int64, dueAt time.Time) (Loan, error) // ErrCopyOnLoan
+}
+
+type handlers struct{ store LoanStore }
+
+// Registered with mux.HandleFunc("POST /loans", h.lend).
+func (h *handlers) lend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CopyID   int64 `json:"copyId"`
+		MemberID int64 `json:"memberId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		problem(w, 400, "invalid-body", "Malformed JSON", "The request body is not valid JSON.", nil)
+		return
+	}
+	errs := map[string][]string{}
+	if req.CopyID < 1 {
+		errs["copyId"] = []string{"must be a positive integer"}
+	}
+	if req.MemberID < 1 {
+		errs["memberId"] = []string{"must be a positive integer"}
+	}
+	if len(errs) > 0 {
+		problem(w, 422, "validation", "Request is invalid", "One or more fields are invalid.", errs)
+		return
+	}
+
+	ctx := r.Context()
+	ok, err := h.store.CopyExists(ctx, req.CopyID)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	if !ok {
+		problem(w, 404, "not-found", "Resource not found", fmt.Sprintf("Copy %d does not exist.", req.CopyID), nil)
+		return
+	}
+	ok, err = h.store.MemberExists(ctx, req.MemberID)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	if !ok {
+		problem(w, 404, "not-found", "Resource not found", fmt.Sprintf("Member %d does not exist.", req.MemberID), nil)
+		return
+	}
+	open, err := h.store.CountOpenLoans(ctx, req.MemberID)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	if open >= maxLoans {
+		detail := fmt.Sprintf("Member %d has %d open loans.", req.MemberID, maxLoans)
+		problem(w, 409, "loan-limit", "Loan limit reached", detail, nil)
+		return
+	}
+
+	loan, err := h.store.InsertLoan(ctx, req.CopyID, req.MemberID, time.Now().AddDate(0, 0, loanDays))
+	if errors.Is(err, ErrCopyOnLoan) {
+		problem(w, 409, "copy-on-loan", "Copy is already on loan", fmt.Sprintf("Copy %d has an open loan.", req.CopyID), nil)
+		return
+	}
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/loans/%d", loan.ID))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(loan)
+}
+
+func problem(w http.ResponseWriter, status int, code, title, detail string, errs map[string][]string) {
+	body := map[string]any{
+		"type": "https://shelfwise.dev/problems/" + code, "title": title, "status": status, "detail": detail,
+	}
+	if len(errs) > 0 {
+		body["errors"] = errs
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func serverError(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "lend failed", "err", err)
+	problem(w, 500, "internal", "Internal error", "Something went wrong.", nil)
+}
+```
+</Stack>
+<Stack id="py" lib="FastAPI">
+```python
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Protocol
+
+from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+LOAN_DAYS, MAX_LOANS = 21, 5
+
+
+class LoanStore(Protocol):
+    async def copy_exists(self, copy_id: int) -> bool: ...
+    async def member_exists(self, member_id: int) -> bool: ...
+    async def count_open_loans(self, member_id: int) -> int: ...
+    async def insert_loan(self, copy_id: int, member_id: int, due_at: datetime) -> dict | None: ...  # None: on loan
+
+
+def get_store() -> LoanStore:
+    raise NotImplementedError("wired at startup; tests override it")
+
+
+class LoanRequest(BaseModel):
+    copyId: int = Field(ge=1)
+    memberId: int = Field(ge=1)
+
+
+def problem(status: int, code: str, title: str, detail: str, **extra) -> JSONResponse:
+    body = {"type": f"https://shelfwise.dev/problems/{code}", "title": title, "status": status,
+            "detail": detail, **extra}
+    return JSONResponse(body, status_code=status, media_type="application/problem+json")
+
+
+app = FastAPI()
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request: Request, e: RequestValidationError) -> JSONResponse:
+    if any(err["type"] == "json_invalid" for err in e.errors()):
+        return problem(400, "invalid-body", "Malformed JSON", "The request body is not valid JSON.")
+    errors: dict[str, list[str]] = {}
+    for err in e.errors():
+        errors.setdefault(".".join(map(str, err["loc"][1:])) or "body", []).append(err["msg"])
+    return problem(422, "validation", "Request is invalid", "One or more fields are invalid.", errors=errors)
+
+
+@app.post("/loans", status_code=201)
+async def lend(body: LoanRequest, response: Response, store: Annotated[LoanStore, Depends(get_store)]):
+    if not await store.copy_exists(body.copyId):
+        return problem(404, "not-found", "Resource not found", f"Copy {body.copyId} does not exist.")
+    if not await store.member_exists(body.memberId):
+        return problem(404, "not-found", "Resource not found", f"Member {body.memberId} does not exist.")
+    if await store.count_open_loans(body.memberId) >= MAX_LOANS:
+        return problem(409, "loan-limit", "Loan limit reached",
+                       f"Member {body.memberId} has {MAX_LOANS} open loans.")
+
+    due_at = datetime.now(timezone.utc) + timedelta(days=LOAN_DAYS)
+    loan = await store.insert_loan(body.copyId, body.memberId, due_at)
+    if loan is None:
+        return problem(409, "copy-on-loan", "Copy is already on loan", f"Copy {body.copyId} has an open loan.")
+    response.headers["Location"] = f"/loans/{loan['id']}"
+    return loan
+```
+</Stack>
+</FiveStacks>
+
+The order of checks is the same in every tab, and you should be able to explain it. Shape comes first, because it needs no database. The 404s come next, because "this does not exist" tells the client more than any rule about it. The insert comes last, so the database has the final word on the rule it can enforce by itself. The differences between the tabs are what to remember:
+
+- **Where the 400 comes from.** Only Go decodes the body itself. Express rejects malformed JSON inside `express.json()`, so the 400 is written in error middleware. ASP.NET Core and Spring answer 400 before your code runs: ASP.NET with an empty body unless you add `AddProblemDetails` and `UseStatusCodePages`, and Spring Boot with Problem Details when `spring.mvc.problemdetails.enabled=true` is set. FastAPI reports malformed JSON as a 422, so the handler picks it out by its `json_invalid` type.
+- **How strict "an integer" is.** Send `"copyId": "1"`. Express answers 422 and Go 400, but ASP.NET Core's web defaults and Pydantic's lax mode both read it as 1. The contract says `integer`, so mention it when the stack is lenient.
+- **Missing versus zero.** C#, Java and Kotlin bind to nullable types and turn a missing field into 0, so one check covers both. Go gets the zero value for free.
+
+Once it works, harden it aloud, in order of risk: reject unknown fields, which the contract forbids (Chapter 13); turn unexpected exceptions into a 500 Problem Details response that quotes the request id (Chapter 12); limit the body size; pass a clock in, so a test can check the due date (Chapter 17). The interviewer may stop you after two of these. What they want to see is that you know what is left.
+
+<Pitfall title="Fighting the framework from memory">
+In your weaker language you may not remember the validation annotation, the binder option or the exception filter. Don't spend ten minutes recalling it. Two `if` statements and a helper that writes Problem Details work in every framework, as the tabs show, and the interviewer is listening for the status codes, not for `@Valid`. Say "in production I'd use the framework's validation", and keep going.
+</Pitfall>
+
+**Testing it quickly.** The contract you wrote down is already the test list. Read it back as cases:
+
+1. A free copy and a member under the limit: 201, `Location: /loans/{id}`, and a due date 21 days later.
+2. Malformed JSON: 400 `invalid-body`.
+3. A missing field and a zero id: 422 `validation`, with the field named in `errors`. A string id gets whatever the stack's binding decides, as above.
+4. An unknown copy and an unknown member: 404 `not-found`, once each.
+5. A member with five open loans: 409 `loan-limit`.
+6. A copy already on loan: 409 `copy-on-loan`.
+7. For every error: `Content-Type: application/problem+json`, and nothing was inserted.
+
+One table-driven test covers most of it. In TypeScript, with `node:test`, the built-in `fetch` and a fake store whose data sends each case down a different branch:
+
+```ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import { loansApp, type LoanStore } from "./loans.ts";
+
+// Copies 1 and 3 exist and 3 is already out; member 10 has no loans, member 11 has five.
+const store: LoanStore = {
+  copyExists: async (id) => id === 1 || id === 3,
+  memberExists: async (id) => id === 10 || id === 11,
+  countOpenLoans: async (id) => (id === 11 ? 5 : 0),
+  insertLoan: async (copyId, memberId, dueAt) =>
+    copyId === 3 ? null : { id: 7, copyId, memberId, bookId: 1, title: "Dune", barcode: "C-1",
+                            loanedAt: new Date(), dueAt, returnedAt: null },
+};
+
+const cases: [string, string, number, string][] = [
+  ["lends a free copy",    '{"copyId":1,"memberId":10}',   201, ""],
+  ["malformed JSON",       '{"copyId":1,',                 400, "invalid-body"],
+  ["missing member",       '{"copyId":1}',                 422, "validation"],
+  ["id as a string",       '{"copyId":"1","memberId":10}', 422, "validation"],
+  ["unknown copy",         '{"copyId":2,"memberId":10}',   404, "not-found"],
+  ["unknown member",       '{"copyId":1,"memberId":12}',   404, "not-found"],
+  ["member at the limit",  '{"copyId":1,"memberId":11}',   409, "loan-limit"],
+  ["copy already on loan", '{"copyId":3,"memberId":10}',   409, "copy-on-loan"],
+];
+
+test("POST /loans", async (t) => {
+  const server = loansApp(store).listen(0);   // port 0: any free port
+  await once(server, "listening");
+  t.after(() => server.close());
+  const url = `http://localhost:${(server.address() as AddressInfo).port}/loans`;
+
+  for (const [name, body, status, code] of cases) {
+    await t.test(name, async () => {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+      assert.equal(res.status, status);
+      if (status === 201) {
+        assert.equal(res.headers.get("location"), "/loans/7");
+      } else {
+        assert.match(res.headers.get("content-type") ?? "", /^application\/problem\+json/);
+        assert.equal((await res.json()).type, `https://shelfwise.dev/problems/${code}`);
+      }
+    });
+  }
+});
+```
+
+The other stacks keep the same table with their own tools from Chapter 17: `httptest.NewRecorder` in Go, `TestClient` with `app.dependency_overrides[get_store]` in FastAPI, `WebApplicationFactory` in ASP.NET Core, and `MockMvc` in Spring. If the editor can't run code, write the table as comments and trace two rows by hand.
+
+### A SQL exercise
+
+The second common task gives you a schema and asks for a query. On the Shelfwise tables from Chapter 14:
+
+> Librarians want the ten members with the most overdue loans, and for each one, how overdue their oldest loan is.
+
+**Ask first.** What counts as overdue? Still open (`returned_at IS NULL`) and past `due_at`. Do members with none appear? No. How are ties ordered? By the oldest due date. Each answer changes the query.
+
+```sql
+SELECT m.id, m.name, count(*) AS overdue, min(l.due_at) AS oldest_due
+FROM loans l
+JOIN members m ON m.id = l.member_id
+WHERE l.returned_at IS NULL
+  AND l.due_at < now()
+GROUP BY m.id
+ORDER BY overdue DESC, oldest_due
+LIMIT 10;
+```
+
+Read it out in logical order: take the loans, keep the open and overdue ones, attach each to its member, group, count, sort, keep ten. `GROUP BY m.id` is enough to select `m.name` because `id` is the primary key, so PostgreSQL knows the name depends on it. Some databases don't accept that; if unsure, add `m.name` to the `GROUP BY`.
+
+**The index.** Next comes "How do you make this fast?" Start from what exists. Shelfwise already has `loans_member_open_idx`, a partial index on `member_id` for open loans only, and PostgreSQL can use it here because its condition matches the query's `returned_at IS NULL`: the plan reads the open loans through it and filters them by date, so the history is never scanned. The better index matches the query's own filter:
+
+```sql
+CREATE INDEX loans_open_due_idx ON loans (due_at) INCLUDE (member_id) WHERE returned_at IS NULL;
+```
+
+Say why in three parts. It is **partial**, so it holds only open loans, and there can never be more of those than copies. It is **ordered by `due_at`**, so `due_at < now()` becomes a range scan over the overdue loans alone. And it **includes `member_id`**, so the join key comes from the index and the plan becomes an index-only scan. Then name the cost from Chapter 14: one more index to update on every lend and return, worth it only if the report runs often, which is a question to ask. End with "I'd confirm it with `EXPLAIN ANALYZE`", not with a number you can't measure in the room.
+
+A common follow-up is the same count for every member, including those with no loans. That needs a `LEFT JOIN`, which has a trap.
+
+<Pitfall title="The LEFT JOIN that quietly loses rows">
+To count open loans for every member, the condition on loans goes in the `ON` clause and you count a right-hand column: `LEFT JOIN loans l ON l.member_id = m.id AND l.returned_at IS NULL` with `count(l.id)`. Move `l.returned_at IS NULL` into `WHERE` and members whose loans are all returned vanish, because every joined row has a non-null `returned_at`. Members who never borrowed survive, since their joined columns are all `NULL`. And `count(*)` shows 1 for every member with no open loans. Both bugs pass a test with only active members, so include one member of each kind in your examples.
+</Pitfall>
+
+**The invariant.** Last comes the question that links the SQL to the endpoint: "How do you guarantee a copy is never lent twice at once?" A check in the application can be passed by two concurrent requests. The strong answer is the one Shelfwise uses:
+
+```sql
+CREATE UNIQUE INDEX one_open_loan_per_copy ON loans (copy_id) WHERE returned_at IS NULL;
+```
+
+Explain the `WHERE`: a plain `UNIQUE (copy_id)` would allow one loan per copy, ever, while the partial index allows any number of returned loans and at most one open one. If two transactions insert an open loan for the same copy, the second waits for the first to commit, then fails with a unique violation (SQLSTATE `23505`) naming `one_open_loan_per_copy`. That is what the store turns into `null` and the handler into 409 `copy-on-loan`. It is Chapter 23's lesson in its smallest form: when the database can evaluate the rule atomically, let it, and keep any application check only for clearer errors.
+
+<InterviewLens>
+"And the five-loan limit? Is it safe?" No, and saying so unprompted is a strong signal. Two requests for a member with four open loans can both count four and both insert, which leaves six. No unique index can express "at most five". Serialise lending per member instead: in one transaction, `SELECT 1 FROM members WHERE id = $1 FOR UPDATE`, then count, then insert. A second request for the same member waits at the lock, and its count then sees the first loan. Another option is a new `open_loans` column on `members`, updated with a conditional write, `SET open_loans = open_loans + 1 WHERE id = $1 AND open_loans < 5`, which is Chapter 23's seat claim. Name the cost: lending to one member becomes sequential, which is harmless at a library's scale.
+</InterviewLens>
+
+### A code-review exercise
+
+In the third format, the interviewer shares a pull request and asks you to review it out loud. The problems planted in it differ widely in severity, and telling them apart is part of the test. The snippet is TypeScript, with Express 5 and `pg`, because every reader of this book can read it; the problems are the same in any language.
+
+Read it and find at least six problems before reading on.
+
+```ts
+// POST /members/:id/checkout   body: { "copyIds": [12, 40, 41] }
+// Lends several copies in one request and emails the member a receipt.
+app.post("/members/:id/checkout", async (req, res) => {
+  const member = (await pool.query(`SELECT * FROM members WHERE id = ${req.params.id}`)).rows[0];
+
+  const loans = [];
+  for (const copyId of req.body.copyIds) {
+    const inserted = await pool.query(
+      "INSERT INTO loans (copy_id, member_id, due_at) VALUES ($1, $2, now() + interval '21 days') RETURNING id",
+      [copyId, member.id],
+    );
+    const book = await pool.query(
+      "SELECT b.title FROM copies c JOIN books b ON b.id = c.book_id WHERE c.id = $1",
+      [copyId],
+    );
+    loans.push({ id: inserted.rows[0].id, copyId, title: book.rows[0].title });
+  }
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await fetch("http://mailer.internal/receipts", {
+        method: "POST",
+        body: JSON.stringify({ to: member.email, loans }),
+      });
+      break;
+    } catch (err) {
+      console.log(err);
+    }
+  }
+
+  res.status(201).json(loans);
+});
+```
+
+Read it twice: once for intent (what should be true when it returns 201?) and once for risk. Then raise the findings most severe first, not in line order, so that if time runs out after three, the interviewer has heard the three that matter.
+
+1. **SQL injection.** `req.params.id` is pasted into the SQL text, so the path becomes part of the query. *Fix:* parse the id as a positive integer, return 400 `invalid-id` otherwise, and pass it as `$1` (Chapter 22).
+2. **No transaction around the inserts.** If the third copy is already on loan, its insert fails after the first two loans are committed. The client sees an error and retries, and now the first copy fails too, because it is on loan to this same member. *Fix:* one transaction (`BEGIN`, `COMMIT`, `ROLLBACK` on any error) on one pooled client, so a checkout succeeds or fails as a whole (Chapter 23).
+3. **The business rules are bypassed.** An unknown member makes `member.id` throw: a 500, not a 404. The five-loan limit is never checked. A copy on loan becomes a 500, not 409 `copy-on-loan`. And `copyIds` is not validated, so a missing array throws and ten thousand ids are accepted. *Fix:* validate the body (Chapter 13) and reuse the rules of `POST /loans` instead of half-duplicating them.
+4. **A retry that can send the receipt twice, or report a failure as success.** If the mailer accepts the email but the response is lost, the next attempt sends it again. And `fetch` rejects only on network errors, so a 503 from the mailer resolves normally and the loop stops as if the receipt had gone out. The attempts also run back to back. *Fix:* an `Idempotency-Key` derived from the checkout (Chapter 24), a check of `res.ok`, and backoff with jitter (Chapter 37).
+5. **No timeout.** Nothing bounds how long the `fetch` can take, so a slow mailer makes every checkout slow. *Fix:* `signal: AbortSignal.timeout(2000)`, shorter than the caller's own deadline (Chapter 37).
+6. **The error is swallowed.** After three failures the member gets a 201, no receipt and no one is told; `console.log` carries no request id and raises no alert. *Fix:* structural. Record a "send receipt" job in the same transaction as the loans and let a worker deliver it with retries (Chapter 24's jobs, or Chapter 34's outbox), so the checkout no longer depends on the mailer.
+7. **N+1 queries.** Each copy costs an insert and a lookup: 2n round trips for n copies (Chapter 15). *Fix:* one `INSERT … SELECT … FROM unnest($2::bigint[])` with `RETURNING`, and one title query with `c.id = ANY($2)`.
+8. **Smaller things.** `SELECT *` loads unused columns. The `fetch` sets no `Content-Type`, so the body goes out as `text/plain;charset=UTF-8`. The `21 days` is hard-coded, though Shelfwise reads `LOAN_DAYS` from configuration (Chapter 16).
+
+Naming, formatting and a type for `loans` are not on the list. Raise them only once everything else is done, labelled as nits.
+
+Phrasing matters as much as finding. Chapter 48 gave the rules: label each comment, explain why, propose a fix. In the room that becomes one or two sentences per finding: the label, what goes wrong and for which input, and the change:
+
+> **Blocking:** the member id goes into the SQL text unescaped, so the path decides what the query does. Parse it as a positive integer and pass it as `$1`.
+
+> **Question:** if the mailer accepts the email but the response is lost, the retry sends a second receipt. Does the mailer accept an idempotency key? If not, I'd move the email to a job written in the same transaction as the loans.
+
+The first states a fact and a fix, because the problem is certain. The second asks, because the answer depends on a system you can't see, which is how a senior reviewer handles it in a real team too. Describe what the code does, not what its author failed to do.
