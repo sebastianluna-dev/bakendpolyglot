@@ -1,0 +1,55 @@
+---
+// Index of the Chapter 49 problem bank, built from the catalogue in bank.ts.
+// by="topic": every problem with its difficulty, one table per topic.
+// by="difficulty": one row per topic, the problem numbers under Easy, Medium and Hard.
+import { PROBLEMS, TOPICS, type Difficulty } from './bank';
+
+interface Props { by: 'topic' | 'difficulty' }
+const { by } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+// The id Starlight gives the heading "NNN · Title" (github-slugger, for ASCII titles).
+const anchor = (n: string, title: string) =>
+  `${n} · ${title}`.toLowerCase().replace(/[^a-z0-9 _-]/g, '').replace(/ /g, '-');
+const href = (p: (typeof PROBLEMS)[number]) => {
+  const page = TOPICS.find((t) => t.id === p.topic)!.page;
+  return `${base}/part-8/${page}/#${anchor(p.n, p.title)}`;
+};
+const LEVELS: Difficulty[] = ['Easy', 'Medium', 'Hard'];
+const count = (d: Difficulty) => PROBLEMS.filter((p) => p.difficulty === d).length;
+---
+{by === 'topic' ? (
+  TOPICS.map((t) => (
+    <>
+      <h3>{t.name}</h3>
+      <table class="bp-bank-index">
+        <thead><tr><th>No.</th><th>Problem</th><th>Difficulty</th></tr></thead>
+        <tbody>
+          {PROBLEMS.filter((p) => p.topic === t.id).map((p) => (
+            <tr><td>{p.n}</td><td><a href={href(p)}>{p.title}</a></td><td>{p.difficulty}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  ))
+) : (
+  <table class="bp-bank-index">
+    <thead>
+      <tr><th>Topic</th>{LEVELS.map((d) => <th>{d} ({count(d)})</th>)}</tr>
+    </thead>
+    <tbody>
+      {TOPICS.map((t) => (
+        <tr>
+          <td>{t.name}</td>
+          {LEVELS.map((d) => (
+            <td>
+              {PROBLEMS.filter((p) => p.topic === t.id && p.difficulty === d).map((p, i) => (
+                <>{i > 0 && ', '}<a href={href(p)} title={p.title}>{p.n}</a></>
+              ))}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+)}

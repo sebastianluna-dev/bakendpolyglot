@@ -7,7 +7,34 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
 Most of these problems need nothing more than a loop, an array and a hash map. They are the first problems to practise in a language you rarely write, because they train the vocabulary every other topic uses: creating and filling an array, looking a key up with a default, counting, and returning a pair.
+
+## 001 · Duplicate Barcodes
+
+**Arrays and Hashing · Easy**
+
+Every copy in a Shelfwise branch carries a barcode label, and a stocktake produces the list of labels scanned on the shelves. Given that list, return `true` if any barcode appears more than once and `false` otherwise. Two barcodes are the same only if the strings are exactly equal, so case matters. An empty list has no duplicates.
+
+```text
+Example 1
+  input:  barcodes = ["SW-1042", "SW-0007", "SW-2210", "SW-0007"]
+  output: true         (SW-0007 is scanned twice)
+
+Example 2
+  input:  barcodes = ["SW-1042", "SW-0007", "SW-2210"]
+  output: false
+```
+
+Constraints: `0 ≤ barcodes.length ≤ 10⁵`, `1 ≤ barcodes[i].length ≤ 20`.
+
+**Approach.** The simple solution compares every pair of barcodes: O(n²). Sorting a copy puts equal barcodes next to each other, so one pass over neighbours finds a duplicate in O(n log n). The pairwise version keeps asking "have I seen this one before?", and a hash set answers that in O(1): walk the list once, return `true` as soon as a barcode is already in the set, and add it otherwise. In C#, Java and Kotlin, `add` returns `false` when the element was already there, so the check and the insert are one call.
+
+<Solutions n="001" />
+
+**Complexity.** O(n) time, O(n) space for the set of barcodes seen so far.
+
+**Common mistake.** Keeping the seen barcodes in a list instead of a set: `contains` on a list scans it, so the "one pass" solution is O(n²) again and times out on 10⁵ barcodes.
 
 ## 002 · Two Prices for a Budget
 
@@ -34,3 +61,211 @@ Constraints: `0 ≤ prices.length ≤ 10⁵`, `1 ≤ prices[i] ≤ 10⁹`, `1 �
 **Complexity.** O(n) time, O(n) space for the map.
 
 **Common mistake.** Storing every index of a price (overwriting the map entry) instead of the first one, which returns `[1, 2]` instead of `[0, 2]` for `[3, 3, 9]` and a budget of 12.
+
+## 003 · Same Letters, Different Order
+
+**Arrays and Hashing · Easy**
+
+Given two words made of lowercase English letters, return `true` if one is a rearrangement of the other: the same letters, each used the same number of times, in any order. A word counts as a rearrangement of itself, and two empty words are rearrangements of each other.
+
+```text
+Example 1
+  input:  a = "dusty", b = "study"
+  output: true
+
+Example 2
+  input:  a = "aab", b = "abb"
+  output: false        (same letters, different counts)
+```
+
+Constraints: `0 ≤ a.length, b.length ≤ 5 × 10⁴`, both contain only `a`–`z`.
+
+**Approach.** The simple solution sorts both words and compares them: O(n log n). Sorting does more than the question needs, because only the number of times each letter appears matters, not its position. With only 26 possible letters, an array of 26 counters indexed by `letter - 'a'` is a hash map that never collides. If the lengths differ, return `false` straight away; otherwise add one for each letter of `a`, subtract one for each letter of `b`, and the words match exactly when every counter ends at zero.
+
+<Solutions n="003" />
+
+**Complexity.** O(n) time, O(1) space (26 counters, whatever the length of the words).
+
+**Common mistake.** Comparing the sets of letters instead of their counts, which says `"aab"` and `"abb"` match because both use only `a` and `b`.
+
+## 004 · The Missing Ticket
+
+**Arrays and Hashing · Easy**
+
+A SeatLock event printed tickets numbered `1` to `n`, and every ticket but one was scanned at the door. You get the scanned numbers in the order they were scanned, each exactly once, so the array has `n - 1` elements. Return the number of the ticket that was never scanned. If nothing was scanned, `n` is 1 and the answer is `1`.
+
+```text
+Example 1
+  input:  scanned = [3, 1, 4, 5]
+  output: 2            (tickets 1 to 5; 2 is absent)
+
+Example 2
+  input:  scanned = [1]
+  output: 2            (the missing ticket can be the last one)
+```
+
+Constraints: `0 ≤ scanned.length ≤ 10⁵`, the numbers are distinct and between `1` and `scanned.length + 1`.
+
+**Approach.** The simple solution checks each candidate from `1` to `n` against the whole array: O(n²). Putting the scanned numbers in a hash set makes each check O(1), for O(n) time and O(n) space. But the numbers `1` to `n` are known in advance, and their sum is `n × (n + 1) / 2`, so the missing ticket is that total minus the sum of the scanned ones, with no extra memory at all. In C#, Java and Kotlin do the arithmetic in a 64-bit `long`; Go's `int` is already 64 bits on the usual platforms, and Python and TypeScript numbers are exact at this size.
+
+<Solutions n="004" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Computing `n * (n + 1) / 2` in a 32-bit `int` in C#, Java or Kotlin: the product overflows once `n` passes 46,340, so the code returns a wrong answer for tickets `1` to `70000`.
+
+## 005 · The Majority Genre
+
+**Arrays and Hashing · Easy**
+
+Shelfwise records the genre of every book borrowed in a month. Given that list, return the genre that accounts for more than half of the loans. If no genre has a strict majority (including when the list is empty), return an empty string. At most one genre can have more than half, so the answer is never ambiguous.
+
+```text
+Example 1
+  input:  loans = ["mystery", "poetry", "mystery", "history", "mystery"]
+  output: "mystery"    (3 of 5)
+
+Example 2
+  input:  loans = ["poetry", "history", "poetry", "history"]
+  output: ""           (exactly half is not a majority)
+```
+
+Constraints: `0 ≤ loans.length ≤ 10⁵`, `1 ≤ loans[i].length ≤ 30`.
+
+**Approach.** The simple solution counts each genre by scanning the whole list again: O(n²). Every rescan repeats counting that has already been done, so keep a hash map from genre to count instead and update it in one pass. The moment a genre's count `c` satisfies `c × 2 > n`, it is the majority and can be returned; if the loop ends, there is none. If the interviewer asks for O(1) space, the follow-up is the Boyer–Moore voting algorithm, which keeps one candidate and one counter, plus a second pass to confirm the candidate really has a majority.
+
+<Solutions n="005" />
+
+**Complexity.** O(n) time, O(k) space for the map, where k is the number of distinct genres.
+
+**Common mistake.** Testing `count >= n / 2` with integer division, which returns `"poetry"` for `["poetry", "history"]`: compare `count * 2 > n` so that exactly half never counts.
+
+## 006 · The Unpaired Seat
+
+**Arrays and Hashing · Easy**
+
+SeatLock's audit log writes a seat's number once when a hold is placed and once when it is released. After a failed deploy, exactly one hold was never released. Given the log as an array of seat numbers in any order, where every seat appears exactly twice except one that appears once, return that seat.
+
+```text
+Example 1
+  input:  log = [14, 3, 14, 8, 3]
+  output: 8
+
+Example 2
+  input:  log = [21]
+  output: 21
+```
+
+Constraints: `1 ≤ log.length ≤ 10⁵` and odd, `1 ≤ log[i] ≤ 10⁹`, exactly one seat appears once.
+
+**Approach.** The simple solution counts each seat by scanning the log again: O(n²). A hash set fixes that in one pass: add a seat the first time you see it, remove it the second time, and the one left at the end is the answer, for O(n) time and O(n) space. The set can go entirely, because XOR does the same pairing in a single integer: `x ^ x` is `0`, `x ^ 0` is `x`, and the order does not matter, so XOR-ing every number in the log cancels the pairs and leaves the unpaired seat. In TypeScript `^` works on 32-bit integers, which is enough for seat numbers up to 10⁹.
+
+<Solutions n="006" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Sorting and comparing neighbours two at a time (`log[i]` with `log[i + 1]`) without handling the case where the unpaired seat sorts last: for `[4, 4, 9]` the loop reads past the end of the array.
+
+## 007 · Add One to a Digit Array
+
+**Arrays and Hashing · Easy**
+
+A non-negative integer is stored as an array of its decimal digits, most significant first, with no leading zeros (the number zero is `[0]`). Return a new array holding the digits of that number plus one, in the same format. Do not modify the input array.
+
+```text
+Example 1
+  input:  digits = [1, 2, 9]
+  output: [1, 3, 0]
+
+Example 2
+  input:  digits = [9, 9, 9]
+  output: [1, 0, 0, 0]  (the result has one more digit)
+```
+
+Constraints: `1 ≤ digits.length ≤ 10⁴`, `0 ≤ digits[i] ≤ 9`.
+
+**Approach.** The tempting solution converts the digits to a number, adds one and converts back, but 10⁴ digits do not fit in a 64-bit integer, and even where big integers exist (Python's `int`, Java's `BigInteger`) the conversion skips the carry logic the problem is about. Do what you would do on paper instead: copy the array and walk it from the last digit. A digit below 9 is increased and the copy returned at once, because the carry stops there; a 9 becomes 0 and the carry moves one place left. If the loop finishes, every digit was 9, so the answer is a 1 followed by that many zeros, one digit longer than the input.
+
+<Solutions n="007" />
+
+**Complexity.** O(n) time, O(n) space for the copy that is returned.
+
+**Common mistake.** Converting the digits to an integer: twenty 9s already overflow a 64-bit integer, and in TypeScript precision is lost past 2⁵³, so `[9, 9, …, 9]` comes back wrong.
+
+## 008 · Best Single Trade
+
+**Arrays and Hashing · Easy**
+
+An array holds the price of one item on consecutive days. You may buy it on one day and sell it on a later day, once. Return the largest profit (sell price minus buy price) you can make. If no trade makes a profit, including when there are fewer than two days, return `0`.
+
+```text
+Example 1
+  input:  prices = [8, 3, 6, 1, 7, 4]
+  output: 6            (buy at 1, sell at 7 the next day)
+
+Example 2
+  input:  prices = [9, 7, 4, 2]
+  output: 0            (the price only falls)
+```
+
+Constraints: `0 ≤ prices.length ≤ 10⁵`, `0 ≤ prices[i] ≤ 10⁴`.
+
+**Approach.** The simple solution tries every buy day with every later sell day: O(n²). For a fixed sell day, the best buy day is simply the cheapest day before it, and the inner loop recomputes that minimum from scratch each time. Keep it in a variable instead: walk the prices once, update the lowest price seen so far, and compare today's price minus that lowest with the best profit so far. Starting the lowest price at the largest integer (or infinity) makes an empty array return `0` with no special case.
+
+<Solutions n="008" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Subtracting the overall minimum from the overall maximum, which ignores the order of the days: for `[5, 9, 1]` it returns 8, but you cannot buy at 1 after selling at 9, so the answer is 4.
+
+## 009 · Rotate the Carousel
+
+**Arrays and Hashing · Easy**
+
+The SeatLock home page shows featured event IDs in a carousel. Each tick moves every slide one position to the right, and the last slide wraps around to the front. Given the slides and a number of ticks `k`, rotate the array **in place** so that it holds the order after `k` ticks; the function returns nothing. `k` may be larger than the number of slides, and an empty carousel stays empty.
+
+```text
+Example 1
+  input:  slides = [1, 2, 3, 4, 5], k = 2
+  output: [4, 5, 1, 2, 3]
+
+Example 2
+  input:  slides = [10, 20], k = 5
+  output: [20, 10]      (5 ticks on 2 slides is the same as 1)
+```
+
+Constraints: `0 ≤ slides.length ≤ 10⁵`, `0 ≤ k ≤ 10⁹`.
+
+**Approach.** The simple solution performs `k` single-step rotations: O(n × k), hopeless for `k` up to 10⁹. The first fix is `k %= n`, since every `n` ticks bring the carousel back where it started. Writing each slide to position `(i + k) % n` of a new array is O(n) but uses O(n) extra memory. Three reversals do it in place: reverse the whole array, then reverse the first `k` slides, then the rest, and every slide lands `k` places to the right. C#, Kotlin and Go have a built-in range reverse (`Array.Reverse`, `IntArray.reverse`, `slices.Reverse` on a subslice); TypeScript, Java and Python use a short helper.
+
+<Solutions n="009" />
+
+**Complexity.** O(n) time, O(1) extra space.
+
+**Common mistake.** Forgetting `k %= n`, so the second reversal runs past the end of the array for `[10, 20]` and `k = 5`; and taking `k % n` before checking for an empty array divides by zero.
+
+## 010 · Number Triangle Rows
+
+**Arrays and Hashing · Easy**
+
+Build the first `n` rows of this number triangle. Row 0 is `[1]`. Each following row is one number longer, starts and ends with `1`, and every number in between is the sum of the two numbers diagonally above it in the previous row. Return the rows as a list of lists; for `n = 0` return an empty list.
+
+```text
+Example 1
+  input:  n = 5
+  output: [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]
+
+Example 2
+  input:  n = 1
+  output: [[1]]
+```
+
+Constraints: `0 ≤ n ≤ 30` (the largest value, 77,558,760, fits in a 32-bit integer).
+
+**Approach.** Each number is a binomial coefficient, so one could compute every entry from factorials, but the factorials overflow long before row 30 and each entry costs O(n). The triangle's own rule is cheaper: every row is built from the row above it. Start each row as `r + 1` ones, then fill only the inner positions `1 ≤ c < r` with `rows[r - 1][c - 1] + rows[r - 1][c]`. The output itself has about n²/2 numbers, so no solution can do better than that.
+
+<Solutions n="010" />
+
+**Complexity.** O(n²) time, O(n²) space, all of it the returned rows.
+
+**Common mistake.** Running the inner loop over `0 ≤ c ≤ r`, which reads `rows[r - 1][-1]` and one past the end of the previous row; the first and last 1 already come from the initial row.

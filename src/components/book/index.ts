@@ -9,3 +9,4 @@ export { default as Quiz } from './Quiz.astro';
 export { default as Flashcards } from './Flashcards.astro';
 export { default as Figure } from './Figure.astro';
 export { default as Solutions } from './Solutions.astro';
+export { default as BankIndex } from './BankIndex.astro';
