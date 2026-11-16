@@ -14,8 +14,9 @@ The chapters show minimal snippets; the full code of every companion app lives n
 | `apps/seatlock` | Chapter 27 | NestJS, ASP.NET Core, Spring (Java), Go, Django | ✅ Conformance suite in CI; invariants hold under load |
 | `apps/parcel` | Chapter 39 | NestJS gateway, FastAPI, Spring (Kotlin), Go, ASP.NET Core | Planned |
 | `apps/pulse` | Chapter 39 | NestJS, ASP.NET Core (SignalR), Spring, Go, FastAPI | Planned |
+| `apps/interview-bank` | Chapter 49 | 200 problems in TypeScript, C#, Java, Kotlin, Go and Python | ✅ CI runs every solution in all six languages |
 
-Each app follows the same layout: `contract/` (OpenAPI, Protobuf or event schemas), `db/migrations/` (one shared schema), `conformance/` (an HTTP-only test suite every stack must pass), `stacks/<stack>/` (one folder per implementation with its own README, tests and Dockerfile) and `compose.yaml`.
+Each app follows the same layout: `contract/` (OpenAPI, Protobuf or event schemas), `db/migrations/` (one shared schema), `conformance/` (an HTTP-only test suite every stack must pass), `stacks/<stack>/` (one folder per implementation with its own README, tests and Dockerfile) and `compose.yaml`. The interview bank is the exception: it has no server, only one folder per language with one runnable file per problem, and `check.sh` to run a range of problems in all six languages.
 
 ## Running an app
 

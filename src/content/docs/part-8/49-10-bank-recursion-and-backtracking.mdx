@@ -61,3 +61,282 @@ Constraints: `1 ≤ code.length ≤ 12`, `code` contains only `a`–`z`, `A`–`
 **Complexity.** O(2^L × n) time and space for the 2^L spellings of length n, plus O(n) for the recursion stack.
 
 **Common mistake.** Making two calls at every position, digits included: the upper- and lower-case forms of a digit are the same character, so `"42"` returns four copies of `"42"` instead of one.
+
+## 153 · Binary Strings With No Adjacent Ones
+
+**Recursion and Backtracking · Easy**
+
+A SeatLock venue sells a row of `n` seats under a spacing rule: two neighbouring seats may not both be sold. Write a row as a string of `n` characters, `1` for a sold seat and `0` for an empty one. Return every row the rule allows, in lexicographic order (`0` before `1`). For `n = 0` the only row is the empty string, so the answer is `[""]`.
+
+```text
+Example 1
+  input:  n = 3
+  output: ["000", "001", "010", "100", "101"]
+
+Example 2
+  input:  n = 1
+  output: ["0", "1"]
+```
+
+Constraints: `0 ≤ n ≤ 20`.
+
+**Approach.** The simple solution generates all 2ⁿ strings of `0`s and `1`s and keeps those without `11`: O(2ⁿ × n). Most of that work is spent on strings that broke the rule early and were extended anyway. Backtracking builds one string in a buffer, `path`, one character at a time, and never extends a prefix that already breaks the rule: append `0` (always allowed), recurse, remove it; then append `1` only if the buffer is empty or ends in `0`, recurse, remove it. When the buffer holds `n` characters, record a copy (`join`, `toString` or `string(path)` makes one). This choose, recurse, un-choose shape is the one the rest of this topic reuses. Trying `0` before `1` at each position produces the strings already in lexicographic order, so no sort is needed.
+
+<Solutions n="153" />
+
+**Complexity.** O(n × F(n+2)) time, where F(n+2) is the Fibonacci number that counts the valid strings (about 1.618ⁿ, far fewer than 2ⁿ), since each one is copied in O(n). O(n) space for the buffer and the recursion, besides the output.
+
+**Common mistake.** Trying `1` before `0`: the strings are right but the order is reversed, so `n = 2` gives `["10", "01", "00"]` instead of `["00", "01", "10"]`.
+
+## 154 · All Subsets
+
+**Recursion and Backtracking · Medium**
+
+Given an array of distinct integers, return every subset of its values, from the empty one to the whole array. Inside a subset, keep the values in their input order. Order the subsets by their positions in the input: compare the lists of positions lexicographically, where a list comes before every longer list that starts with it. So the empty subset is first, and each subset is followed straight away by the subsets that extend it. When the input is sorted, this is plain lexicographic order of the values.
+
+```text
+Example 1
+  input:  nums = [1, 2, 3]
+  output: [[], [1], [1, 2], [1, 2, 3], [1, 3], [2], [2, 3], [3]]
+
+Example 2
+  input:  nums = [4, 1]
+  output: [[], [4], [4, 1], [1]]        (input order, not sorted)
+```
+
+Constraints: `0 ≤ nums.length ≤ 10`, `-100 ≤ nums[i] ≤ 100`, all values distinct.
+
+**Approach.** One simple way counts from 0 to 2ⁿ − 1 and reads each number's bits as a choice of positions: O(2ⁿ × n), but it produces the subsets in a different order and gives no shape to reuse. Backtracking does it with one buffer, `path`. Every call is itself a subset, so `walk(start)` first records a copy of `path`; then, for each position `i` from `start` on, it appends `nums[i]`, recurses with `i + 1` and removes it again. Starting each loop at `start` means later picks come only from later positions, so no subset appears twice and the values stay in input order; the loop order is exactly the order the statement asks for. The Go section writes the same search as a take-or-skip choice at each position, which finds the same 2ⁿ subsets in another order.
+
+<Solutions n="154" />
+
+**Complexity.** O(2ⁿ × n) time: 2ⁿ subsets, each copied in O(n). O(n) space for the buffer and the recursion, besides the output.
+
+**Common mistake.** Recording `path` itself instead of a copy: the search keeps changing that one list, so the result for `[1, 2, 3]` does not hold eight different subsets (in TypeScript and Python, all eight entries are the same list, empty by the end).
+
+## 155 · All Orderings
+
+**Recursion and Backtracking · Medium**
+
+Given an array of distinct integers, return every ordering of its values (every permutation). List them in the order you get by always trying the values in their input order: all orderings that start with `nums[0]` come first, then those that start with `nums[1]`, and so on, and the same rule decides the order among the remaining values at every later position. For a sorted input this is plain lexicographic order. An empty array has exactly one ordering, the empty one.
+
+```text
+Example 1
+  input:  nums = [1, 2, 3]
+  output: [[1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]]
+
+Example 2
+  input:  nums = [3, 1, 2]
+  output: [[3, 1, 2], [3, 2, 1], [1, 3, 2], [1, 2, 3], [2, 3, 1], [2, 1, 3]]
+```
+
+Constraints: `0 ≤ nums.length ≤ 8`, `-100 ≤ nums[i] ≤ 100`, all values distinct.
+
+**Approach.** A simple recursive idea builds the orderings of the first `n − 1` values and inserts the last value into every gap of each one; it works, but copies many lists and produces another order. Backtracking fills one position at a time. Keep a buffer `path` and an array of booleans `used`, one per input position. At each level loop over every position `i`; skip it if it is used, otherwise mark it, append `nums[i]`, recurse, then remove it and clear the mark. When `path` holds all `n` values, record a copy. The `used` array makes "is this value already placed?" an O(1) check instead of a scan of `path`. The well-known version that swaps elements in place needs no `used` array, but it emits the orderings in a different sequence, so it does not meet this contract.
+
+<Solutions n="155" />
+
+**Complexity.** O(n × n!) time: n! orderings, each copied in O(n), and the search's other calls add only a constant factor. O(n) space for `path`, `used` and the recursion, besides the output.
+
+**Common mistake.** Forgetting to clear `used[i]` after the recursive call: a value placed once stays marked for the rest of the search, so `[1, 2, 3]` returns only `[[1, 2, 3]]`.
+
+## 156 · Combinations That Sum to a Target
+
+**Recursion and Backtracking · Medium**
+
+A Parcel and Pulse truck has `target` units of free space, and the depot has crates in a few distinct sizes, given in `candidates`, with as many crates of each size as needed. Return every way to fill the space exactly. A way is a collection of sizes in which order does not matter, so write each one as a list in non-decreasing order, and return the lists in lexicographic order. If no way exists, return an empty list.
+
+```text
+Example 1
+  input:  candidates = [2, 3, 5], target = 8
+  output: [[2, 2, 2, 2], [2, 3, 3], [3, 5]]
+
+Example 2
+  input:  candidates = [7, 3, 2], target = 7
+  output: [[2, 2, 3], [7]]        (the input does not have to be sorted)
+```
+
+Constraints: `1 ≤ candidates.length ≤ 30`, `1 ≤ candidates[i] ≤ 50`, all sizes distinct, `1 ≤ target ≤ 40`.
+
+**Approach.** A naive search tries every crate at every step and collects every sequence that reaches the target; it finds each way once per ordering of its crates (`[3, 5]` and `[5, 3]`), so it does far more work and still needs a sort and a dedupe at the end. Sort the sizes first and let the search pick sizes only in non-decreasing order: `walk(start, remaining)` records a copy of `path` when `remaining` is 0, and otherwise loops `i` from `start`, appends `sizes[i]`, recurses with `walk(i, remaining − sizes[i])` and removes it. Passing `i` and not `i + 1` lets the same size be used again, and never going back below `start` means each way is built in exactly one order. Because the sizes are sorted, the loop can stop at the first size larger than `remaining`, since every later one is larger too. The loop order makes the results come out in lexicographic order.
+
+<Solutions n="156" />
+
+**Complexity.** O(k log k) to sort the `k` sizes, then time proportional to the number of non-decreasing lists of sizes whose sum is at most `target`, which grows exponentially with `target`, times the copy of each result. O(target / smallest size) space for the path and the recursion, plus the sorted copy, besides the output.
+
+**Common mistake.** Starting each loop at index 0 instead of at `start`, which builds the same way in several orders: for `[2, 3, 5]` and 8 it returns `[3, 5]` and `[5, 3]`, and three orderings of `2, 3, 3`.
+
+## 157 · Every Balanced Bracket String
+
+**Recursion and Backtracking · Medium**
+
+Given `n`, return every string of `n` opening and `n` closing round brackets that is balanced: reading from the left, the number of `)` never exceeds the number of `(` seen so far, and the two counts are equal at the end. Return the strings in lexicographic order with `(` before `)`, which is also their order in ASCII. For `n = 0`, return `[""]`.
+
+```text
+Example 1
+  input:  n = 3
+  output: ["((()))", "(()())", "(())()", "()(())", "()()()"]
+
+Example 2
+  input:  n = 1
+  output: ["()"]
+```
+
+Constraints: `0 ≤ n ≤ 10`.
+
+**Approach.** The simple solution generates all 2²ⁿ strings of length `2n` and keeps the balanced ones: O(4ⁿ × n). Backtracking only builds strings that can still be balanced, using two counters. An `(` is allowed while `opened < n`, and a `)` only while `closed < opened`, so every prefix the search builds can be completed and no branch is wasted. Append the bracket, recurse with the updated counter, remove it; when `closed` reaches `n`, record a copy. Trying `(` before `)` produces the strings in lexicographic order. Their number is the `n`-th Catalan number: 5 for `n = 3`, 14 for `n = 4`, 16,796 for `n = 10`.
+
+<Solutions n="157" />
+
+**Complexity.** O(n × Cₙ) time, where Cₙ is the `n`-th Catalan number (it grows roughly like 4ⁿ / (n√n)): each string is copied in O(n), and since no branch dead-ends, the search makes O(n) calls per result. O(n) space for the buffer and the recursion, besides the output.
+
+**Common mistake.** Allowing `)` while `closed < n` instead of `closed < opened`, which lets a string close a bracket that was never opened: `n = 1` returns `["()", ")("]`.
+
+## 158 · Find a Word in a Letter Grid
+
+**Recursion and Backtracking · Medium**
+
+A grid of lowercase letters is given as an array of strings of equal length, one per row. Return `true` if `word` can be spelled along a path of cells in which each cell is directly above, below, left or right of the one before it (diagonals do not count), and no cell is used twice in the same path. The word has at least one letter. The grid must not be changed.
+
+```text
+Example 1
+  input:  grid = ["she",
+                  "afl",
+                  "nao"], word = "shelf"
+  output: true         (s, h, e along the top row, down to l, left to f)
+
+Example 2
+  input:  the same grid, word = "lol"
+  output: false        (the grid has one l, and a cell cannot be used twice)
+```
+
+Constraints: `1 ≤ rows, cols ≤ 6`, `1 ≤ word.length ≤ 15`, the grid and the word contain only `a`–`z`.
+
+**Approach.** The simple idea is to list every path of the right length from every cell and compare each with the word, which spends nearly all its time on paths that went wrong at the first letter. Backtracking stops a path as soon as it fails. `walk(r, c, k)` returns `true` if `k` has reached the end of the word; it returns `false` if the cell is off the grid, already in the path, or holds a letter other than `word[k]`. Otherwise it marks the cell in a separate `used` grid (choose), tries the four neighbours with `k + 1` (recurse), clears the mark (un-choose) and returns what it found. Clearing the mark is what lets a later path use a cell that a failed path passed through, and keeping the marks in their own grid leaves the input untouched. Start `walk` from every cell; `||` stops at the first neighbour that works.
+
+<Solutions n="158" />
+
+**Complexity.** O(rows × cols × 3ᴸ) time, where `L` is the word's length: from each start the first step has four directions and every later one at most three, since the cell it came from is used. O(rows × cols) space for `used`, plus O(L) for the recursion.
+
+**Common mistake.** Not clearing the mark when a path fails: cells tried by a dead end stay blocked for later starts, so `grid = ["aa", "ab"]` with `"aaab"` returns `false`, although the path that starts at the top-right `a` (top-right, top-left, bottom-left, then the `b`) spells it.
+
+## 159 · Phone Keypad Words
+
+**Recursion and Backtracking · Medium**
+
+On a phone keypad each digit from `2` to `9` stands for a few letters: `2` is `abc`, `3` is `def`, `4` is `ghi`, `5` is `jkl`, `6` is `mno`, `7` is `pqrs`, `8` is `tuv` and `9` is `wxyz`. Given a string of such digits, return every letter string it can spell, one letter per digit, in lexicographic order. An empty string of digits spells nothing, so return an empty list for it.
+
+```text
+Example 1
+  input:  digits = "23"
+  output: ["ad", "ae", "af", "bd", "be", "bf", "cd", "ce", "cf"]
+
+Example 2
+  input:  digits = "7"
+  output: ["p", "q", "r", "s"]
+```
+
+Constraints: `0 ≤ digits.length ≤ 6`, every character is `2`–`9`.
+
+**Approach.** An iterative version starts from a list holding one empty string and, for each digit, replaces every string with one copy per letter of that digit; it works, but it builds every list of shorter prefixes along the way. Backtracking builds one word at a time in a buffer: at position `k`, for each letter of `digits[k]`, append it, recurse with `k + 1` and remove it, and record a copy when `k` reaches the end. The mapping is an array of ten strings indexed by the digit's value, `digits[k] - '0'`, with empty strings at 0 and 1. Each key's letters are already in alphabetical order and the search tries them from left to right, so the words come out in lexicographic order. The empty input needs its own check, because the search on its own would record the empty buffer once.
+
+<Solutions n="159" />
+
+**Complexity.** O(4ⁿ × n) time for `n` digits: at most four letters per digit, and each word is copied in O(n). O(n) space for the buffer and the recursion, besides the output.
+
+**Common mistake.** Leaving out the check for empty input: the search records the empty buffer straight away, so `""` returns `[""]` instead of `[]`.
+
+## 160 · Split Into Palindromes
+
+**Recursion and Backtracking · Medium**
+
+Given a string of lowercase letters, return every way to cut it into consecutive pieces so that each piece is a palindrome, a string that reads the same in both directions. A way is the list of its pieces from left to right. Order the ways by their pieces from the left: at the first piece where two ways differ, the one with the shorter piece comes first. This is the order a search produces when it always tries the shortest first piece first.
+
+```text
+Example 1
+  input:  s = "aab"
+  output: [["a", "a", "b"], ["aa", "b"]]
+
+Example 2
+  input:  s = "noon"
+  output: [["n", "o", "o", "n"], ["n", "oo", "n"], ["noon"]]
+```
+
+Constraints: `1 ≤ s.length ≤ 12`, `s` contains only `a`–`z`.
+
+**Approach.** The simple solution tries all 2ⁿ⁻¹ ways to place cuts between letters and keeps those whose pieces are all palindromes. Backtracking chooses the first piece and only goes on when that piece is a palindrome, so a bad prefix is never extended. `walk(start)` records a copy of `path` when `start` reaches the end; otherwise, for each `end` from `start` to the last index, if `s[start..end]` is a palindrome it appends that piece, recurses with `end + 1` and removes it. A two-pointer check that walks in from both ends tests a piece in O(length). For longer strings, a table `isPalindrome[i][j]` filled once in O(n²) removes the repeated checks; at this size the direct check is enough, but it is a good follow-up to mention.
+
+<Solutions n="160" />
+
+**Complexity.** O(n × 2ⁿ) time in the worst case, a string of one repeated letter, where all 2ⁿ⁻¹ ways are valid and each costs O(n) to check and copy. O(n) space for the path and the recursion, besides the output.
+
+**Common mistake.** Taking the piece as the slice from `start` to `end` when `end` is the inclusive last index (slices exclude their end): every piece loses its last letter, and `"ab"` returns `[["", ""]]` instead of `[["a", "b"]]`.
+
+## 161 · Place n Queens
+
+**Recursion and Backtracking · Hard**
+
+Place `n` queens on an `n × n` chessboard so that no two of them share a row, a column or a diagonal. Return every such board, written as `n` strings, one per row from the top, with `Q` for a queen and `.` for an empty square. Each row holds exactly one queen, so a board is described by the list of its queens' columns from the top row down; return the boards in lexicographic order of those lists. That is not the order of the strings themselves, because `.` sorts before `Q`. If no board exists, return an empty list.
+
+```text
+Example 1
+  input:  n = 4
+  output: [[".Q..", "...Q", "Q...", "..Q."],        (columns 1, 3, 0, 2)
+           ["..Q.", "Q...", "...Q", ".Q.."]]        (columns 2, 0, 3, 1)
+
+Example 2
+  input:  n = 3
+  output: []
+```
+
+Constraints: `1 ≤ n ≤ 9`.
+
+**Approach.** Since each row gets one queen, the simple solution tries every choice of a column per row, nⁿ boards, and checks each: O(nⁿ × n²). Backtracking places the queens row by row and only in squares no earlier queen attacks, so a bad partial board is dropped as soon as it appears. Three arrays of booleans make that test O(1): one per column, one per `r + c`, which is the same along every down-left diagonal, and one per `r − c + n − 1`, which is the same along every down-right diagonal (the `n − 1` keeps the index from going negative). For each column `c` of row `r` that is free in all three, set the three flags and append `c` (choose), recurse to row `r + 1`, then clear them and remove `c` (un-choose). At row `n`, build the strings from the list of columns. Trying columns from left to right produces the boards in the required order.
+
+<Solutions n="161" />
+
+**Complexity.** O(n!) time as an upper bound on the search, since row `r` has at most `n − r` free columns, plus O(n²) to build each board found. O(n) space for the flags, the column list and the recursion, besides the output.
+
+**Common mistake.** Marking only one of the two diagonal directions, which lets two queens attack each other along the other one: `n = 4` returns 7 boards instead of 2.
+
+## 162 · Solve a Sudoku
+
+**Recursion and Backtracking · Hard**
+
+A Sudoku board is given as 9 strings of 9 characters, one per row, as in problem 019: a digit `1`–`9` for a given cell and `.` for an empty one. Fill the empty cells so that every row, every column and every 3 × 3 box holds each digit from 1 to 9 exactly once, and return the filled board in the same format. The givens never repeat a digit within a row, a column or a box. If the board cannot be completed, return an empty array. If it has several solutions, return the one that is smallest when the rows are read in order as one 81-digit number; the test boards have exactly one.
+
+```text
+Example 1
+  input:  board = ["..59..386",
+                   ".86....29",
+                   "1....3...",
+                   ".51...8..",
+                   "8.4..7...",
+                   "...46...1",
+                   ".12....4.",
+                   "..87..5..",
+                   "647.....8"]
+  output: ["475921386",
+           "386574129",
+           "129683475",
+           "751392864",
+           "864157293",
+           "293468751",
+           "512839647",
+           "938746512",
+           "647215938"]
+
+Example 2
+  input:  board = ["12345678.", "........9", then seven rows of "........."]
+  output: []           (the last cell of row 0 needs a 9, and column 8 already has one)
+```
+
+Constraints: `board.length = 9`, `board[i].length = 9`, each character is `1`–`9` or `.`, the givens do not repeat within a row, column or box.
+
+**Approach.** Trying every digit in every empty cell and checking only at the end means 9ᵐ boards for `m` empty cells, which is hopeless; backtracking checks each digit as it is placed, so a wrong guess is cut off at once. Three tables of booleans built from the givens, `inRow[r][d]`, `inCol[c][d]` and `inBox[b][d]` with `b = (r / 3) × 3 + c / 3` as in problem 019, make that check O(1). Copy the rows into mutable character arrays (strings are immutable in all six languages) and list the empty cells in row order. `fill(k)` returns `true` once `k` has passed the last empty cell; otherwise it tries each allowed digit at cell `k`: set the flags and the cell, call `fill(k + 1)`, and either return `true` at once, keeping the digits, or clear them and try the next digit. If no digit fits it returns `false`, and the previous cell moves on to its next digit; trying the digits in increasing order, cell by cell, makes the first solution found the smallest. A good follow-up is to fill next the cell with the fewest allowed digits, which shrinks the search a lot on hard puzzles.
+
+<Solutions n="162" />
+
+**Complexity.** O(9ᵐ) time in the worst case for `m` empty cells, though the checks prune most branches: example 1, with 51 empty cells, takes 548 calls to `fill`. O(m) space for the list of empty cells and the recursion, plus the copy of the board and the three fixed-size tables.
+
+**Common mistake.** Calling `fill(k + 1)` without returning when it succeeds: the loop carries on, undoes the digits it just placed, and the solver reports failure, so example 1 returns an empty array.
