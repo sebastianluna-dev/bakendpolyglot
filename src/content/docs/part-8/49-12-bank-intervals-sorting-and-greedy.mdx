@@ -7,3 +7,211 @@ sidebar:
 ---
 import { Solutions } from '../../../components/book';
 
+
+## 183 · Make Change at the Box Office
+
+**Intervals, Sorting and Greedy · Easy**
+
+The SeatLock box office at a small venue sells walk-up tickets for 5 each, and the till starts the evening empty. Customers are served in queue order, each buys exactly one ticket and pays with a single bill of 5, 10 or 20, and each must get the exact change back on the spot from the bills already in the till. Given the bills in queue order, return `true` if every customer can be given correct change and `false` otherwise. An empty queue returns `true`.
+
+```text
+Example 1
+  input:  bills = [5, 5, 10, 5, 20]
+  output: true         (the last customer gets a 10 and a 5 back)
+
+Example 2
+  input:  bills = [5, 10, 10, 20]
+  output: false        (the third customer pays 10 and the till holds no 5)
+```
+
+Constraints: `0 ≤ bills.length ≤ 10⁵`, every `bills[i]` is 5, 10 or 20.
+
+**Approach.** The simple solution keeps every bill in a list and, for each customer, searches the list for a combination that makes the change, which is O(n) per customer and O(n²) overall. But a 20 is never given back as change, so the till is fully described by two counters: how many 5s and how many 10s it holds. A 5 needs no change, and a 10 needs one 5. A 20 needs 15 back, as `10 + 5` or `5 + 5 + 5`, and that is the only real choice: prefer the 10, because a 10 can only ever change a 20 while a 5 can change both, so keeping 5s never leaves you worse off. Return `false` the moment a customer cannot be served.
+
+<Solutions n="183" />
+
+**Complexity.** O(n) time, O(1) space for the two counters.
+
+**Common mistake.** Paying a 20 with three 5s whenever the till has them, which spends the bills that later 10s need: `[5, 5, 5, 5, 10, 20, 10]` returns `false` instead of `true`.
+
+## 184 · Seat Everyone With the Fewest Moves
+
+**Intervals, Sorting and Greedy · Easy**
+
+Before a SeatLock event starts, `n` guests stand in the aisle of one row and the row has exactly `n` free seats. Positions along the row are integers: `seats[i]` is where a free seat is and `guests[j]` is where a guest stands. One move takes one guest one position left or right. Return the fewest moves needed to put every guest in a different free seat. Seat positions are all different; two guests may stand at the same position. Empty arrays need 0 moves.
+
+```text
+Example 1
+  input:  seats = [4, 1, 7], guests = [2, 8, 3]
+  output: 3            (2 → 1, 3 → 4, 8 → 7)
+
+Example 2
+  input:  seats = [2, 6, 9, 10], guests = [5, 5, 1, 12]
+  output: 8            (1 → 2, 5 → 6, 5 → 9, 12 → 10)
+```
+
+Constraints: `0 ≤ n ≤ 10⁵`, `seats.length == guests.length`, `1 ≤ seats[i], guests[j] ≤ 10⁴`.
+
+**Approach.** The simple solution tries every assignment of guests to seats, which is n! assignments. Sorting removes the search: pair the leftmost guest with the leftmost seat, the second with the second, and so on, and add up the distances. Any assignment where two guests cross (the guest further left takes the seat further right) can be uncrossed without adding moves, so the sorted pairing is never beaten. Sort copies so the caller's arrays keep their order. Since positions are at most 10⁴, a counting sort would make the sort O(n + 10⁴), which is worth naming; the comparison sort is the version to write first. Go has no integer `abs`, so its file adds a three-line helper.
+
+<Solutions n="184" />
+
+**Complexity.** O(n log n) time for the two sorts, O(n) space for the sorted copies.
+
+**Common mistake.** Pairing `seats[i]` with `guests[i]` in the order given, without sorting: Example 1 returns `2 + 7 + 4 = 13` instead of 3.
+
+## 185 · Merge Overlapping Intervals
+
+**Intervals, Sorting and Greedy · Medium**
+
+A Shelfwise reading room is booked in blocks of time, each given as a pair `[start, end]` of whole minutes with `start ≤ end`, in no particular order. Merge every group of blocks that overlap into one block that covers the group, and return the merged blocks sorted by start. Two blocks overlap if they share at least one minute, and blocks that touch, where one ends at the minute the next starts, also merge: `[1, 4]` and `[4, 6]` become `[1, 6]`. Do not change the input. An empty list returns an empty list.
+
+```text
+Example 1
+  input:  intervals = [[9, 12], [1, 3], [2, 6], [8, 9]]
+  output: [[1, 6], [8, 12]]      ([8, 9] touches [9, 12])
+
+Example 2
+  input:  intervals = [[1, 10], [2, 3], [4, 5]]
+  output: [[1, 10]]              (the short blocks sit inside the long one)
+```
+
+Constraints: `0 ≤ intervals.length ≤ 10⁴`, `0 ≤ start ≤ end ≤ 10⁴`.
+
+**Approach.** The simple solution compares every pair of blocks and merges any two that overlap, repeating until nothing changes: O(n²) per round or worse. After sorting by start, overlapping blocks sit next to each other, so one pass is enough. Keep the merged list; for each block, if it starts at or before the end of the last merged block, extend that end to the larger of the two ends; otherwise it starts a new merged block. The larger of the two ends matters because a block can sit entirely inside the previous one. Each new merged block is a fresh pair rather than the input's own array, so extending it never changes the input.
+
+<Solutions n="185" />
+
+**Complexity.** O(n log n) time for the sort, O(n) space for the sorted copy and the result.
+
+**Common mistake.** Setting the last end to the new block's end instead of the larger of the two: Example 2 returns `[[1, 3], [4, 5]]`, because `[2, 3]` shrinks the block `[1, 10]` to `[1, 3]`.
+
+## 186 · Insert a New Interval
+
+**Intervals, Sorting and Greedy · Medium**
+
+In Parcel and Pulse, a truck's busy time for the day is a list of blocks `[start, end]` in minutes since midnight, with `start ≤ end`. The list is sorted by start, and no two blocks overlap or touch. A new delivery adds one more block, `newInterval`. Return the new list of busy blocks: still sorted, with every block that overlaps or touches the new one merged into it. As in problem 185, blocks that touch merge, so `[1, 3]` and `[3, 5]` become `[1, 5]`. The list may be empty.
+
+```text
+Example 1
+  input:  intervals = [[1, 3], [6, 8], [10, 12], [15, 18]], newInterval = [7, 10]
+  output: [[1, 3], [6, 12], [15, 18]]     (overlaps [6, 8], touches [10, 12])
+
+Example 2
+  input:  intervals = [[2, 4], [9, 11]], newInterval = [5, 7]
+  output: [[2, 4], [5, 7], [9, 11]]       (fits in a gap)
+```
+
+Constraints: `0 ≤ intervals.length ≤ 10⁴`, `0 ≤ start ≤ end ≤ 10⁵` for every block and for `newInterval`.
+
+**Approach.** The simple solution appends the new block and runs the merge from problem 185, which sorts again: O(n log n). The list is already sorted, so one walk in three phases is enough. First copy every block that ends before the new one starts. Then, while a block starts at or before the new block's end, absorb it: the new block's start becomes the smaller start and its end the larger end. Add the grown block, then copy the rest. The comparisons decide what touching means: `end < start` for "entirely before" and `start <= end` for "overlaps or touches".
+
+<Solutions n="186" />
+
+**Complexity.** O(n) time, O(n) space for the result.
+
+**Common mistake.** Writing the first phase as `end <= newStart`, which counts a block that touches the new one as entirely before it: `[[1, 3]]` with `[3, 5]` returns `[[1, 3], [3, 5]]` instead of `[[1, 5]]`.
+
+## 187 · Fewest Removals to Avoid Overlap
+
+**Intervals, Sorting and Greedy · Medium**
+
+A SeatLock venue has one hall, and organisers have requested it for events given as pairs `[start, end]` of whole hours with `start < end`, in no particular order. Return the fewest requests that must be turned down so that no two of the remaining events overlap. Here an event occupies the hall from `start` up to `end`, so two events that touch, where one ends at the hour the next starts, do not overlap and can both stay. Two identical requests do overlap. An empty list needs 0 removals.
+
+```text
+Example 1
+  input:  intervals = [[1, 10], [2, 3], [4, 5], [6, 7]]
+  output: 1            (drop [1, 10] and the other three fit)
+
+Example 2
+  input:  intervals = [[1, 3], [3, 5], [5, 8]]
+  output: 0            (touching events do not overlap)
+```
+
+Constraints: `0 ≤ intervals.length ≤ 10⁵`, `0 ≤ start < end ≤ 10⁹`.
+
+**Approach.** Turning down the fewest requests means keeping the most events that do not overlap. Trying every subset is O(2ⁿ), and a dynamic programme over events sorted by start is O(n²). The greedy rule is to keep the event that ends first: whatever else you could keep, swapping your first event for the one that ends earliest never causes a new overlap, and it leaves the most hall time for the rest. So sort by end and walk the list, keeping the end of the last event kept; an event that starts at or after that end is kept and moves it, and any other event is a removal. Ties in the end do not change the count, so an unstable sort such as C#'s `Array.Sort` is fine here.
+
+<Solutions n="187" />
+
+**Complexity.** O(n log n) time for the sort, O(n) space for the sorted copy.
+
+**Common mistake.** Sorting by start and keeping the earliest-starting event, which keeps a long event that blocks many short ones: Example 1 returns 3 instead of 1.
+
+## 188 · Rooms Needed for All Meetings
+
+**Intervals, Sorting and Greedy · Medium**
+
+A Shelfwise branch lends its study rooms to reading groups, and each booking is a pair `[start, end]` of whole minutes with `start < end`, in no particular order. All rooms are the same. Return the fewest rooms that let every meeting happen as booked, with no two meetings in the same room at the same time. A meeting occupies its room from `start` up to `end`, so a meeting that ends at minute 10 and one that starts at minute 10 can use the same room. No bookings need 0 rooms.
+
+```text
+Example 1
+  input:  meetings = [[9, 12], [10, 11], [11, 13], [13, 14]]
+  output: 2            ([11, 13] takes the room [10, 11] has just left)
+
+Example 2
+  input:  meetings = [[8, 10], [10, 12], [12, 14]]
+  output: 1            (back to back in one room)
+```
+
+Constraints: `0 ≤ meetings.length ≤ 10⁴`, `0 ≤ start < end ≤ 10⁶`.
+
+**Approach.** The answer is the largest number of meetings running at the same moment, and the simple solution counts, for each meeting's start, how many meetings are running then: O(n²). Only the order of the start and end times matters, not which meeting each belongs to, so sort the starts and the ends separately and walk the starts with a second pointer `j` into the ends. If the next start is at or after `ends[j]`, some meeting is over and its room is reused, so advance `j`; otherwise one more room is needed. The other classic solution sorts the meetings by start and keeps a min-heap of the end times of the rooms in use, popping the top whenever it is at or before the next start; it is also O(n log n), and in TypeScript it would need the `MinHeap` class from the TypeScript section, which is why the two-pointer version is the one written here.
+
+<Solutions n="188" />
+
+**Complexity.** O(n log n) time for the two sorts, O(n) space for the sorted starts and ends.
+
+**Common mistake.** Comparing with `start > ends[j]` instead of `>=`, which counts back-to-back meetings as overlapping: Example 2 returns 2 instead of 1.
+
+## 189 · Can You Reach the Last Square?
+
+**Intervals, Sorting and Greedy · Medium**
+
+A board game is a single row of squares, and `jumps[i]` is the longest jump allowed from square `i`: from there you may move forward by any number of squares from 1 to `jumps[i]`, or not at all if it is 0. You start on square 0. Return `true` if some sequence of jumps lands on the last square and `false` otherwise. A board with one square returns `true`, since you start on it.
+
+```text
+Example 1
+  input:  jumps = [2, 0, 3, 0, 0, 1]
+  output: true         (0 → 2, then 2 → 5)
+
+Example 2
+  input:  jumps = [3, 1, 1, 0, 4]
+  output: false        (every path ends on square 3, which allows no jump)
+```
+
+Constraints: `1 ≤ jumps.length ≤ 10⁴`, `0 ≤ jumps[i] ≤ 10⁵`.
+
+**Approach.** The simple solution marks squares as reachable: from each reachable square, mark every square it can jump to, which is O(n × max jump) and O(n²) on a board of long jumps. The marks are wasteful, because the reachable squares always form one unbroken run from square 0: if you can reach square `k`, you can reach every square before it on the way. So one number describes them, the furthest square reached so far. Walk the squares left to right; if the current square is beyond that furthest point, nothing reachable gets you there, so return `false`; otherwise extend the furthest point to `i + jumps[i]` if that is larger. Reaching the end of the loop means the last square was reachable.
+
+<Solutions n="189" />
+
+**Complexity.** O(n) time, O(1) space for the furthest square.
+
+**Common mistake.** Extending the furthest point from every square without first checking that the square itself is reachable: `[0, 1]` returns `true` instead of `false`, because square 1's jump counts although you can never stand on it.
+
+## 190 · Hand Out Candy Fairly
+
+**Intervals, Sorting and Greedy · Hard**
+
+At the end of a Shelfwise summer reading club, the children sit in a row and `scores[i]` is the number of books child `i` read. Hand out candy so that every child gets at least one piece, and any child who read more books than a neighbour on either side gets more candy than that neighbour. Neighbours with the same score need not get the same amount. Return the fewest pieces of candy in total. An empty row needs 0.
+
+```text
+Example 1
+  input:  scores = [1, 3, 2, 2, 1]
+  output: 7            (candy 1, 2, 1, 2, 1)
+
+Example 2
+  input:  scores = [5, 4, 3, 4]
+  output: 8            (candy 3, 2, 1, 2)
+```
+
+Constraints: `0 ≤ scores.length ≤ 2 × 10⁴`, `0 ≤ scores[i] ≤ 2 × 10⁴`.
+
+**Approach.** The simple solution starts everyone at one piece and keeps sweeping the row, raising any child who has no more than a lower-scoring neighbour, until a sweep changes nothing: O(n²) in the worst case, on a long decreasing row. The rule is really two separate rules, one for the left neighbour and one for the right, and each can be satisfied in one pass. Left to right, give a child one more than the left neighbour when the score is higher. Right to left, give a child at least one more than the right neighbour when the score is higher, taking the maximum with what the first pass gave, so that the left rule still holds. Each child ends with the smallest amount that satisfies both rules. A one-pass O(1)-space solution that counts the lengths of rising and falling runs also exists; it is much easier to get wrong under time pressure.
+
+<Solutions n="190" />
+
+**Complexity.** O(n) time, O(n) space for the candy per child.
+
+**Common mistake.** Overwriting in the second pass, `candy[i] = candy[i + 1] + 1`, instead of taking the maximum: `[1, 2, 3, 4, 1]` returns 9 instead of 11, and the child who read 4 books gets fewer pieces than the one who read 3.
