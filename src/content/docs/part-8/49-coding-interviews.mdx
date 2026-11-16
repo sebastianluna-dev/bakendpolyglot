@@ -966,3 +966,456 @@ foreach (var (prices, budget, want) in cases)
 ```
 
 It is the shape the TypeScript and Go sections use, and the message names the failing row. A real project would make it an xUnit `[Theory]` with one `[InlineData]` per row, run by `dotnet test` (Chapter 17); in the round, one file is enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
+
+## Java
+
+Java reads so much like C# that the traps are the same kind: code you half-remember compiles, then does something else. `==` compares references on strings and boxed `Integer` values, `map.get` returns `null` and the `int` you assign it to throws, `Arrays.sort` on an `int[]` takes no comparator, and length is spelled three ways: `a.length`, `s.length()`, `list.size()`. In return the library has a heap, a real deque, sorted maps and records that work as keys. It lacks tuples and a heap that can change a priority.
+
+Everything here runs on Java 21 with `java File.java`, the way the files in `apps/interview-bank` do: the launcher compiles the file in memory and runs the `main` of its first class, with no project. In the round, `import java.util.*;` saves remembering where each type lives; add `java.util.function.*`, `java.util.stream.*`, `java.util.concurrent.*` and `java.util.concurrent.atomic.*` as needed. The short `void main()` is a preview in Java 21, so type the full `public static void main(String[] args)`. Chapter 5 covers the runtime; this section covers only what you type in the round.
+
+### Syntax by heart
+
+These are the structures the problem bank uses, with the costs you will name in step 6.
+
+| Structure | Write it as | Operations to know |
+| --- | --- | --- |
+| List | `List<Integer> a = new ArrayList<>()` | `add`, `get(i)`, `set(i, x)`, `getLast()`, `removeLast()`, `size()`: O(1), `add` amortized. `add(0, x)`, `remove(0)`, `contains`, `indexOf`: O(n) |
+| Array | `int[] a = new int[n]` | `a[i]` and `a.length`, a field with no parentheses: O(1). Zeroed on creation, fixed size |
+| Map | `Map<String, Integer> m = new HashMap<>()` | `get`, `getOrDefault`, `put`, `putIfAbsent`, `merge`, `computeIfAbsent`, `containsKey`, `remove`, `size()`: O(1) average. Iteration order is not specified |
+| Set | `Set<Integer> s = new HashSet<>()` | `add` (returns `false` if already there), `contains`, `remove`, `size()`: O(1) average |
+| Stack | `Deque<Integer> st = new ArrayDeque<>()` | `push`, `pop`, `peek`: O(1). `pop` throws when empty; `peek` returns `null` |
+| Queue | `Deque<Integer> q = new ArrayDeque<>()` | `offer` at the back, `poll` and `peek` at the front: O(1). Both return `null` when empty |
+| Deque | `Deque<Integer> d = new ArrayDeque<>()` | `offerFirst`, `offerLast`, `pollFirst`, `pollLast`, `peekFirst`, `peekLast`: O(1). No indexing, no `null` elements |
+| Heap | `new PriorityQueue<Integer>()` | `offer`, `poll`: O(log n). `peek`, `size()`: O(1). Smallest first |
+| Grid | `int[][] g = new int[rows][cols]` | `g[r][c]`; `g.length` rows, `g[0].length` columns. Zeroed |
+| Pair | a record, `record Cell(int r, int c) {}`, or an `int[]` | `new Cell(r, c)`, `cell.r()`. A record is equal by value, so it works as a key; an `int[]` is not |
+
+`ArrayDeque` is your stack, queue and deque. Leave `Stack` and `LinkedList` to old code: the `Stack` documentation itself points to `Deque`, and `ArrayDeque`'s says it is likely to be faster than either in its role. Generics take only objects, so `List<int>` does not compile; write `List<Integer>`, or use an `int[]` when the size is fixed.
+
+The everyday moves:
+
+```java
+List<Integer> copies = new ArrayList<>();
+copies.add(4);
+copies.add(9);
+int last = copies.getLast();               // 9, without removing it (Java 21)
+copies.removeLast();                       // pop from the end: O(1)
+
+Map<String, Integer> loansPerMember = new HashMap<>();
+loansPerMember.put("ana", loansPerMember.getOrDefault("ana", 0) + 1);   // count with a default
+loansPerMember.merge("ana", 1, Integer::sum);                           // the same, in one call
+
+Map<String, List<String>> byAuthor = new HashMap<>();
+byAuthor.computeIfAbsent("Herbert", k -> new ArrayList<>()).add("Dune");   // group without an if
+
+Set<Integer> seen = new HashSet<>(List.of(3, 1, 3));   // 3 and 1
+boolean added = seen.add(7);               // true; false if 7 was already there
+
+Deque<Character> stack = new ArrayDeque<>();
+stack.push('(');
+char top = stack.peek();                   // '(', without removing it
+stack.pop();                               // pop throws on an empty stack; peek returns null
+
+Deque<Integer> queue = new ArrayDeque<>();
+queue.offer(1);                            // in at the back
+queue.offer(2);
+int first = queue.poll();                  // 1, out at the front; poll returns null when empty
+
+Deque<Integer> deque = new ArrayDeque<>();
+deque.offerLast(5);
+deque.offerFirst(2);
+int front = deque.peekFirst();             // 2
+deque.pollLast();                          // O(1) at both ends
+
+int[][] grid = new int[3][4];              // zeroed; grid.length is 3, grid[0].length is 4
+```
+
+For a composite key, declare a record, inside the class or even inside the method. As in the C# section, records compare by value and arrays do not:
+
+```java
+record Cell(int r, int c) {}
+
+Set<Cell> visited = new HashSet<>();
+visited.add(new Cell(0, 1));
+boolean found = visited.contains(new Cell(0, 1));    // true: records compare by value
+
+Set<int[]> broken = new HashSet<>();
+broken.add(new int[] {0, 1});
+boolean lost = broken.contains(new int[] {0, 1});    // false: arrays compare by reference
+```
+
+`int[]` is still the quickest pair when nothing looks it up, such as a heap entry or a stack frame. A `Map` hands out `Map.Entry` pairs, read with `getKey()` and `getValue()`; `Map.entry(k, v)` makes one.
+
+In breadth-first search, `HashSet.add` returning a `boolean` makes the "seen" check and the insert one call:
+
+```java
+static List<Integer> bfsOrder(Map<Integer, List<Integer>> graph, int start) {
+    List<Integer> order = new ArrayList<>();
+    Set<Integer> seen = new HashSet<>(List.of(start));
+    Deque<Integer> queue = new ArrayDeque<>(List.of(start));
+    while (!queue.isEmpty()) {
+        int node = queue.poll();
+        order.add(node);
+        for (int next : graph.getOrDefault(node, List.of()))
+            if (seen.add(next)) queue.offer(next);
+    }
+    return order;
+}
+```
+
+<Pitfall title="Boxed integers">
+Boxing is silent, and three bugs come with it. `==` on two `Integer` values compares references: values from −128 to 127 are cached, so `a == b` passes small tests, while two boxed 1000s are different objects on a default JVM. Write `a.equals(b)`. `int c = counts.get("zoe")` throws `NullPointerException` for a missing key, because `null` cannot unbox. And `list.remove(1)` on a `List<Integer>` removes index 1, not the value 1; write `list.remove(Integer.valueOf(1))`.
+</Pitfall>
+
+### Strings and characters
+
+Strings are immutable, and `s.charAt(i)` returns a `char`, a UTF-16 code unit. Arithmetic on a `char` gives an `int`; cast back with `(char)`.
+
+```java
+String s = "Shelfwise";
+char first = s.charAt(0);                  // 'S'
+char lastCh = s.charAt(s.length() - 1);    // 'e'
+String part = s.substring(1, 4);           // "hel": begin and end, end excluded
+int pos = s.charAt(1) - 'a';               // 7: char minus char is an int
+char letter = (char) ('a' + 7);            // 'h': cast back to char
+int digit = '7' - '0';                     // 7
+char[] chars = s.toCharArray();            // a copy you can change; new String(chars) turns it back
+String[] words = "  two   words ".trim().split("\\s+");   // ["two", "words"]
+String padded = String.format("%03d", 7);  // "007"
+String reversed = new StringBuilder("stressed").reverse().toString();   // "desserts"
+String joined = String.join(", ", List.of("a", "b", "c"));             // "a, b, c"
+```
+
+`String.join` takes strings only; print an `int[]` with `Arrays.toString(a)`. Build long strings with `StringBuilder` (`append`, `setCharAt`, `deleteCharAt`, then `toString()`). For letter counts, `new int[26]` with `counts[ch - 'a']++`, compared with `Arrays.equals`, never `==`.
+
+Compare strings with `equals`. `==` compares references, and often passes anyway because identical literals are one object:
+
+```java
+String typed = new StringBuilder("du").append("ne").toString();
+boolean same = typed == "dune";            // false: two different objects
+boolean equal = typed.equals("dune");      // true
+```
+
+<Pitfall title="split takes a regular expression">
+`split` reads its argument as a regex and drops trailing empty strings. `"a.b.c".split(".")` returns an empty array, because `.` matches every character; write `split("\\.")`. `"a,b,,".split(",")` gives `["a", "b"]`; pass a limit of `-1` to keep the empty fields. A leading separator does give a leading `""`, so `trim()` before splitting on `"\\s+"`.
+</Pitfall>
+
+### Sorting with a comparator
+
+`Arrays.sort` on a primitive array sorts ascending and has no comparator overload: `Arrays.sort(nums, (a, b) -> b - a)` on an `int[]` does not compile. Object arrays and lists take one, and an `int[][]` is an array of objects:
+
+```java
+int[] nums = {10, 9, 1};
+Arrays.sort(nums);                                  // [1, 9, 10], in place; int[] takes no comparator
+Integer[] boxed = {10, 9, 1};
+Arrays.sort(boxed, Comparator.reverseOrder());      // [10, 9, 1]: an Integer[] does
+int[][] intervals = {{5, 6}, {1, 3}, {2, 4}};
+Arrays.sort(intervals, (a, b) -> Integer.compare(a[0], b[0]));   // int[][] is an array of objects
+```
+
+For an `int[]` in descending order, sort it and read it backwards. Use `Integer.compare` in comparators, not `a - b`, which overflows: `[1, Integer.MIN_VALUE, 5]` sorted with `(a, b) -> a - b` comes out as `[1, 5, -2147483648]`. Chain keys with `Comparator`'s factory methods:
+
+```java
+record Loan(String member, int due) {}
+
+loans.sort(Comparator.comparingInt(Loan::due).thenComparing(Loan::member));   // bob, ana, eve
+loans.sort(Comparator.comparingInt(Loan::due).reversed());                     // latest first; ties keep their order
+loans.sort(Comparator.comparingInt(Loan::due).thenComparing(Loan::member, Comparator.reverseOrder()));
+```
+
+`reversed()` reverses the whole chain so far; to reverse only the second key, pass `Comparator.reverseOrder()` to `thenComparing`. Prefer method references: `Comparator.comparingInt(l -> l.due()).reversed()` does not compile, because Java can no longer infer that `l` is a `Loan`. Write `(Loan l) -> l.due()` if you need a lambda.
+
+Strings sort in ordinal order, by UTF-16 code unit: `["b", "a", "B", "A"]` becomes `A, B, a, b`, usually what a problem means by "lexicographic". `List.sort`, `Collections.sort` and `Arrays.sort` on objects are guaranteed stable, unlike C#. For primitive arrays the documentation names a dual-pivot quicksort; stability cannot matter there, since equal `int` values are indistinguishable.
+
+### Iteration
+
+```java
+int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+for (int i = 0; i < titles.length; i++) { /* index and value */ }
+for (String t : titles) { /* values */ }
+for (int i = titles.length - 1; i >= 0; i--) { /* backwards */ }
+for (Map.Entry<String, Integer> e : stock.entrySet()) { /* e.getKey(), e.getValue() */ }
+for (var e : stock.entrySet()) { /* the same, with var */ }
+stock.forEach((title, count) -> { /* a lambda: no break, no changing outer locals */ });
+for (int[] d : dirs) { int nr = r + d[0], nc = c + d[1]; /* the four neighbours */ }
+```
+
+Removing from a collection inside its own for-each usually throws `ConcurrentModificationException`; remove the second-to-last element of an `ArrayList` and the loop silently skips the last one instead. Use `list.removeIf(...)` or `map.values().removeIf(...)`. A lambda cannot assign to an outer local (`forEach(x -> total += x)` does not compile), another reason to prefer plain loops.
+
+### Numbers
+
+`int` is 32 bits and `long` is 64. Overflow wraps silently; instead of C#'s `checked`, there are the `Math.*Exact` methods:
+
+```java
+int a = 50_000, b = 50_000;
+int wrong = a * b;                    // -1794967296, and no error
+long stillWrong = a * b;              // the same: the multiplication happens in int
+long right = (long) a * b;            // 2500000000
+int boom = Math.multiplyExact(a, b);  // throws ArithmeticException
+long big = 3_000_000_000L;            // without the L, this does not compile
+```
+
+If values can pass about 2.1 × 10⁹, say so in step 2 and use `long`; beyond 64 bits there is `java.math.BigInteger`.
+
+| You want | Write | Note |
+| --- | --- | --- |
+| Integer division toward zero | `a / b` | `-7 / 2` is `-3`, and `7 / 2` is `3` |
+| A real quotient | `(double) a / b` | Cast before dividing; `(double) (a / b)` is already truncated |
+| Integer division rounding down | `Math.floorDiv(a, b)` | `-4` for `-7` and `2`, like Python's `//` |
+| Remainder | `a % b` | Takes the sign of `a`: `-7 % 3` is `-1` |
+| Always-positive modulo | `Math.floorMod(a, m)` | `2` for `-7` and `3`; the result takes the sign of `m` |
+| Midpoint | `lo + (hi - lo) / 2` | `(lo + hi) / 2` can overflow |
+| Sentinels | `Integer.MAX_VALUE`, `Integer.MIN_VALUE`, `Long.MAX_VALUE` | `MAX_VALUE + 1` wraps to `MIN_VALUE`: never add to a sentinel |
+| Checked arithmetic | `Math.addExact`, `Math.multiplyExact`, `Math.toIntExact` | Throw `ArithmeticException` instead of wrapping |
+| Absolute value | `Math.abs(x)` | Stays negative for `Integer.MIN_VALUE`; `Math.absExact` throws |
+
+`Integer.parseInt("12a")` throws `NumberFormatException`, and so does `Integer.parseInt(" 42 ")`: unlike C#, whitespace is not allowed, so `strip()` first. A value past `Integer.MAX_VALUE` throws too; use `Long.parseLong`. There is no `TryParse`, so you catch the exception. When the problem defines the format, as 038 does, parse by hand.
+
+### Errors
+
+Java alone in this book has checked exceptions (Chapter 5), which every caller must catch or declare. In an interview, throw unchecked ones: `IllegalArgumentException` for bad input, `IllegalStateException` for a call at the wrong time, or your own nested class that extends `RuntimeException`:
+
+```java
+static final Map<Integer, String> shelf = Map.of(1, "Dune, copy 1");
+
+static String findCopy(int id) {
+    String copy = shelf.get(id);
+    if (copy == null) throw new NotFoundException("copy " + id + " not found");
+    return copy;
+}
+
+static String findCopyOrNull(int id) {
+    try {
+        return findCopy(id);
+    } catch (NotFoundException e) {
+        return null;          // anything else keeps propagating: don't catch Exception here
+    }
+}
+
+static class NotFoundException extends RuntimeException {
+    NotFoundException(String message) { super(message); }
+}
+```
+
+For "may be missing" in a return type, the library's answer is `Optional.ofNullable(shelf.get(id))`, read with `orElse`. When you call something that throws a checked exception, such as `Thread.sleep` or `Future.get`, `main(String[] args) throws Exception` is acceptable in a round. A lambda passed as a `Function` or `Runnable` cannot throw one at all; a `Callable` can. Unlike C#, `throw e;` keeps the original stack trace, which Java records when the exception is created.
+
+### Concurrency basics
+
+Platform threads are OS threads; Java 21 adds virtual threads, which the JVM parks cheaply while they block (Chapter 5). Either way, shared variables can race, so the tools are those of C#: `AtomicInteger` for a number, a lock for anything bigger, or a concurrent collection. Work goes to an `ExecutorService`, which is `AutoCloseable` since Java 19: closing it waits for the submitted tasks.
+
+```java
+try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
+    Future<String> book = exec.submit(() -> loadBook(7));     // both calls start here
+    Future<String> member = exec.submit(() -> loadMember(3));
+    System.out.println(member.get() + " borrows " + book.get());   // get blocks until each is done
+}
+
+CompletableFuture<String> book = CompletableFuture.supplyAsync(() -> loadBook(7));
+CompletableFuture<String> member = CompletableFuture.supplyAsync(() -> loadMember(3));
+String line = book.thenCombine(member, (b, m) -> m + " borrows " + b).join();   // join: no checked exception
+```
+
+`Future.get` throws the checked `ExecutionException`, wrapping whatever the task threw; `join` throws an unchecked one. `CompletableFuture.allOf(...)` waits for many.
+
+The TypeScript `mapLimit` translates directly, with an `AtomicInteger` in place of `next++`. `getAndIncrement` reads and increments in one atomic step, so each index goes to exactly one worker:
+
+```java
+static <T, R> List<R> mapLimit(List<T> items, int limit, Function<T, R> fn) throws Exception {
+    List<R> results = new ArrayList<>(Collections.nCopies(items.size(), null));
+    AtomicInteger next = new AtomicInteger();
+    try (ExecutorService pool = Executors.newFixedThreadPool(limit)) {
+        List<Future<?>> workers = new ArrayList<>();
+        for (int w = 0; w < Math.min(limit, items.size()); w++)
+            workers.add(pool.submit(() -> {
+                int i;
+                while ((i = next.getAndIncrement()) < items.size())
+                    results.set(i, fn.apply(items.get(i)));   // each index goes to one worker
+            }));
+        for (Future<?> f : workers) f.get();   // wait, and rethrow a worker's failure
+    }
+    return results;
+}
+```
+
+With virtual threads, the idiomatic version starts a thread per item and lets a `Semaphore` admit `limit` at a time:
+
+```java
+static <T, R> List<R> mapLimitGate(List<T> items, int limit, Function<T, R> fn) throws Exception {
+    Semaphore gate = new Semaphore(limit);
+    try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
+        List<Future<R>> futures = new ArrayList<>();
+        for (T item : items)
+            futures.add(exec.submit(() -> {
+                gate.acquire();                // at most `limit` threads get past here
+                try { return fn.apply(item); }
+                finally { gate.release(); }
+            }));
+        List<R> results = new ArrayList<>();
+        for (Future<R> f : futures) results.add(f.get());   // in input order
+        return results;
+    }
+}
+```
+
+Both keep results in input order. A fixed pool of `limit` threads with one task per item also works: the pool size is the limit. For other shared state:
+
+```java
+AtomicInteger total = new AtomicInteger();
+try (ExecutorService pool = Executors.newFixedThreadPool(8)) {
+    for (int w = 0; w < 8; w++)
+        pool.submit(() -> { for (int k = 0; k < 100_000; k++) total.incrementAndGet(); });
+}                                          // close() waits for every task to finish
+// total.get() is 800000; a plain int[] counter with ++ loses updates
+
+Map<String, Integer> counts = new ConcurrentHashMap<>();
+counts.merge("ana", 1, Integer::sum);      // atomic on a ConcurrentHashMap
+
+ReentrantLock lock = new ReentrantLock();
+lock.lock();
+try { loansPerMember.merge("ana", 1, Integer::sum); }
+finally { lock.unlock(); }
+```
+
+On Java 21 a virtual thread that blocks inside `synchronized` pins its carrier thread, which is why Chapter 5 prefers `ReentrantLock`.
+
+<InterviewLens>
+"Why `AtomicInteger` and not a `volatile int`?" `volatile` makes writes visible, but `next++` is still a read, an add and a write: two workers can read the same value, so one item runs twice and another never runs. `getAndIncrement` is one atomic step. Then say why the plain `List` is safe: each slot has one writer, `set` never resizes it, and `f.get()` makes every write visible before `mapLimit` returns.
+</InterviewLens>
+
+### The heap
+
+`PriorityQueue<E>` is a min-heap whose elements are their own priorities, as in Python and unlike C#. Pass a comparator for anything else:
+
+```java
+PriorityQueue<Integer> minHeap = new PriorityQueue<>(List.of(14, 3, 7));
+int smallest = minHeap.peek();             // 3, without removing it; peek and poll return null when empty
+PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Comparator.reverseOrder());
+PriorityQueue<Integer> alsoMax = new PriorityQueue<>((a, b) -> Integer.compare(b, a));
+
+PriorityQueue<int[]> byDue = new PriorityQueue<>((a, b) -> Integer.compare(a[0], b[0]));   // {day, copyId}
+byDue.offer(new int[] {14, 101});
+byDue.offer(new int[] {3, 102});
+byDue.offer(new int[] {7, 103});
+while (!byDue.isEmpty()) {
+    int[] e = byDue.poll();
+    System.out.println(e[0] + " " + e[1]);      // "3 102", then "7 103", then "14 101"
+}
+```
+
+With more fields, a record such as `Due(int day, String title)` and `Comparator.comparingInt(Due::day).thenComparing(Due::title)` reads better. Ties come out in no guaranteed order, so add a tie-breaker when order matters. Printing a heap or looping over it shows the internal array order (`minHeap` above prints `[3, 14, 7]`); only `poll` gives sorted order. For "the k largest", keep a min-heap of size k:
+
+```java
+static int kthLargest(int[] nums, int k) {
+    PriorityQueue<Integer> heap = new PriorityQueue<>();   // a min-heap of the k largest so far
+    for (int x : nums) {
+        heap.offer(x);
+        if (heap.size() > k) heap.poll();                  // drop the smallest
+    }
+    return heap.peek();
+}
+```
+
+**The queue cannot update a priority.** There is no decrease-key, and `remove(Object)` is a linear scan. For Dijkstra's algorithm, use lazy deletion as in the C# section: push the node again with the new distance, and skip stale entries.
+
+```java
+static int[] shortestFrom(List<List<int[]>> graph, int source) {   // graph.get(u) holds {to, cost}
+    int[] dist = new int[graph.size()];
+    Arrays.fill(dist, Integer.MAX_VALUE);
+    dist[source] = 0;
+    PriorityQueue<int[]> heap = new PriorityQueue<>(Comparator.comparingInt(e -> e[0]));   // {dist, node}
+    heap.offer(new int[] {0, source});
+    while (!heap.isEmpty()) {
+        int[] top = heap.poll();
+        int d = top[0], node = top[1];
+        if (d > dist[node]) continue;             // stale: a shorter path was found after this was queued
+        for (int[] edge : graph.get(node)) {
+            int next = edge[0], nd = d + edge[1];
+            if (nd < dist[next]) {
+                dist[next] = nd;
+                heap.offer(new int[] {nd, next});   // queue it again instead of updating the old entry
+            }
+        }
+    }
+    return dist;
+}
+```
+
+As in C#, say O(E log E). For a truly updatable queue, a `TreeSet<int[]>` ordered by distance, then node, has `first()`, `remove` and `add` in O(log n).
+
+### Standard-library tools that save time
+
+| Tool | What it saves |
+| --- | --- |
+| `IntStream.range(0, n)` | A range; `boxed().toList()` makes it a list |
+| `Arrays.fill(a, -1)`, `a.clone()`, `Arrays.copyOfRange(a, lo, hi)` | Filling, and copying an input you must not change |
+| `Arrays.toString(a)`, `Arrays.deepToString(grid)` | Printing arrays while debugging |
+| `Arrays.stream(a).sum()`, `.max().getAsInt()` | Folds in one call; `max` returns an `OptionalInt` |
+| `List.of(...)`, `Map.of(...)`, `Set.of(...)` | Quick immutable collections; no `null`, and `Set.of` throws on duplicates |
+| `Collectors.groupingBy(f, Collectors.counting())` | Counting and grouping into a `Map` |
+| `Arrays.binarySearch(a, x)` | Binary search; a negative result is `-(insertionPoint) - 1` |
+| `TreeMap`, `TreeSet` | Sorted data with `floorKey`, `ceilingKey`, `firstKey`, `pollFirst`, `headMap` in O(log n) |
+
+### Mistakes when coming from the other languages
+
+Each of these fails to compile or gives a wrong answer, and costs minutes.
+
+**From TypeScript.** `==` on strings compares references; use `equals`. `7 / 2` is `3`. A missing key gives `null`, and assigning it to an `int` throws. Lists use `get(i)`, not `a[i]`, and there is no `at(-1)`. `<` does not compile on strings: use `compareTo`. Printing an array shows `[I@` and a hash. Numbers that were safe up to 2⁵³ now overflow near 2.1 × 10⁹.
+
+**From C#.** `substring(1, 4)` ends at index 4, where `Substring(1, 4)` takes four characters. `map.get` returns `null` where the indexer throws. `==` on strings compares references, not text. There are no value tuples: write a record. `PriorityQueue` takes one type parameter, not an element and a priority. `Math.abs(Integer.MIN_VALUE)` stays negative instead of throwing. `Thread.sleep` needs a `throws` or a `catch`.
+
+**From Kotlin.** `==` is Kotlin's `===`, so strings and boxed numbers need `equals`. `List.of` and `new ArrayList<>()` are both just `List`, and `add` on the immutable one throws `UnsupportedOperationException`. There are no ranges: write the counted `for`. Record accessors need parentheses, `p.x()`, and there is no `copy`. Checked exceptions exist.
+
+**From Go.** A missing key returns `null`, not a zero value; use `getOrDefault`. `int` is always 32 bits, so a sum that was fine in Go overflows. There are no multiple return values: return a record or an `int[]`. `int[] b = a` shares the array that Go would copy; use `a.clone()`. `charAt` indexes UTF-16 units, not bytes.
+
+**From Python.** `a[-1]` throws. `//` starts a comment; `%` keeps the sign of the left operand, so use `Math.floorMod`. Integers are bounded. `x in items` is `items.contains(x)`, O(n) on a `List`. `if (count)` does not compile. `"ab" * 3` is `"ab".repeat(3)`.
+
+### Writing and running a quick test
+
+Every Java file in the bank is one class with static methods and a `main` that calls a `check` helper. Here is that `main` for problem 002, with an `expectThrows` helper added for the `findCopy` example:
+
+```java
+public static void main(String[] args) {
+    check(Arrays.equals(twoPrices(new int[] {12, 7, 3, 9, 5}, 12), new int[] {2, 3}));
+    check(twoPrices(new int[] {1, 2}, 10).length == 0);
+    expectThrows(NotFoundException.class, () -> findCopy(2));
+    System.out.println("002 ok");
+}
+
+static void check(boolean ok) {
+    if (!ok) throw new AssertionError("test failed");
+}
+
+static void expectThrows(Class<? extends Throwable> type, Runnable act) {
+    try {
+        act.run();
+    } catch (Throwable e) {
+        if (type.isInstance(e)) return;
+        throw new AssertionError("expected " + type.getSimpleName() + ", got " + e);
+    }
+    throw new AssertionError("expected " + type.getSimpleName());
+}
+```
+
+`java P002TwoPrices.java` runs the file; a failing `check` throws, and the stack trace gives the line. The bank avoids Java's `assert` because assertions are off unless you run `java -ea`: without the flag, a failing `assert` passes in silence.
+
+To see which case failed, put the cases in a list of records:
+
+```java
+record Case(int[] prices, int budget, int[] want) {}
+
+List<Case> cases = List.of(
+    new Case(new int[] {12, 7, 3, 9, 5}, 12, new int[] {2, 3}),
+    new Case(new int[] {4, 4, 1}, 8, new int[] {0, 1}),
+    new Case(new int[] {1, 2}, 10, new int[] {}),
+    new Case(new int[] {}, 5, new int[] {}));
+
+for (Case c : cases) {
+    int[] got = twoPrices(c.prices(), c.budget());
+    if (!Arrays.equals(got, c.want()))
+        throw new AssertionError("twoPrices(" + Arrays.toString(c.prices()) + ", " + c.budget() + ") = "
+            + Arrays.toString(got) + ", want " + Arrays.toString(c.want()));
+}
+```
+
+A record holding arrays compares them by reference, so compare the fields with `Arrays.equals`, not the records. The message names the failing row. A real project would make it a JUnit 5 `@ParameterizedTest` fed by a `@MethodSource`, run by Maven or Gradle (Chapter 17); in the round, one file is enough. When the editor cannot run code, write the table as comments and trace each row by hand, as in step 5.
