@@ -8,6 +8,60 @@ sidebar:
 import { Solutions } from '../../../components/book';
 
 
+Most problems in this topic sort first and then make one pass that takes a choice at each step and never goes back on it. They train the comparator vocabulary, because sorting a list of pairs by its first element is spelled differently in every language: `(a, b) => a[0] - b[0]` in TypeScript, a `Comparison` passed to `Array.Sort` in C#, `Integer.compare` inside a Java comparator, `sortBy` in Kotlin, `slices.SortFunc` with `cmp.Compare` in Go, and `key=` in Python. They also train saying why a greedy choice is safe before trusting it, usually by showing that any best answer can be changed into the greedy one without getting worse. Interval problems add a question for step 2 of the method: do two intervals that only touch, one ending exactly where the next begins, overlap?
+
+## 181 · Can One Person Attend Every Meeting?
+
+**Intervals, Sorting and Greedy · Easy**
+
+Each meeting is a pair `[start, end]` of minutes after midnight, and it occupies the half-open range `[start, end)`: it begins at `start` and is over at `end`. Two meetings overlap when each one starts before the other ends, so a meeting that ends at 600 and one that starts at 600 only touch, and one person can attend both. Return `true` if one person can attend every meeting in the list, that is, if no two overlap, and `false` otherwise. The list is in no particular order and you may reorder it. An empty list returns `true`.
+
+```text
+Example 1
+  input:  meetings = [[540, 600], [600, 660], [480, 540]]
+  output: true     (they touch but never overlap)
+
+Example 2
+  input:  meetings = [[540, 630], [600, 660]]
+  output: false    (the second starts at 600, before the first ends at 630)
+```
+
+Constraints: `0 ≤ meetings.length ≤ 10⁴`, `0 ≤ start < end ≤ 1440`.
+
+**Approach.** The simple solution checks every pair with the overlap test `a.start < b.end && b.start < a.end`: O(n²). Sorting by start time means only neighbours need checking: if a meeting overlaps any later one, it also overlaps the next one, which starts no later than that one. So sort, then walk once and return `false` as soon as a meeting starts before the previous one ends. The comparison is a strict `<`, because touching is allowed.
+
+<Solutions n="181" />
+
+**Complexity.** O(n log n) time for the sort; the walk adds O(n). O(1) extra space besides what the sort uses, since the list is sorted in place.
+
+**Common mistake.** Testing `start <= previous end`, which treats touching meetings as overlapping: Example 1 returns `false` instead of `true`.
+
+## 182 · Hand Out Cookies
+
+**Intervals, Sorting and Greedy · Easy**
+
+After a children's reading hour at a Shelfwise branch, the librarian hands out cookies. Child `i` is content only with a cookie of size at least `greed[i]`, and cookie `j` has size `sizes[j]`. Each child gets at most one cookie and each cookie goes to at most one child. Return the largest number of children who can be made content. Either list may be empty, and you may reorder both.
+
+```text
+Example 1
+  input:  greed = [5, 2, 8, 2], sizes = [3, 1, 6, 9]
+  output: 3        (3 and 6 to the two children who need 2, 9 to the one who needs 5; 1 is too small)
+
+Example 2
+  input:  greed = [1, 3], sizes = [3, 1]
+  output: 2        (the small cookie goes to the child who needs little)
+```
+
+Constraints: `0 ≤ greed.length, sizes.length ≤ 3 × 10⁴`, `1 ≤ greed[i], sizes[j] ≤ 10⁹`.
+
+**Approach.** The simple solution takes the children from the least greedy up and, for each, scans all the cookies for the smallest unused one that fits: O(n × m). Sorting both lists removes the scan. Walk the cookies from the smallest, with an index on the least greedy child still waiting: if the cookie is big enough for that child, give it and move to the next child; if not, it is too small for every child still waiting, so skip it. The choice is safe because the smallest cookie that fits the least greedy child is the one least useful to anyone else: in any best hand-out, giving it to that child instead, and handing that child's old cookie, which is at least as big, to whoever had it, never lowers the count.
+
+<Solutions n="182" />
+
+**Complexity.** O(n log n + m log m) time for the two sorts, then one O(m) pass. O(1) extra space besides what the sorts use.
+
+**Common mistake.** Handing out cookies without sorting, giving each child in the given order the first cookie that fits: with `greed = [1, 3]` and `sizes = [3, 1]`, the first child takes the 3 and the answer is 1 instead of 2.
+
 ## 183 · Make Change at the Box Office
 
 **Intervals, Sorting and Greedy · Easy**

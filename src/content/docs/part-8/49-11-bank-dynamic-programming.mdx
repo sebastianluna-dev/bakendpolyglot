@@ -274,3 +274,211 @@ Constraints: `0 ≤ text.length ≤ 300`, `0 ≤ words.length ≤ 1000`, `1 ≤ 
 **Complexity.** O(n × L²) time, where `L` is the longest word: at most `L` pieces per position, each costing O(L) to cut and hash. O(n) space for the table, plus the set of words.
 
 **Common mistake.** Taking the first or the longest matching word and never reconsidering it: Example 1 takes `"books"`, gets stuck on `"eller"` and returns `false`.
+
+## 173 · Ways to Decode a Digit String
+
+**Dynamic Programming · Medium**
+
+A message of capital letters is encoded by writing each letter as its position in the alphabet, `A` as `1` up to `Z` as `26`, and joining the numbers with no separator, so `"BZ"` becomes `"226"`. Given the digits, return how many different messages could have produced them. A letter's number never has a leading zero, so `"06"` is not a letter, and neither is `"0"` on its own. If no message produces the digits, return 0.
+
+```text
+Example 1
+  input:  digits = "2612"
+  output: 4        (2 6 1 2, 26 1 2, 2 6 12 and 26 12: BFAB, ZAB, BFL, ZL)
+
+Example 2
+  input:  digits = "301"
+  output: 0        (the 0 must be part of "30" or stand alone, and neither is a letter)
+```
+
+Constraints: `1 ≤ digits.length ≤ 45`, `digits` contains only `0`–`9`. The largest possible answer, for forty-five `1`s, is 1,836,311,903, so the count fits in a 32-bit `int`.
+
+**Approach.** The simple solution recurses: the first letter takes one digit or two, so try both and count the decodings of what is left. It is exponential, because the same suffix is counted again for every way of reaching it. State it as `ways[i]`, the number of decodings of the first `i` digits, with `ways[0] = 1` for the empty prefix. The last letter is either digit `i` alone, allowed when it is not `0`, which adds `ways[i - 1]`, or digits `i - 1` and `i` together, allowed when they make a number from 10 to 26, which adds `ways[i - 2]`. Each step reads only the two values before it, so two variables, `oneBack` and `twoBack`, replace the table.
+
+<Solutions n="173" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Accepting any pair of digits whose number is at most 26, without checking that it is at least 10: `"06"` then counts as `F`, and `"106"` returns 2 instead of 1.
+
+## 174 · Longest Common Subsequence
+
+**Dynamic Programming · Medium**
+
+A subsequence of a string is what is left after deleting any number of its letters, possibly none, without changing the order of the others: `"pce"` is a subsequence of `"parcel"`, but `"cp"` is not. Given two strings `a` and `b`, return the length of the longest string that is a subsequence of both. If they have no letter in common, or one of them is empty, return 0.
+
+```text
+Example 1
+  input:  a = "parcel", b = "place"
+  output: 4        ("pace")
+
+Example 2
+  input:  a = "seat", b = "lock"
+  output: 0
+```
+
+Constraints: `0 ≤ a.length, b.length ≤ 1000`, both contain only `a`–`z`.
+
+**Approach.** The simple solution lists all 2ⁿ subsequences of `a` and checks each one against `b`, which is hopeless beyond about 20 letters. Look at the last letters instead. Let `best[i][j]` be the answer for the first `i` letters of `a` and the first `j` letters of `b`, with 0 when either prefix is empty. If `a[i - 1]` equals `b[j - 1]`, the two letters can end the common subsequence, so `best[i][j] = best[i - 1][j - 1] + 1`; otherwise at least one of them is not used, so `best[i][j] = max(best[i - 1][j], best[i][j - 1])`. Filled row by row, row `i` reads only row `i - 1` and itself, so the solutions keep two rows, `prev` and `cur`, instead of the whole table.
+
+<Solutions n="174" />
+
+**Complexity.** O(n × m) time, O(m) space for the two rows.
+
+**Common mistake.** On a match, adding 1 to `max(best[i - 1][j], best[i][j - 1])` instead of to `best[i - 1][j - 1]`, which lets one letter be matched twice: `a = "a"`, `b = "aa"` returns 2 instead of 1.
+
+## 175 · Split Into Two Equal-Sum Groups
+
+**Dynamic Programming · Medium**
+
+Parcel and Pulse loads a batch of parcels onto two trucks and wants both trucks to carry exactly the same weight. Given the parcel weights, return `true` if the parcels can be split into two groups with equal total weight, every parcel going into exactly one group, and `false` otherwise. A parcel cannot be divided.
+
+```text
+Example 1
+  input:  weights = [3, 1, 4, 2, 2]
+  output: true     (4 + 2 and 3 + 1 + 2)
+
+Example 2
+  input:  weights = [2, 3, 7]
+  output: false    (the total, 12, is even, but no group weighs 6)
+```
+
+Constraints: `1 ≤ weights.length ≤ 200`, `1 ≤ weights[i] ≤ 100`.
+
+**Approach.** The simple solution tries all 2ⁿ ways to assign the parcels, which is far too many at 200 parcels. If the total is odd the answer is `false`; otherwise the question becomes whether some group weighs exactly `half = total / 2`, since the other parcels then weigh `half` too. The weights are small, so the possible group weights are few: `reachable[s]` says whether some of the parcels seen so far weigh exactly `s`, and at the start only `reachable[0]` is true. A parcel of weight `w` makes `s` reachable whenever `s - w` already was. Walk `s` from `half` down to `w`, so every entry read in this pass still describes the parcels before this one; walking up would let the same parcel be added again and again.
+
+<Solutions n="175" />
+
+**Complexity.** O(n × half) time, at most 200 × 10,000 = 2 × 10⁶ steps, and O(half) space for the array.
+
+**Common mistake.** Walking `s` upwards, which reuses the parcel just added: `[1, 5]` reaches 3 as 1 + 1 + 1 and returns `true` instead of `false`.
+
+## 176 · Largest Product of a Stretch
+
+**Dynamic Programming · Medium**
+
+Given an array of integers, return the largest product of a stretch, that is, of one or more consecutive elements. The stretch cannot be empty, so an array with a single negative number returns that number.
+
+```text
+Example 1
+  input:  nums = [2, -5, -2, 4, 0, 3]
+  output: 80       (2 × -5 × -2 × 4)
+
+Example 2
+  input:  nums = [-3, 0, -2]
+  output: 0        (the 0 on its own)
+```
+
+Constraints: `1 ≤ nums.length ≤ 2 × 10⁴`, `-10 ≤ nums[i] ≤ 10`, and the product of every stretch is between `-2³¹` and `2³¹ − 1`. Every value the solution computes is the product of some stretch, so a 32-bit `int` holds all of them.
+
+**Approach.** The simple solution starts at every index and extends a running product to every end: O(n²). As in problem 165, the better solution tracks the best stretch that ends at the current element, but a product needs two values, because multiplying by a negative number turns the smallest product into the largest. Keep `hi` and `lo`, the largest and the smallest product of a stretch ending here. For the next element `x`, the candidates are `x` alone, `hi × x` and `lo × x`: the new `hi` is the largest of the three and the new `lo` the smallest, and the answer is the largest `hi` seen. Compute both products before overwriting `hi`, since the new `lo` needs the old one.
+
+<Solutions n="176" />
+
+**Complexity.** O(n) time, O(1) space.
+
+**Common mistake.** Tracking only the largest product: `[-2, 3, -4]` returns 3 instead of 24, because the -6 that the last element turns into 24 was thrown away.
+
+## 177 · Edit Distance
+
+**Dynamic Programming · Hard**
+
+When a Shelfwise member mistypes a title, the search box suggests the closest one, and closeness is measured by the edit distance: the fewest single-letter edits that turn `source` into `target`. An edit inserts one letter anywhere, deletes one letter, or replaces one letter with a different one. Return the edit distance. Two equal strings are at distance 0, and turning a string into the empty string takes one deletion per letter.
+
+```text
+Example 1
+  input:  source = "shelf", target = "shelves"
+  output: 3        (replace f with v, then insert e and s)
+
+Example 2
+  input:  source = "loan", target = "lone"
+  output: 2        (replace a with n and n with e)
+```
+
+Constraints: `0 ≤ source.length, target.length ≤ 500`, both contain only `a`–`z`.
+
+**Approach.** The simple solution recurses on two positions: if the letters are equal it moves past both, otherwise it tries all three edits and keeps the cheapest, which is exponential. The same pair of prefixes comes up again and again, so tabulate them: `dist[i][j]` is the fewest edits that turn the first `i` letters of `source` into the first `j` letters of `target`, with `dist[i][0] = i` (delete everything) and `dist[0][j] = j` (insert everything). If the last letters are equal, `dist[i][j] = dist[i - 1][j - 1]`; otherwise it is 1 plus the smallest of `dist[i - 1][j]` (delete), `dist[i][j - 1]` (insert) and `dist[i - 1][j - 1]` (replace). Row `i` reads only row `i - 1` and itself, so the solutions keep two rows and set `cur[0] = i` at the start of each.
+
+<Solutions n="177" />
+
+**Complexity.** O(n × m) time, O(m) space for the two rows.
+
+**Common mistake.** Starting the first row and column at 0 instead of `j` and `i`, as if turning a string into an empty one were free: `("abc", "")` returns 0 instead of 3.
+
+## 178 · Pattern Matching With . and *
+
+**Dynamic Programming · Hard**
+
+A pattern is a sequence of items. An item is a lowercase letter or a dot, optionally followed by a star. A letter item matches exactly that letter, a dot item matches any one letter, and an item followed by `*` matches zero or more consecutive letters, each of which the item alone would match, so `.*` matches any run of letters, including none. A pattern matches a text when its items, in order, match consecutive pieces that together make up the whole text, with nothing left over at either end. Return `true` if `pattern` matches `text` and `false` otherwise. An empty pattern matches only the empty text.
+
+```text
+Example 1
+  input:  text = "seat", pattern = "se.*t"
+  output: true     (".*" matches "a")
+
+Example 2
+  input:  text = "seats", pattern = "se.*t"
+  output: false    (the final s is left over)
+```
+
+Constraints: `0 ≤ text.length, pattern.length ≤ 1000`, `text` contains only `a`–`z`, `pattern` contains only `a`–`z`, `.` and `*`, and every `*` comes straight after a letter or a dot, so a pattern never starts with `*` or has two in a row.
+
+**Approach.** The simple solution backtracks: match the items from the left, and for a starred item try every number of letters it could take. It is exponential on inputs like `"aaaaaaaaaaaaaaaaaaab"` with `"a*a*a*a*a*a*a*a*c"`, where it tries every way to share the `a`s among the eight stars before failing. The same pair of positions keeps coming back, so tabulate: `match[i][j]` says whether the first `i` letters of the text match the first `j` characters of the pattern, and `match[0][0]` is true. If pattern character `j` is not a star, `match[i][j]` needs `i > 0`, the text letter to fit the pattern character (equal, or a dot) and `match[i - 1][j - 1]`. If it is a star, its item either matches nothing, `match[i][j - 2]`, or takes the last letter, which must fit the item, and possibly more letters before it, `match[i - 1][j]`. Row `i = 0` must be computed too, because `"a*b*"` matches the empty text; each row reads only the previous one and itself, so the solutions keep two rows.
+
+<Solutions n="178" />
+
+**Complexity.** O(n × m) time, O(m) space for the two rows.
+
+**Common mistake.** Starting the loop over the text at `i = 1` and leaving row 0 false apart from `match[0][0]`, which forgets that a starred item can match nothing at the start: `("b", "a*b")` returns `false` instead of `true`.
+
+## 179 · Best Profit With at Most k Trades
+
+**Dynamic Programming · Hard**
+
+`prices[i]` is the price of one share on day `i`. A trade buys one share on one day and sells it on a later day. You hold at most one share at a time, so a trade must be sold before the next one is bought, although selling and buying again on the same day is allowed. Return the largest total profit you can make with at most `k` trades. Making no trade is allowed, so the answer is never below 0. Problem 008 is the case `k = 1`.
+
+```text
+Example 1
+  input:  prices = [3, 8, 5, 1, 7, 8], k = 2
+  output: 12       (buy at 3, sell at 8; buy at 1, sell at 8)
+
+Example 2
+  input:  prices = [9, 7, 4, 1], k = 2
+  output: 0        (prices only fall)
+```
+
+Constraints: `0 ≤ prices.length ≤ 1000`, `0 ≤ prices[i] ≤ 1000`, `0 ≤ k ≤ 100`.
+
+**Approach.** The simple solution tries every set of at most `k` non-overlapping buy and sell days, which is exponential, and the greedy shortcuts fail (see the common mistake). Instead, keep two numbers per trade, counting cash from 0 so that cash is profit: `bought[t]` is the most cash you can have while holding the share of your `t`-th trade, and `sold[t]` the most cash after completing `t` trades. On a day with price `p`, for `t` from 1 to `k`, `bought[t] = max(bought[t], sold[t - 1] - p)` (keep holding, or buy today after `t - 1` trades) and `sold[t] = max(sold[t], bought[t] + p)` (keep, or sell today). Start every `bought[t]` at `-prices[0]`, as if the share had been bought on day 0, and every `sold[t]` at 0. Since buying and selling on the same day is allowed and earns nothing, `sold[t]` never drops below `sold[t - 1]`, so `sold[k]` already covers "at most `k`".
+
+<Solutions n="179" />
+
+**Complexity.** O(n × k) time, O(k) space for the two arrays.
+
+**Common mistake.** Adding up the `k` largest rising runs: with `[1, 3, 2, 8]` and `k = 1` that takes the run from 2 to 8 and returns 6, but buying at 1 and selling at 8 earns 7.
+
+## 180 · Count Distinct Subsequences
+
+**Dynamic Programming · Hard**
+
+Given two strings `s` and `t`, count the ways to pick letters of `s`, keeping their order, that spell `t`. Two ways are different when they use a different set of positions in `s`, even though both spell `t`; positions count from 0. The count grows very fast, so return it modulo `10⁹ + 7`. An empty `t` can be picked in exactly one way, by picking nothing, even from an empty `s`.
+
+```text
+Example 1
+  input:  s = "banana", t = "ban"
+  output: 3        (the b, then an a and a later n, at positions 1 and 2, 1 and 4, or 3 and 4)
+
+Example 2
+  input:  s = "abc", t = "abcd"
+  output: 0
+```
+
+Constraints: `0 ≤ s.length, t.length ≤ 1000`, both contain only `a`–`z`.
+
+**Approach.** The simple solution tries every set of `t.length` positions in `s`, which is exponential. Instead, read `s` one letter at a time and keep `ways[j]`, the number of ways to spell the first `j` letters of `t` with the letters read so far, starting with `ways[0] = 1` and the rest 0. When the next letter `c` arrives, every `j` with `t[j - 1] == c` gains `ways[j - 1]`, the ways that finish with this letter. Walk `j` from the end down to 1, so that `ways[j - 1]` still counts only ways that use earlier letters, the same trick as in problem 175. Reduce modulo `10⁹ + 7` after every addition: both terms are below `10⁹ + 7`, so the sum stays below `2³¹ − 1` and a 32-bit `int` never overflows.
+
+<Solutions n="180" />
+
+**Complexity.** O(n × m) time, O(m) space for the array.
+
+**Common mistake.** Walking `j` upwards, which lets one letter of `s` stand for two letters of `t`: `("a", "aa")` returns 1 instead of 0.
