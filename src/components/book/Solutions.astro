@@ -35,7 +35,19 @@ const solutions = BANK_STACKS.map((id) => {
   if (found.length === 0) throw new Error(`Problem ${n}: no ${STACKS[id].name} solution in ${prefix}`);
   return { id, lang, parts: found.map((path) => ({ title: path.replace('/apps/interview-bank/', ''), code: files[path].trimEnd() })) };
 });
+// The print page renders only the printed language: 1,200 hidden blocks would make it too heavy to paginate.
+const isPrint = Astro.url.pathname.replace(/\/$/, '').endsWith('/print');
+const printed = solutions.find((s) => s.id === BANK_PRINT_STACK)!;
 ---
+{isPrint ? (
+  <section class="bp-stacks">
+    <div class="bp-stacks__head">
+      <span class="bp-label">{STACKS[printed.id].name}</span>
+      <span class="bp-stacks__note">{`Problem ${n} · all six languages in the web edition and apps/interview-bank`}</span>
+    </div>
+    {printed.parts.map((p) => <Code code={p.code} lang={printed.lang} title={p.title} />)}
+  </section>
+) : (
 <FiveStacks title="Six Languages" note={`Problem ${n}`} printOnly={BANK_PRINT_STACK}>
   {solutions.map((s) => (
     <Stack id={s.id}>
@@ -43,3 +55,4 @@ const solutions = BANK_STACKS.map((id) => {
     </Stack>
   ))}
 </FiveStacks>
+)}

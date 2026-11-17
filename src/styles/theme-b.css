@@ -70,3 +70,18 @@ h1#_top {
   --sl-color-bg-nav: var(--bp-paper);
   --sl-color-bg-sidebar: var(--bp-paper);
 }
+
+/* Reading time in the sidebar: quiet text after the page name, not a pill */
+.sidebar-content .sl-badge.bp-read-time {
+  background: none !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin-inline-start: 0.4em;
+  font-family: var(--bp-font-label, inherit);
+  font-size: 0.68rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--sl-color-gray-4) !important;
+  opacity: 0.85;
+}

@@ -20,7 +20,7 @@ const server = createServer(async (req, res) => {
 }).listen(0);
 const port = server.address().port;
 
-const browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+const browser = await puppeteer.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', args: ['--no-sandbox'], protocolTimeout: 1_800_000 }); // pagination of the full book blocks the page for minutes
 const page = await browser.newPage();
 page.setDefaultTimeout(600_000);
 page.on('pageerror', (e) => console.error('[page error]', e.message));

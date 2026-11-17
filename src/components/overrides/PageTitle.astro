@@ -1,8 +1,13 @@
 ---
-// Chapter pages get the book's opener: part, "Chapter N", title, ornament, kicker.
-const data = Astro.locals.starlightRoute.entry.data as {
-  title: string; chapter?: number; part?: string; kicker?: string;
+// Chapter pages get the book's opener: part, "Chapter N", title, ornament, kicker, reading time.
+// Pages that continue a chapter (the problem bank) show their reading time under the title.
+import { formatMinutes, readingMinutes } from '../book/readingTime';
+const entry = Astro.locals.starlightRoute.entry;
+const data = entry.data as {
+  title: string; chapter?: number; part?: string; kicker?: string; continues?: number;
 };
+const showTime = typeof data.chapter === 'number' || typeof data.continues === 'number';
+const readTime = showTime && entry.body ? formatMinutes(readingMinutes(entry.body)) : undefined;
 const words = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen','Twenty'];
 const n = data.chapter;
 ---
@@ -13,9 +18,13 @@ const n = data.chapter;
     <h1 id="_top">{data.title}</h1>
     <div class="bp-web-ornament" aria-hidden="true"><span></span><i></i><span></span></div>
     {data.kicker && <p class="bp-web-opener__kicker">{data.kicker}</p>}
+    {readTime && <p class="bp-web-opener__time">{readTime}</p>}
   </header>
 ) : (
-  <h1 id="_top">{data.title}</h1>
+  <>
+    <h1 id="_top">{data.title}</h1>
+    {readTime && <p class="bp-web-time">{readTime}</p>}
+  </>
 )}
 
 <style>
@@ -25,6 +34,7 @@ const n = data.chapter;
   .bp-web-opener__part { font-family: var(--bp-font-label); font-size: 0.75rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--sl-color-gray-3); }
   .bp-web-opener__num { margin-top: 1.25rem; font-family: var(--bp-font-display); font-style: italic; font-size: 1.3rem; color: var(--sl-color-accent); }
   .bp-web-opener__kicker { margin: 0; font-style: italic; color: var(--sl-color-gray-3); }
+  .bp-web-opener__time, .bp-web-time { margin: 0.5rem 0 0; font-family: var(--bp-font-label); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sl-color-gray-3); }
   .bp-web-ornament { display: flex; align-items: center; gap: 0.75rem; width: 12rem; margin: 1rem auto; }
   .bp-web-ornament span { flex: 1; height: 1px; background: var(--sl-color-accent); }
   .bp-web-ornament i { width: 7px; height: 7px; background: var(--sl-color-accent); transform: rotate(45deg); }

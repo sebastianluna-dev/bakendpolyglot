@@ -25,6 +25,7 @@ export default defineConfig({
       description: 'From language to system in five stacks: TypeScript, C#, Java & Kotlin, Go and Python.',
       customCss: ['./src/styles/fonts.css', './src/styles/theme-b.css'],
       components: { PageTitle: './src/components/overrides/PageTitle.astro' },
+      routeMiddleware: './src/routeData.ts', // reading time on every sidebar link
       expressiveCode: {
         themes: ['github-light', 'github-dark'],
         defaultProps: { wrap: true, preserveIndent: true },

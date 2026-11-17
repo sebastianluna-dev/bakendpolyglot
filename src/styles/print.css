@@ -89,6 +89,7 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 
 /* Boxes and figures stay whole */
 .bp-box, .bp-figure, .bp-q, .bp-card, .expressive-code { break-inside: avoid; }
+.expressive-code.bp-long-code, .bp-long-code .frame, .bp-long-code pre { break-inside: auto; }
 .bp-box { margin-block: 1.1em; }
 
 /* Five Stacks: every panel visible, stacked, labelled */
@@ -168,3 +169,8 @@ code { font-family: var(--bp-font-mono); font-size: 0.86em; background: var(--bp
 /* Pages that continue a chapter (the problem bank): each starts on a new page under a large title */
 .bp-continuation { break-before: page; }
 .bp-continuation__title { font-family: var(--bp-font-display); font-size: 24pt; margin: 0 0 0.6em; }
+
+/* Estimated reading time under chapter openers and bank topic titles */
+.bp-opener__time, .bp-continuation__time { font-family: var(--bp-font-label); font-size: 8pt; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bp-muted); }
+.bp-opener__time { margin-top: 0.8em; text-align: center; }
+.bp-continuation__time { margin: -0.4em 0 1em; }
